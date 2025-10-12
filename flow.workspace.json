@@ -1,0 +1,6 @@
+{
+  "solutions": [
+    { "name": "SampleA", "path": "src/Sample.SolutionA.sln" },
+    { "name": "SampleB", "path": "src/Sample.SolutionB.sln" }
+  ]
+}
