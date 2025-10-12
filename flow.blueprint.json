@@ -1,0 +1,668 @@
+{
+  "analyzerVersion": "graphkit-blueprint-1.0",
+  "nodes": [
+    {
+      "id": "node::559e2bb95aa9b6b991cd4b2d09ce456787e7668e5cd20548b03e52c8e9b85e8c",
+      "type": "endpoint.controller",
+      "name": "ReportsController.Get",
+      "fqdn": "Sample.Web.Controllers.ReportsController.Get",
+      "assembly": "Sample.Web",
+      "project": "src/Sample.Web/Sample.Web.csproj",
+      "file_path": "src/Sample.Web/Controllers/ReportsController.cs",
+      "span": {
+        "start_line": 22,
+        "end_line": 34
+      },
+      "symbol_id": "M:Sample.Web.Controllers.ReportsController.Get(System.Guid,System.Guid,System.Threading.CancellationToken)",
+      "tags": [
+        "web"
+      ],
+      "props": {
+        "route": "/api/Reports/{id:guid}",
+        "http_method": "GET"
+      }
+    },
+    {
+      "id": "node::f0fa07d68ea4111dd937da7aab7da4c92c98b5aaee958af58dc67b742a9ba676",
+      "type": "cqrs.request",
+      "name": "GetReportQuery",
+      "fqdn": "Sample.App.Requests.GetReportQuery",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Requests/GetReportQuery.cs",
+      "span": {
+        "start_line": 1,
+        "end_line": 6
+      },
+      "symbol_id": "T:Sample.App.Requests.GetReportQuery",
+      "tags": [
+        "app"
+      ],
+      "props": {}
+    },
+    {
+      "id": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "type": "cqrs.handler",
+      "name": "GetReportHandler",
+      "fqdn": "Sample.App.Handlers.GetReportHandler",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Handlers/GetReportHandler.cs",
+      "span": {
+        "start_line": 13,
+        "end_line": 41
+      },
+      "symbol_id": "T:Sample.App.Handlers.GetReportHandler",
+      "tags": [
+        "app"
+      ],
+      "props": {
+        "request_type": "GetReportQuery"
+      }
+    },
+    {
+      "id": "node::d02a184d81dbac2404753abadf51746d8f6f285a6bcd17a8d4e7722505028119",
+      "type": "dto",
+      "name": "ReportDto",
+      "fqdn": "Sample.App.Dtos.ReportDto",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Dtos/ReportDto.cs",
+      "span": {
+        "start_line": 3,
+        "end_line": 11
+      },
+      "symbol_id": "T:Sample.App.Dtos.ReportDto",
+      "tags": [
+        "app"
+      ],
+      "props": {}
+    },
+    {
+      "id": "node::6e0d3685c3389458e6d919308094c4db5318d4bf4ca4eb0f040035ad580c8ec6",
+      "type": "validator",
+      "name": "GetReportQueryValidator",
+      "fqdn": "Sample.App.Validation.GetReportQueryValidator",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Validation/GetReportQueryValidator.cs",
+      "span": {
+        "start_line": 6,
+        "end_line": 13
+      },
+      "symbol_id": "T:Sample.App.Validation.GetReportQueryValidator",
+      "tags": [
+        "app"
+      ],
+      "props": {
+        "validates": "GetReportQuery"
+      }
+    },
+    {
+      "id": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "type": "ef.entity",
+      "name": "Report",
+      "fqdn": "Sample.Data.Entities.Report",
+      "assembly": "Sample.Data",
+      "project": "src/Sample.Data/Sample.Data.csproj",
+      "file_path": "src/Sample.Data/Entities/Report.cs",
+      "span": {
+        "start_line": 3,
+        "end_line": 13
+      },
+      "symbol_id": "T:Sample.Data.Entities.Report",
+      "tags": [
+        "data"
+      ],
+      "props": {}
+    },
+    {
+      "id": "node::c7bc4d17b221783422f7ecad3caa7c8d7b513eb02bf0cb5bcf9d531ca750a750",
+      "type": "db.table",
+      "name": "Reports",
+      "fqdn": "Reports",
+      "assembly": "Sample.Data",
+      "project": "src/Sample.Data/Sample.Data.csproj",
+      "file_path": "src/Sample.Data/Db/ReportsDbContext.cs",
+      "span": {
+        "start_line": 17,
+        "end_line": 22
+      },
+      "symbol_id": "db:Reports",
+      "tags": [
+        "db"
+      ],
+      "props": {}
+    },
+    {
+      "id": "node::3715fae9c17307dcc4fb647566de82831311340bc669f76ef203b50bd8bdf6a4",
+      "type": "mapping.automapper.map",
+      "name": "Report_to_ReportDto_Map",
+      "fqdn": "Sample.App.Mapping.ReportProfile.Report_to_ReportDto",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Mapping/ReportProfile.cs",
+      "span": {
+        "start_line": 11,
+        "end_line": 11
+      },
+      "symbol_id": "M:Sample.App.Mapping.ReportProfile.CreateMap",
+      "tags": [
+        "mapping"
+      ],
+      "props": {
+        "source": "Sample.Data.Entities.Report",
+        "destination": "Sample.App.Dtos.ReportDto"
+      }
+    },
+    {
+      "id": "node::32ea60f3a36e4c5c1270b46231e42291b54bf21974c69e14395c7b0de27c1d2f",
+      "type": "http.client",
+      "name": "ReportsClient",
+      "fqdn": "Sample.App.Clients.ReportsClient",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Clients/ReportsClient.cs",
+      "span": {
+        "start_line": 3,
+        "end_line": 16
+      },
+      "symbol_id": "T:Sample.App.Clients.ReportsClient",
+      "tags": [
+        "http"
+      ],
+      "props": {
+        "base_url": "https://reports-api.local"
+      }
+    },
+    {
+      "id": "node::f53723b5064b5386b814ad31bf46fe35405fa12c8ef7271d4e735d4ff0bbd90b",
+      "type": "endpoint.minimal_api",
+      "name": "GET /api/reports/{id:guid}/summary",
+      "fqdn": "Sample.ReportsApi.Endpoints.GetReportSummary",
+      "assembly": "Sample.ReportsApi",
+      "project": "src/Sample.ReportsApi/Sample.ReportsApi.csproj",
+      "file_path": "src/Sample.ReportsApi/Program.cs",
+      "span": {
+        "start_line": 14,
+        "end_line": 20
+      },
+      "symbol_id": "endpoint:reports.summary",
+      "tags": [
+        "web"
+      ],
+      "props": {
+        "route": "/api/reports/{id:guid}/summary",
+        "http_method": "GET"
+      }
+    },
+    {
+      "id": "node::69ed703a9f79dc6be9b6483396c45e059e90733d21e58fed77c9042c22a8aea0",
+      "type": "message.publisher",
+      "name": "ReportPublisher",
+      "fqdn": "Sample.App.Messaging.ReportPublisher",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Messaging/ReportPublisher.cs",
+      "span": {
+        "start_line": 10,
+        "end_line": 24
+      },
+      "symbol_id": "T:Sample.App.Messaging.ReportPublisher",
+      "tags": [
+        "messaging"
+      ],
+      "props": {
+        "channel": "reports"
+      }
+    },
+    {
+      "id": "node::d1e9d1819f2cec0302b4e942bcde5c739d20d30c15e5f0f0e2f0c5533f0cd4f7",
+      "type": "message.contract",
+      "name": "ReportPublished",
+      "fqdn": "Sample.App.Messaging.ReportPublished",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App/Sample.App.csproj",
+      "file_path": "src/Sample.App/Messaging/ReportPublisher.cs",
+      "span": {
+        "start_line": 26,
+        "end_line": 26
+      },
+      "symbol_id": "T:Sample.App.Messaging.ReportPublished",
+      "tags": [
+        "messaging"
+      ],
+      "props": {}
+    }
+  ],
+  "edges": [
+    {
+      "from": "node::559e2bb95aa9b6b991cd4b2d09ce456787e7668e5cd20548b03e52c8e9b85e8c",
+      "to": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "kind": "handled_by",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "controller.action",
+        "method": "GetReportHandler",
+        "location": {
+          "file": "src/Sample.Web/Controllers/ReportsController.cs",
+          "line": 32
+        },
+        "method_span": {
+          "start_line": 22,
+          "end_line": 34
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "request_type": "GetReportQuery"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Controllers/ReportsController.cs",
+            "start_line": 25,
+            "end_line": 33
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::559e2bb95aa9b6b991cd4b2d09ce456787e7668e5cd20548b03e52c8e9b85e8c",
+      "to": "node::6e0d3685c3389458e6d919308094c4db5318d4bf4ca4eb0f040035ad580c8ec6",
+      "kind": "validates",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "validation",
+        "method": "GetReportQueryValidator",
+        "location": {
+          "file": "src/Sample.Web/Controllers/ReportsController.cs",
+          "line": 26
+        },
+        "method_span": {
+          "start_line": 22,
+          "end_line": 34
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {},
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Controllers/ReportsController.cs",
+            "start_line": 25,
+            "end_line": 27
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::6e0d3685c3389458e6d919308094c4db5318d4bf4ca4eb0f040035ad580c8ec6",
+      "to": "node::f0fa07d68ea4111dd937da7aab7da4c92c98b5aaee958af58dc67b742a9ba676",
+      "kind": "validates",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "validation",
+        "method": "GetReportQueryValidator",
+        "location": {
+          "file": "src/Sample.App/Validation/GetReportQueryValidator.cs",
+          "line": 6
+        },
+        "method_span": {
+          "start_line": 6,
+          "end_line": 13
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {},
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Validation/GetReportQueryValidator.cs",
+            "start_line": 8,
+            "end_line": 12
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "kind": "queries",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "ef.query",
+        "method": "GetReportHandler.Handle",
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 30
+        },
+        "method_span": {
+          "start_line": 28,
+          "end_line": 40
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "entity": "Sample.Data.Entities.Report"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 30,
+            "end_line": 33
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "to": "node::c7bc4d17b221783422f7ecad3caa7c8d7b513eb02bf0cb5bcf9d531ca750a750",
+      "kind": "reads_from",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "ef.dbset",
+        "method": "Reports",
+        "location": {
+          "file": "src/Sample.Data/Db/ReportsDbContext.cs",
+          "line": 13
+        },
+        "method_span": {
+          "start_line": 17,
+          "end_line": 22
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "table": "Reports"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Data/Db/ReportsDbContext.cs",
+            "start_line": 17,
+            "end_line": 22
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::69ed703a9f79dc6be9b6483396c45e059e90733d21e58fed77c9042c22a8aea0",
+      "kind": "publishes",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "message.publish",
+        "method": "ReportPublisher.PublishAsync",
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 36
+        },
+        "method_span": {
+          "start_line": 28,
+          "end_line": 40
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "queue": "reports.events"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 36,
+            "end_line": 37
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::69ed703a9f79dc6be9b6483396c45e059e90733d21e58fed77c9042c22a8aea0",
+      "to": "node::d1e9d1819f2cec0302b4e942bcde5c739d20d30c15e5f0f0e2f0c5533f0cd4f7",
+      "kind": "publishes",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "message.publish",
+        "method": "ReportPublisher.PublishAsync",
+        "location": {
+          "file": "src/Sample.App/Messaging/ReportPublisher.cs",
+          "line": 21
+        },
+        "method_span": {
+          "start_line": 10,
+          "end_line": 24
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "contract": "Sample.App.Messaging.ReportPublished"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Messaging/ReportPublisher.cs",
+            "start_line": 19,
+            "end_line": 22
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "to": "node::d02a184d81dbac2404753abadf51746d8f6f285a6bcd17a8d4e7722505028119",
+      "kind": "converts_to",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "automapper.for_member",
+        "method": "ReportProfile",
+        "location": {
+          "file": "src/Sample.App/Mapping/ReportProfile.cs",
+          "line": 11
+        },
+        "method_span": {
+          "start_line": 9,
+          "end_line": 12
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "source": "Sample.Data.Entities.Report",
+        "destination": "Sample.App.Dtos.ReportDto"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Mapping/ReportProfile.cs",
+            "start_line": 9,
+            "end_line": 12
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::d02a184d81dbac2404753abadf51746d8f6f285a6bcd17a8d4e7722505028119",
+      "kind": "maps_to",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "automapper.for_member",
+        "method": "GetReportHandler.Handle",
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 34
+        },
+        "method_span": {
+          "start_line": 28,
+          "end_line": 40
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {},
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 34,
+            "end_line": 35
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::f53723b5064b5386b814ad31bf46fe35405fa12c8ef7271d4e735d4ff0bbd90b",
+      "kind": "calls",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "httpclient.request",
+        "method": "ReportsClient.GetSummaryAsync",
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 37
+        },
+        "method_span": {
+          "start_line": 28,
+          "end_line": 40
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "verb": "GET",
+        "route": "/api/reports/{id:guid}/summary",
+        "target_service": "ReportsApi"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 37,
+            "end_line": 37
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::32ea60f3a36e4c5c1270b46231e42291b54bf21974c69e14395c7b0de27c1d2f",
+      "kind": "uses_client",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "httpclient.request",
+        "method": "ReportsClient.GetSummaryAsync",
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 37
+        },
+        "method_span": {
+          "start_line": 28,
+          "end_line": 40
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {
+        "verb": "GET",
+        "route": "/api/reports/{id:guid}/summary"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 37,
+            "end_line": 37
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::f0fa07d68ea4111dd937da7aab7da4c92c98b5aaee958af58dc67b742a9ba676",
+      "to": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "kind": "handled_by",
+      "source": "static",
+      "confidence": 1.0,
+      "transform": {
+        "type": "mediatr.handler",
+        "method": "GetReportHandler",
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 13
+        },
+        "method_span": {
+          "start_line": 13,
+          "end_line": 41
+        },
+        "il_range": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "props": {},
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 13,
+            "end_line": 26
+          }
+        ],
+        "trace_ids": []
+      }
+    }
+  ]
+}
