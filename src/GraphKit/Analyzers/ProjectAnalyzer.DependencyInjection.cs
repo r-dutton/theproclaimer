@@ -153,8 +153,40 @@ public sealed partial class ProjectAnalyzer
                 _ => null
             };
 
-            if (methodName is null || !IsServiceRegistrationMethod(methodName))
+            if (methodName is null)
             {
+                if (TryCaptureAutofacRegistration(project, tree, invocation, out var autofacRegistrations))
+                {
+                    foreach (var autoRegistration in autofacRegistrations)
+                    {
+                        AddServiceRegistration(autoRegistration.ServiceType, autoRegistration);
+                        var simpleName = autoRegistration.ServiceType.Split('.').Last();
+                        if (!string.Equals(simpleName, autoRegistration.ServiceType, StringComparison.Ordinal))
+                        {
+                            AddServiceRegistration(simpleName, autoRegistration);
+                        }
+                    }
+                }
+
+                continue;
+            }
+
+            if (!IsServiceRegistrationMethod(methodName))
+            {
+                if (string.Equals(methodName, "RegisterType", StringComparison.Ordinal) &&
+                    TryCaptureAutofacRegistration(project, tree, invocation, out var autofacRegistrations))
+                {
+                    foreach (var autoRegistration in autofacRegistrations)
+                    {
+                        AddServiceRegistration(autoRegistration.ServiceType, autoRegistration);
+                        var simpleName = autoRegistration.ServiceType.Split('.').Last();
+                        if (!string.Equals(simpleName, autoRegistration.ServiceType, StringComparison.Ordinal))
+                        {
+                            AddServiceRegistration(simpleName, autoRegistration);
+                        }
+                    }
+                }
+
                 continue;
             }
 
@@ -270,6 +302,114 @@ public sealed partial class ProjectAnalyzer
     private static bool IsServiceRegistrationMethod(string methodName)
         => methodName is "AddScoped" or "AddSingleton" or "AddTransient";
 
+    private bool TryCaptureAutofacRegistration(ProjectInfo project, SyntaxTree tree, InvocationExpressionSyntax registerInvocation, out List<ServiceRegistrationInfo> registrations)
+    {
+        registrations = new List<ServiceRegistrationInfo>();
+
+        if (registerInvocation.Expression is not MemberAccessExpressionSyntax { Name: GenericNameSyntax registerGeneric } registerMember ||
+            !string.Equals(registerGeneric.Identifier.Text, "RegisterType", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var implementationType = registerGeneric.TypeArgumentList.Arguments.FirstOrDefault()?.ToString();
+        if (string.IsNullOrWhiteSpace(implementationType))
+        {
+            return false;
+        }
+
+        var chain = new List<InvocationExpressionSyntax> { registerInvocation };
+        var current = registerInvocation;
+        while (current.Parent is MemberAccessExpressionSyntax parentMember &&
+               parentMember.Parent is InvocationExpressionSyntax parentInvocation)
+        {
+            current = parentInvocation;
+            chain.Add(current);
+        }
+
+        var serviceTypes = new HashSet<string>(StringComparer.Ordinal);
+        var lifetime = "Transient";
+
+        foreach (var chainInvocation in chain.Skip(1))
+        {
+            if (chainInvocation.Expression is not MemberAccessExpressionSyntax member)
+            {
+                continue;
+            }
+
+            var identifier = member.Name switch
+            {
+                GenericNameSyntax generic => generic.Identifier.Text,
+                IdentifierNameSyntax identifierName => identifierName.Identifier.Text,
+                _ => null
+            };
+
+            if (string.IsNullOrWhiteSpace(identifier))
+            {
+                continue;
+            }
+
+            if (string.Equals(identifier, "As", StringComparison.Ordinal))
+            {
+                switch (member.Name)
+                {
+                    case GenericNameSyntax generic when generic.TypeArgumentList.Arguments.Count > 0:
+                        serviceTypes.Add(generic.TypeArgumentList.Arguments[0].ToString());
+                        break;
+                    case IdentifierNameSyntax:
+                        if (chainInvocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is TypeOfExpressionSyntax typeOf)
+                        {
+                            serviceTypes.Add(typeOf.Type.ToString());
+                        }
+                        break;
+                }
+            }
+            else if (string.Equals(identifier, "AsSelf", StringComparison.Ordinal) ||
+                     string.Equals(identifier, "AsImplementedInterfaces", StringComparison.Ordinal))
+            {
+                serviceTypes.Add(implementationType);
+            }
+            else if (TryMapAutofacLifetime(identifier, out var mappedLifetime))
+            {
+                lifetime = mappedLifetime;
+            }
+        }
+
+        if (serviceTypes.Count == 0)
+        {
+            serviceTypes.Add(implementationType);
+        }
+
+        var span = ToGraphSpan(tree, registerInvocation);
+        var filePath = GetRelativePath(tree.FilePath);
+
+        foreach (var serviceType in serviceTypes.Where(s => !string.IsNullOrWhiteSpace(s)))
+        {
+            registrations.Add(new ServiceRegistrationInfo(
+                serviceType!,
+                implementationType!,
+                lifetime,
+                filePath,
+                span,
+                project.AssemblyName,
+                project.RelativeDirectory));
+        }
+
+        return registrations.Count > 0;
+    }
+
+    private static bool TryMapAutofacLifetime(string methodName, out string lifetime)
+    {
+        lifetime = methodName;
+
+        return methodName is "SingleInstance" or
+            "InstancePerLifetimeScope" or
+            "InstancePerMatchingLifetimeScope" or
+            "InstancePerRequest" or
+            "InstancePerOwned" or
+            "InstancePerDependency";
+    }
+
     private static (string? ServiceType, string? ImplementationType) ResolveGenericRegistration(GenericNameSyntax generic, InvocationExpressionSyntax invocation)
     {
         if (generic.TypeArgumentList.Arguments.Count >= 2)
@@ -375,26 +515,26 @@ public sealed partial class ProjectAnalyzer
     private bool TryEnsureServiceNode(string serviceType, out string? nodeId, out ServiceRegistrationInfo? registration)
     {
         registration = FindServiceRegistration(serviceType);
-        if (registration is null)
-        {
-            nodeId = null;
-            return false;
-        }
+        var effectiveServiceType = registration?.ServiceType ?? serviceType;
+        var symbolId = $"T:{effectiveServiceType}";
+        var assembly = registration?.Assembly ?? GuessAssemblyName(effectiveServiceType);
+        var project = registration?.Project ?? string.Empty;
+        var filePath = registration?.FilePath ?? string.Empty;
+        var span = registration?.Span;
 
-        var symbolId = $"T:{registration.ServiceType}";
-        var id = StableId.For("app.service_contract", registration.ServiceType, registration.Assembly, symbolId);
+        var id = StableId.For("app.service_contract", effectiveServiceType, assembly, symbolId);
         if (!_nodes.ContainsKey(id))
         {
             _nodes[id] = new GraphNode
             {
                 Id = id,
                 Type = "app.service_contract",
-                Name = registration.ServiceType.Split('.').Last(),
-                Fqdn = registration.ServiceType,
-                Assembly = registration.Assembly,
-                Project = registration.Project,
-                FilePath = registration.FilePath,
-                Span = registration.Span,
+                Name = effectiveServiceType.Split('.').Last(),
+                Fqdn = effectiveServiceType,
+                Assembly = assembly,
+                Project = project,
+                FilePath = filePath,
+                Span = span,
                 SymbolId = symbolId,
                 Tags = new[] { "app" }
             };
@@ -402,6 +542,17 @@ public sealed partial class ProjectAnalyzer
 
         nodeId = id;
         return true;
+    }
+
+    private static string GuessAssemblyName(string serviceType)
+    {
+        if (string.IsNullOrWhiteSpace(serviceType))
+        {
+            return string.Empty;
+        }
+
+        var firstSegment = serviceType.Split('.').FirstOrDefault();
+        return string.IsNullOrWhiteSpace(firstSegment) ? serviceType : firstSegment;
     }
 
     private ServiceRegistrationInfo? FindServiceRegistration(string serviceType)

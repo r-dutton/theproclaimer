@@ -17,6 +17,8 @@ public sealed partial class ProjectAnalyzer
         public Dictionary<string, string> LocalVariables { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ControllerRepositoryInvocation> RepositoryInvocations { get; } = new();
+        public List<ServiceUsage> ServiceUsages { get; } = new();
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
@@ -30,6 +32,8 @@ public sealed partial class ProjectAnalyzer
     private sealed record ControllerCastInvocation(string SourceType, string DestinationType, string? AssignedVariable, int Line, string Kind);
 
     private sealed record ControllerNotificationInvocation(string NotificationType, int Line);
+
+    private sealed record ControllerRepositoryInvocation(string RepositoryType, string? EntityType, string Method, string Operation, int Line);
 
     private sealed record MinimalEndpointInfo(string Route, string HttpMethod, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
     {
@@ -114,7 +118,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record NodeReference(string Id, string FilePath, GraphSpan Span);
 
-    private sealed record ServiceUsage(string ServiceType, int Line);
+    private sealed record ServiceUsage(string ServiceType, int Line, string? Method = null);
 
     private sealed record FieldDescriptor(string Type, int Line);
 
