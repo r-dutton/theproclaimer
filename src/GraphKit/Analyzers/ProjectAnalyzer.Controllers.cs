@@ -187,6 +187,15 @@ public sealed partial class ProjectAnalyzer
                         var typeName = descriptor.Type;
                         var baseTypeName = GetTypeNameWithoutGenerics(typeName);
                         var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                        if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
+                        {
+                            if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
+                            {
+                                info.ConfigurationUsages.Add(configurationUsage);
+                            }
+
+                            continue;
+                        }
                         if (string.IsNullOrWhiteSpace(resolvedType))
                         {
                             continue;
@@ -327,6 +336,31 @@ public sealed partial class ProjectAnalyzer
                             info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, null, line));
                         }
                     }
+                }
+            }
+
+            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            {
+                if (elementAccess.Expression is not IdentifierNameSyntax identifier)
+                {
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
+                {
+                    continue;
+                }
+
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                {
+                    info.ConfigurationUsages.Add(configurationUsage);
                 }
             }
             foreach (var binary in method.DescendantNodes().OfType<BinaryExpressionSyntax>())
@@ -586,6 +620,8 @@ public sealed partial class ProjectAnalyzer
                     Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
                 });
             }
+
+            EmitConfigurationEdges(id, action.ConfigurationUsages);
 
             foreach (var clientInvocation in action.HttpClientInvocations)
             {

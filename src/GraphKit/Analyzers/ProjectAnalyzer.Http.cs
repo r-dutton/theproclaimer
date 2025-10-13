@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using GraphKit.Graph;
 using GraphKit.Workspace;
@@ -63,9 +64,21 @@ public sealed partial class ProjectAnalyzer
                 Tags = new[] { "integration" }
             };
 
-            if (_httpClientBaseUrls.TryGetValue(client.Name, out var baseAddress) && !_httpClientBaseUrls.ContainsKey(client.Fqdn))
+            HttpClientBaseAddress? effectiveAddress = null;
+            if (_httpClientBaseUrls.TryGetValue(client.Fqdn, out var fqdnAddress))
             {
-                _httpClientBaseUrls[client.Fqdn] = baseAddress with { ClientType = client.Fqdn };
+                effectiveAddress = fqdnAddress;
+            }
+            else if (_httpClientBaseUrls.TryGetValue(client.Name, out var baseAddress))
+            {
+                var normalized = baseAddress with { ClientType = client.Fqdn };
+                _httpClientBaseUrls[client.Fqdn] = normalized;
+                effectiveAddress = normalized;
+            }
+
+            if (effectiveAddress is not null)
+            {
+                EmitHttpClientConfigurationEdge(id, client, effectiveAddress!);
             }
 
             foreach (var call in client.OutboundCalls)
@@ -73,6 +86,23 @@ public sealed partial class ProjectAnalyzer
                 _httpCalls.Add(new HttpCallInfo(client, call));
             }
         }
+    }
+
+    private void EmitHttpClientConfigurationEdge(string clientId, HttpClientInfo client, HttpClientBaseAddress address)
+    {
+        if (string.IsNullOrWhiteSpace(address.ConfigurationKey))
+        {
+            return;
+        }
+
+        var usage = new ConfigurationUsage(
+            "IConfiguration",
+            "httpclient.base_address",
+            address.ConfigurationKey,
+            address.Line,
+            address.SourceFile);
+
+        EmitConfigurationEdges(clientId, new[] { usage });
     }
 
     private void EmitHttpCalls()

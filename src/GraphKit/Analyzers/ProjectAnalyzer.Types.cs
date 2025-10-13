@@ -20,6 +20,7 @@ public sealed partial class ProjectAnalyzer
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ControllerRepositoryInvocation> RepositoryInvocations { get; } = new();
         public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
@@ -55,6 +56,7 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerNotificationPublication> PublishedNotifications { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record HandlerDbAccess(string DbContextType, string Member, int Line);
@@ -111,6 +113,7 @@ public sealed partial class ProjectAnalyzer
         public List<RepositoryMapperCall> MapperCalls { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record RepositoryDbAccess(string Member, string Method, int Line);
@@ -142,6 +145,7 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerNotificationPublication> PublishedNotifications { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line);
@@ -154,6 +158,7 @@ public sealed partial class ProjectAnalyzer
         public List<BackgroundServiceRepositoryCall> RepositoryCalls { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record BackgroundServiceRepositoryCall(string RepositoryType, string Method, int Line);
@@ -168,4 +173,6 @@ public sealed partial class ProjectAnalyzer
     }
 
     private sealed record OptionsUsage(string OptionsType, int Line);
+
+    private sealed record ConfigurationUsage(string ConfigurationType, string Accessor, string? Key, int Line, string FilePath);
 }
