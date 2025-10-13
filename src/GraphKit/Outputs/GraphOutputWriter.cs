@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Linq;
 using GraphKit.Graph;
+using GraphKit.Workspace;
 
 namespace GraphKit.Outputs;
 
@@ -12,11 +13,13 @@ public sealed class GraphOutputWriter
 {
     private readonly string _workspaceRoot;
     private readonly string _outputDirectory;
+    private readonly FlowWorkspaceIndex _workspaceIndex;
 
     public GraphOutputWriter(string workspaceRoot, string outputDirectory)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         _outputDirectory = Path.GetFullPath(Path.Combine(_workspaceRoot, outputDirectory));
+        _workspaceIndex = FlowWorkspaceIndex.Load(_workspaceRoot);
     }
 
     public async Task WriteAsync(GraphDocument document, string analyzerVersion, CancellationToken cancellationToken)
@@ -99,7 +102,7 @@ public sealed class GraphOutputWriter
             return;
         }
 
-        var allFlows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "*" }));
+        var allFlows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "*" }), _workspaceIndex);
         if (!string.IsNullOrWhiteSpace(allFlows))
         {
             await File.WriteAllTextAsync(Path.Combine(flowDirectory, "controllers.all.md"), allFlows, cancellationToken);
@@ -107,7 +110,7 @@ public sealed class GraphOutputWriter
 
         foreach (var controller in controllers)
         {
-            var flow = FlowBuilder.BuildFlows(document, node => string.Equals(node.Id, controller.Id, StringComparison.Ordinal));
+            var flow = FlowBuilder.BuildFlows(document, node => string.Equals(node.Id, controller.Id, StringComparison.Ordinal), _workspaceIndex);
             if (string.IsNullOrWhiteSpace(flow))
             {
                 continue;

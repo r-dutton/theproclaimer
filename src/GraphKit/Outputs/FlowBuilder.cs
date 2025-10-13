@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using GraphKit.Graph;
+using GraphKit.Workspace;
 
 namespace GraphKit.Outputs;
 
 public static class FlowBuilder
 {
-    public static string BuildFlows(GraphDocument document, Func<GraphNode, bool> controllerPredicate)
+    public static string BuildFlows(GraphDocument document, Func<GraphNode, bool> controllerPredicate, FlowWorkspaceIndex? workspace = null)
     {
         var nodesById = document.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
         var edgesByFrom = document.Edges
@@ -32,135 +33,155 @@ public static class FlowBuilder
         var builder = new StringBuilder();
         foreach (var controller in controllers)
         {
-            AppendControllerFlow(builder, document, controller, nodesById, edgesByFrom, mapLookup);
+            var state = new FlowRenderState(document, nodesById, edgesByFrom, mapLookup, workspace);
+            AppendControllerFlow(builder, state, controller);
             builder.AppendLine();
         }
 
         return builder.ToString();
     }
 
-    private static void AppendControllerFlow(
-        StringBuilder builder,
-        GraphDocument document,
-        GraphNode controller,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup)
+    private static void AppendControllerFlow(StringBuilder builder, FlowRenderState state, GraphNode controller)
     {
-        var method = GetNodeProp(controller, "http_method") ?? "GET";
-        var route = GetNodeProp(controller, "route") ?? "/";
-        var span = controller.Span;
-        builder.AppendLine($"[web] {method} {route}  ({controller.Fqdn})  [L{span?.StartLine}–L{span?.EndLine}]");
+        AppendEndpointFlow(builder, state, controller, indent: 0);
+    }
 
-        if (!edgesByFrom.TryGetValue(controller.Id, out var controllerEdges))
+    private static void AppendEndpointFlow(StringBuilder builder, FlowRenderState state, GraphNode endpoint, int indent)
+    {
+        if (!state.EndpointStack.Add(endpoint.Id))
         {
             return;
         }
 
-        foreach (var mapEdge in controllerEdges.Where(e => e.Kind == "maps_to"))
+        try
         {
-            AppendMappingEdge(builder, document, mapEdge, nodesById, edgesByFrom, mapLookup, indent: 1);
-        }
+            var method = GetNodeProp(endpoint, "http_method") ?? "GET";
+            var route = GetNodeProp(endpoint, "route") ?? "/";
+            var span = endpoint.Span;
+            var header = $"[web] {method} {route}  ({endpoint.Fqdn})  [L{span?.StartLine}–L{span?.EndLine}]";
 
-        foreach (var castEdge in controllerEdges.Where(e => e.Kind == "casts_to"))
-        {
-            var annotation = castEdge.Props is { } props && props.TryGetValue("cast_kind", out var castValue)
-                ? castValue?.ToString()
-                : null;
-            AppendMappingEdge(builder, document, castEdge, nodesById, edgesByFrom, mapLookup, indent: 1, label: "casts_to", annotation: annotation, includeAutomapper: false);
-        }
-
-        foreach (var clientEdge in controllerEdges.Where(e => e.Kind == "uses_client"))
-        {
-            if (!nodesById.TryGetValue(clientEdge.To, out var clientNode))
+            if (indent <= 0)
             {
-                continue;
+                builder.AppendLine(header);
+            }
+            else
+            {
+                AppendIndented(builder, indent, header);
             }
 
-            AppendHttpClientUsage(builder, clientEdge, clientNode, nodesById, edgesByFrom, indent: 1);
-        }
-
-        foreach (var validatorEdge in controllerEdges.Where(e => e.Kind == "uses_validator"))
-        {
-            if (!nodesById.TryGetValue(validatorEdge.To, out var validatorNode))
+            if (!state.EdgesByFrom.TryGetValue(endpoint.Id, out var edges))
             {
-                continue;
+                return;
             }
 
-            var lineText = validatorEdge.Transform?.Location?.Line is int line
-                ? $" [L{line}]"
-                : string.Empty;
-            var targetType = validatorEdge.Props is { } props && props.TryGetValue("target_type", out var value)
-                ? value?.ToString()
-                : null;
-            var extra = string.IsNullOrWhiteSpace(targetType) ? string.Empty : $" ({targetType})";
-            AppendIndented(builder, 1, $"uses_validator {validatorNode.Name}{extra}{lineText}");
-        }
+            var childIndent = indent <= 0 ? 1 : indent + 1;
 
-        foreach (var cacheEdge in controllerEdges.Where(e => e.Kind == "uses_cache"))
-        {
-            if (!nodesById.TryGetValue(cacheEdge.To, out var cacheNode))
+            foreach (var mapEdge in edges.Where(e => e.Kind == "maps_to"))
             {
-                continue;
+                AppendMappingEdge(builder, state, mapEdge, childIndent);
             }
 
-            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
-                ? methodValue?.ToString()
-                : null;
-            var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
-                ? opValue?.ToString()
-                : null;
-            var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
-                ? keyValue?.ToString()
-                : null;
-            var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var methodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
-            var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-            var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-            AppendIndented(builder, 1, $"uses_cache {cacheNode.Name}{methodText}{operationText}{keyText}{lineText}");
-        }
-
-        foreach (var optionsEdge in controllerEdges.Where(e => e.Kind == "uses_options"))
-        {
-            if (!nodesById.TryGetValue(optionsEdge.To, out var optionsNode))
+            foreach (var castEdge in edges.Where(e => e.Kind == "casts_to"))
             {
-                continue;
+                var annotation = castEdge.Props is { } props && props.TryGetValue("cast_kind", out var castValue)
+                    ? castValue?.ToString()
+                    : null;
+                AppendMappingEdge(builder, state, castEdge, childIndent, label: "casts_to", annotation: annotation, includeAutomapper: false);
             }
 
-            var section = GetNodeProp(optionsNode, "section");
-            var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-            var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, 1, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
-        }
-
-        foreach (var notificationEdge in controllerEdges.Where(e => e.Kind == "publishes_notification"))
-        {
-            if (!nodesById.TryGetValue(notificationEdge.To, out var notificationNode))
+            foreach (var clientEdge in edges.Where(e => e.Kind == "uses_client"))
             {
-                continue;
+                if (!state.NodesById.TryGetValue(clientEdge.To, out var clientNode))
+                {
+                    continue;
+                }
+
+                AppendHttpClientUsage(builder, state, clientEdge, clientNode, childIndent);
             }
 
-            var lineText = notificationEdge.Transform?.Location?.Line is int line
-                ? $" [L{line}]"
-                : string.Empty;
-            AppendIndented(builder, 1, $"publishes_notification {notificationNode.Name}{lineText}");
-            AppendNotificationFlow(builder, document, notificationNode, nodesById, edgesByFrom, mapLookup, indent: 2);
+            foreach (var validatorEdge in edges.Where(e => e.Kind == "uses_validator"))
+            {
+                if (!state.NodesById.TryGetValue(validatorEdge.To, out var validatorNode))
+                {
+                    continue;
+                }
+
+                var lineText = validatorEdge.Transform?.Location?.Line is int line
+                    ? $" [L{line}]"
+                    : string.Empty;
+                var targetType = validatorEdge.Props is { } props && props.TryGetValue("target_type", out var value)
+                    ? value?.ToString()
+                    : null;
+                var extra = string.IsNullOrWhiteSpace(targetType) ? string.Empty : $" ({targetType})";
+                AppendIndented(builder, childIndent, $"uses_validator {validatorNode.Name}{extra}{lineText}");
+            }
+
+            foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
+            {
+                if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
+                {
+                    continue;
+                }
+
+                var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+                    ? methodValue?.ToString()
+                    : null;
+                var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
+                    ? opValue?.ToString()
+                    : null;
+                var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
+                    ? keyValue?.ToString()
+                    : null;
+                var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var methodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+                var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
+                var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
+                AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{methodText}{operationText}{keyText}{lineText}");
+            }
+
+            foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
+            {
+                if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
+                {
+                    continue;
+                }
+
+                var section = GetNodeProp(optionsNode, "section");
+                var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
+                var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                AppendIndented(builder, childIndent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+            }
+
+            foreach (var notificationEdge in edges.Where(e => e.Kind == "publishes_notification"))
+            {
+                if (!state.NodesById.TryGetValue(notificationEdge.To, out var notificationNode))
+                {
+                    continue;
+                }
+
+                var lineText = notificationEdge.Transform?.Location?.Line is int line
+                    ? $" [L{line}]"
+                    : string.Empty;
+                AppendIndented(builder, childIndent, $"publishes_notification {notificationNode.Name}{lineText}");
+                AppendNotificationFlow(builder, state, notificationNode, childIndent + 1);
+            }
+        }
+        finally
+        {
+            state.EndpointStack.Remove(endpoint.Id);
         }
     }
 
     private static void AppendMappingEdge(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphEdge edge,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
         int indent,
         string label = "maps_to",
         string? annotation = null,
         bool includeAutomapper = true)
     {
-        if (!nodesById.TryGetValue(edge.To, out var destination))
+        if (!state.NodesById.TryGetValue(edge.To, out var destination))
         {
             return;
         }
@@ -175,196 +196,212 @@ public static class FlowBuilder
 
         if (includeAutomapper)
         {
-            AppendAutomapperRegistrations(builder, document, edge, mapLookup, indent + 1);
+            AppendAutomapperRegistrations(builder, state, edge, indent + 1);
         }
 
-        if (!edgesByFrom.TryGetValue(destination.Id, out var downstreamEdges))
+        if (!state.EdgesByFrom.TryGetValue(destination.Id, out var downstreamEdges))
         {
             return;
         }
 
         foreach (var convertEdge in downstreamEdges.Where(e => e.Kind == "converts_to"))
         {
-            AppendConversion(builder, document, convertEdge, nodesById, mapLookup, indent + 1);
+            AppendConversion(builder, state, convertEdge, indent + 1);
         }
 
         if (destination.Type == "cqrs.request")
         {
-            AppendCommandFlow(builder, document, destination, nodesById, edgesByFrom, mapLookup, indent + 1);
+            AppendCommandFlow(builder, state, destination, indent + 1);
         }
     }
 
     private static void AppendCommandFlow(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphNode command,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
         int indent)
     {
-        if (!edgesByFrom.TryGetValue(command.Id, out var edges))
+        if (!state.EdgesByFrom.TryGetValue(command.Id, out var edges))
         {
             return;
         }
 
         foreach (var handlerEdge in edges.Where(e => e.Kind == "handled_by"))
         {
-            if (!nodesById.TryGetValue(handlerEdge.To, out var handlerNode))
+            if (!state.NodesById.TryGetValue(handlerEdge.To, out var handlerNode))
             {
                 continue;
             }
 
             var span = handlerNode.Span;
             AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
-            AppendHandlerFlow(builder, document, handlerNode, nodesById, edgesByFrom, mapLookup, indent + 1);
+            AppendHandlerFlow(builder, state, handlerNode, indent + 1);
         }
     }
 
     private static void AppendHandlerFlow(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphNode handler,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
         int indent)
     {
-        if (!edgesByFrom.TryGetValue(handler.Id, out var edges))
+        if (!state.HandlerStack.Add(handler.Id))
         {
             return;
         }
 
-        foreach (var call in edges.Where(e => e.Kind == "calls"))
+        try
         {
-            if (!nodesById.TryGetValue(call.To, out var target))
+            if (!state.EdgesByFrom.TryGetValue(handler.Id, out var edges))
             {
-                continue;
+                return;
             }
 
-            var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue)
-                ? methodValue?.ToString()
-                : null;
-            var methodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
-            var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"calls {target.Name}{methodText}{lineText}");
-            AppendRepositoryFlow(builder, document, target, nodesById, edgesByFrom, mapLookup, indent + 1);
-        }
-
-        foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
-        {
-            AppendMappingEdge(builder, document, mapping, nodesById, edgesByFrom, mapLookup, indent);
-        }
-
-        foreach (var service in edges.Where(e => e.Kind == "uses_service"))
-        {
-            if (!nodesById.TryGetValue(service.To, out var serviceNode))
+            foreach (var call in edges.Where(e => e.Kind == "calls"))
             {
-                continue;
+                if (!state.NodesById.TryGetValue(call.To, out var target))
+                {
+                    continue;
+                }
+
+                var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue)
+                    ? methodValue?.ToString()
+                    : null;
+                var methodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
+                var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                AppendIndented(builder, indent, $"calls {target.Name}{methodText}{lineText}");
+                AppendRepositoryFlow(builder, state, target, indent + 1);
             }
 
-            var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
-                ? lifetimeValue?.ToString()
-                : null;
-            var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
-            AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{lineText}");
-        }
-
-        foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
-        {
-            if (!nodesById.TryGetValue(cacheEdge.To, out var cacheNode))
+            foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
             {
-                continue;
+                AppendMappingEdge(builder, state, mapping, indent);
             }
 
-            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
-                ? methodValue?.ToString()
-                : null;
-            var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
-                ? opValue?.ToString()
-                : null;
-            var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
-                ? keyValue?.ToString()
-                : null;
-            var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var methodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
-            var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-            var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-            AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodText}{operationText}{keyText}{lineText}");
-        }
-
-        foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
-        {
-            if (!nodesById.TryGetValue(optionsEdge.To, out var optionsNode))
+            foreach (var clientEdge in edges.Where(e => e.Kind == "uses_client"))
             {
-                continue;
+                if (!state.NodesById.TryGetValue(clientEdge.To, out var clientNode))
+                {
+                    continue;
+                }
+
+                AppendHttpClientUsage(builder, state, clientEdge, clientNode, indent);
             }
 
-            var section = GetNodeProp(optionsNode, "section");
-            var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-            var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
-        }
-
-        foreach (var publish in edges.Where(e => e.Kind == "publishes"))
-        {
-            if (!nodesById.TryGetValue(publish.To, out var messageNode))
+            foreach (var service in edges.Where(e => e.Kind == "uses_service"))
             {
-                continue;
+                if (!state.NodesById.TryGetValue(service.To, out var serviceNode))
+                {
+                    continue;
+                }
+
+                var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
+                    ? lifetimeValue?.ToString()
+                    : null;
+                var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
+                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{lineText}");
             }
 
-            var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"publishes {messageNode.Name}{lineText}");
-        }
-
-        foreach (var notificationEdge in edges.Where(e => e.Kind == "publishes_notification"))
-        {
-            if (!nodesById.TryGetValue(notificationEdge.To, out var notificationNode))
+            foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
             {
-                continue;
+                if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
+                {
+                    continue;
+                }
+
+                var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+                    ? methodValue?.ToString()
+                    : null;
+                var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
+                    ? opValue?.ToString()
+                    : null;
+                var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
+                    ? keyValue?.ToString()
+                    : null;
+                var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var methodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+                var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
+                var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
+                AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodText}{operationText}{keyText}{lineText}");
             }
 
-            var lineText = notificationEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
-            AppendNotificationFlow(builder, document, notificationNode, nodesById, edgesByFrom, mapLookup, indent + 1);
+            foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
+            {
+                if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
+                {
+                    continue;
+                }
+
+                var section = GetNodeProp(optionsNode, "section");
+                var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
+                var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+            }
+
+            foreach (var publish in edges.Where(e => e.Kind == "publishes"))
+            {
+                if (!state.NodesById.TryGetValue(publish.To, out var messageNode))
+                {
+                    continue;
+                }
+
+                var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var details = BuildPublisherDetails(messageNode);
+                AppendIndented(builder, indent, $"publishes {messageNode.Name}{details}{lineText}");
+                AppendPublisherFlow(builder, state, messageNode, indent + 1);
+            }
+
+            foreach (var notificationEdge in edges.Where(e => e.Kind == "publishes_notification"))
+            {
+                if (!state.NodesById.TryGetValue(notificationEdge.To, out var notificationNode))
+                {
+                    continue;
+                }
+
+                var lineText = notificationEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
+                AppendNotificationFlow(builder, state, notificationNode, indent + 1);
+            }
+        }
+        finally
+        {
+            state.HandlerStack.Remove(handler.Id);
         }
     }
 
     private static void AppendRepositoryFlow(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphNode repository,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
         int indent)
     {
-        if (!edgesByFrom.TryGetValue(repository.Id, out var edges))
+        if (!state.EdgesByFrom.TryGetValue(repository.Id, out var edges))
         {
             return;
         }
 
         foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
         {
-            AppendMappingEdge(builder, document, mapping, nodesById, edgesByFrom, mapLookup, indent);
+            AppendMappingEdge(builder, state, mapping, indent);
         }
 
-        foreach (var write in edges.Where(e => e.Kind == "writes_to"))
+        foreach (var write in edges.Where(e => e.Kind is "writes_to" or "queries"))
         {
-            if (!nodesById.TryGetValue(write.To, out var entityNode))
+            if (!state.NodesById.TryGetValue(write.To, out var entityNode))
             {
                 continue;
             }
 
             var lineText = write.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"writes_to {entityNode.Name}{lineText}");
-            AppendEntityFlow(builder, document, entityNode, nodesById, edgesByFrom, indent + 1);
+            var operation = write.Kind == "queries" ? "queries" : "writes_to";
+            AppendIndented(builder, indent, $"{operation} {entityNode.Name}{lineText}");
+            AppendEntityFlow(builder, state, entityNode, indent + 1);
         }
 
         foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
         {
-            if (!nodesById.TryGetValue(cacheEdge.To, out var cacheNode))
+            if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
             {
                 continue;
             }
@@ -387,7 +424,7 @@ public static class FlowBuilder
 
         foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
         {
-            if (!nodesById.TryGetValue(optionsEdge.To, out var optionsNode))
+            if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
             {
                 continue;
             }
@@ -401,25 +438,28 @@ public static class FlowBuilder
 
     private static void AppendEntityFlow(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphNode entity,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
         int indent)
     {
-        if (!edgesByFrom.TryGetValue(entity.Id, out var edges))
+        if (!state.EdgesByFrom.TryGetValue(entity.Id, out var edges))
         {
             return;
         }
 
-        foreach (var tableEdge in edges.Where(e => e.Kind is "writes_to" or "reads_from"))
+        foreach (var tableEdge in edges.Where(e => e.Kind is "writes_to" or "reads_from" or "queries"))
         {
-            if (!nodesById.TryGetValue(tableEdge.To, out var tableNode))
+            if (!state.NodesById.TryGetValue(tableEdge.To, out var tableNode))
             {
                 continue;
             }
 
-            var transform = tableEdge.Kind == "writes_to" ? "writes_to" : "reads_from";
+            var transform = tableEdge.Kind switch
+            {
+                "writes_to" => "writes_to",
+                "queries" => "queries",
+                _ => "reads_from"
+            };
             var lineText = tableEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             AppendIndented(builder, indent, $"{transform} {tableNode.Name}{lineText}");
         }
@@ -427,27 +467,24 @@ public static class FlowBuilder
 
     private static void AppendConversion(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphEdge edge,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
         int indent)
     {
-        if (!nodesById.TryGetValue(edge.To, out var destination))
+        if (!state.NodesById.TryGetValue(edge.To, out var destination))
         {
             return;
         }
 
         var lineText = edge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
         AppendIndented(builder, indent, $"converts_to {destination.Name}{lineText}");
-        AppendAutomapperRegistrations(builder, document, edge, mapLookup, indent + 1);
+        AppendAutomapperRegistrations(builder, state, edge, indent + 1);
     }
 
     private static void AppendAutomapperRegistrations(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphEdge edge,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
         int indent)
     {
         if (edge.Props is null)
@@ -465,14 +502,14 @@ public static class FlowBuilder
         }
 
         var key = (GetSimpleType(source), GetSimpleType(destination));
-        if (!mapLookup.TryGetValue(key, out var maps))
+        if (!state.MapLookup.TryGetValue(key, out var maps))
         {
             return;
         }
 
         foreach (var mapNode in maps)
         {
-            var profileName = ResolveProfileName(document, mapNode);
+            var profileName = ResolveProfileName(state, mapNode);
             var mapLabel = mapNode.Props is { } props && props.TryGetValue("map", out var mapValue)
                 ? mapValue?.ToString()
                 : mapNode.Name;
@@ -480,11 +517,16 @@ public static class FlowBuilder
         }
     }
 
-    private static string ResolveProfileName(GraphDocument document, GraphNode mapNode)
+    private static string ResolveProfileName(FlowRenderState state, GraphNode mapNode)
     {
-        foreach (var edge in document.Edges.Where(e => e.From == mapNode.Id && e.Kind == "generated_from"))
+        foreach (var edge in state.Document.Edges.Where(e => e.From == mapNode.Id && e.Kind == "generated_from"))
         {
-            var profileNode = document.Nodes.FirstOrDefault(n => n.Id == edge.To);
+            if (state.NodesById.TryGetValue(edge.To, out var profileNode))
+            {
+                return profileNode.Name;
+            }
+
+            profileNode = state.Document.Nodes.FirstOrDefault(n => n.Id == edge.To);
             if (profileNode is not null)
             {
                 return profileNode.Name;
@@ -526,23 +568,22 @@ public static class FlowBuilder
 
     private static void AppendHttpClientUsage(
         StringBuilder builder,
+        FlowRenderState state,
         GraphEdge clientEdge,
         GraphNode clientNode,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
         int indent)
     {
         var lineText = clientEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
         AppendIndented(builder, indent, $"uses_client {clientNode.Name}{lineText}");
 
-        if (!edgesByFrom.TryGetValue(clientNode.Id, out var clientEdges))
+        if (!state.EdgesByFrom.TryGetValue(clientNode.Id, out var clientEdges))
         {
             return;
         }
 
         foreach (var callEdge in clientEdges.Where(e => e.Kind == "calls"))
         {
-            if (!nodesById.TryGetValue(callEdge.To, out var targetNode))
+            if (!state.NodesById.TryGetValue(callEdge.To, out var targetNode))
             {
                 continue;
             }
@@ -587,7 +628,129 @@ public static class FlowBuilder
             var detailText = details.Count > 0 ? $" ({string.Join(", ", details)})" : string.Empty;
             var callLineText = callEdge.Transform?.Location?.Line is int callLine ? $" [L{callLine}]" : string.Empty;
             AppendIndented(builder, indent + 1, $"calls {targetNode.Name}{detailText}{callLineText}");
+            AppendTargetServiceFlow(builder, state, callEdge, indent + 2);
         }
+    }
+
+    private static void AppendTargetServiceFlow(StringBuilder builder, FlowRenderState state, GraphEdge callEdge, int indent)
+    {
+        if (state.Workspace is null)
+        {
+            return;
+        }
+
+        if (callEdge.Props is not { } props || !props.TryGetValue("target_service", out var serviceValue))
+        {
+            return;
+        }
+
+        var serviceName = serviceValue?.ToString();
+        if (string.IsNullOrWhiteSpace(serviceName))
+        {
+            return;
+        }
+
+        if (!state.Workspace.TryGetAssemblies(serviceName, out var assemblies) || assemblies.Count == 0)
+        {
+            AppendIndented(builder, indent, $"target_service {serviceName}");
+            return;
+        }
+
+        var assemblySet = assemblies is HashSet<string> set
+            ? set
+            : new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
+
+        var route = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
+        var verb = props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null;
+
+        var candidates = state.Document.Nodes
+            .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api")
+                        && assemblySet.Contains(n.Assembly))
+            .ToList();
+
+        AppendIndented(builder, indent, $"target_service {serviceName}");
+
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        var matched = FilterEndpointsByRouteAndVerb(candidates, route, verb);
+        foreach (var endpoint in matched)
+        {
+            AppendEndpointFlow(builder, state, endpoint, indent + 1);
+        }
+    }
+
+    private static IReadOnlyList<GraphNode> FilterEndpointsByRouteAndVerb(
+        List<GraphNode> candidates,
+        string? route,
+        string? verb)
+    {
+        static bool Matches(string? expected, string? actual)
+            => !string.IsNullOrWhiteSpace(expected) && !string.IsNullOrWhiteSpace(actual)
+               && string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(route) && !string.IsNullOrWhiteSpace(verb))
+        {
+            var both = candidates
+                .Where(n => Matches(route, GetNodeProp(n, "route")) && Matches(verb, GetNodeProp(n, "http_method")))
+                .ToList();
+            if (both.Count > 0)
+            {
+                return both;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(route))
+        {
+            var routeOnly = candidates
+                .Where(n => Matches(route, GetNodeProp(n, "route")))
+                .ToList();
+            if (routeOnly.Count > 0)
+            {
+                return routeOnly;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(verb))
+        {
+            var verbOnly = candidates
+                .Where(n => Matches(verb, GetNodeProp(n, "http_method")))
+                .ToList();
+            if (verbOnly.Count > 0)
+            {
+                return verbOnly;
+            }
+        }
+
+        return candidates;
+    }
+
+    private sealed class FlowRenderState
+    {
+        public FlowRenderState(
+            GraphDocument document,
+            IReadOnlyDictionary<string, GraphNode> nodesById,
+            IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
+            IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
+            FlowWorkspaceIndex? workspace)
+        {
+            Document = document;
+            NodesById = nodesById;
+            EdgesByFrom = edgesByFrom;
+            MapLookup = mapLookup;
+            Workspace = workspace;
+        }
+
+        public GraphDocument Document { get; }
+        public IReadOnlyDictionary<string, GraphNode> NodesById { get; }
+        public IReadOnlyDictionary<string, List<GraphEdge>> EdgesByFrom { get; }
+        public IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> MapLookup { get; }
+        public FlowWorkspaceIndex? Workspace { get; }
+        public HashSet<string> EndpointStack { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> HandlerStack { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> NotificationStack { get; } = new(StringComparer.Ordinal);
     }
 
     private static string? GetNodeProp(GraphNode node, string key)
@@ -624,84 +787,61 @@ public static class FlowBuilder
 
     private static void AppendNotificationFlow(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphNode notification,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
-        int indent,
-        HashSet<string>? visitedNotifications = null,
-        HashSet<string>? visitedHandlers = null)
+        int indent)
     {
-        visitedNotifications ??= new HashSet<string>(StringComparer.Ordinal);
-        if (!visitedNotifications.Add(notification.Id))
+        if (!state.NotificationStack.Add(notification.Id))
         {
-            return;
-        }
-
-        if (!edgesByFrom.TryGetValue(notification.Id, out var edges))
-        {
-            visitedNotifications.Remove(notification.Id);
             return;
         }
 
         try
         {
+            if (!state.EdgesByFrom.TryGetValue(notification.Id, out var edges))
+            {
+                return;
+            }
+
             foreach (var handlerEdge in edges.Where(e => e.Kind == "handled_by"))
             {
-                if (!nodesById.TryGetValue(handlerEdge.To, out var handlerNode))
+                if (!state.NodesById.TryGetValue(handlerEdge.To, out var handlerNode))
                 {
                     continue;
                 }
 
                 var span = handlerNode.Span;
                 AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
-                AppendNotificationHandlerFlow(
-                    builder,
-                    document,
-                    handlerNode,
-                    nodesById,
-                    edgesByFrom,
-                    mapLookup,
-                    indent + 1,
-                    visitedNotifications,
-                    visitedHandlers);
+                AppendNotificationHandlerFlow(builder, state, handlerNode, indent + 1);
             }
         }
         finally
         {
-            visitedNotifications.Remove(notification.Id);
+            state.NotificationStack.Remove(notification.Id);
         }
     }
 
     private static void AppendNotificationHandlerFlow(
         StringBuilder builder,
-        GraphDocument document,
+        FlowRenderState state,
         GraphNode handler,
-        IReadOnlyDictionary<string, GraphNode> nodesById,
-        IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-        IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
-        int indent,
-        HashSet<string> visitedNotifications,
-        HashSet<string>? visitedHandlers = null)
+        int indent)
     {
-        visitedHandlers ??= new HashSet<string>(StringComparer.Ordinal);
-        if (!visitedHandlers.Add(handler.Id))
+        if (!state.HandlerStack.Add(handler.Id))
         {
-            return;
-        }
-
-        if (!edgesByFrom.TryGetValue(handler.Id, out var edges))
-        {
-            visitedHandlers.Remove(handler.Id);
             return;
         }
 
         try
         {
+            if (!state.EdgesByFrom.TryGetValue(handler.Id, out var edges))
+            {
+                return;
+            }
+
             foreach (var call in edges.Where(e => e.Kind == "calls"))
             {
-                if (!nodesById.TryGetValue(call.To, out var target))
+                if (!state.NodesById.TryGetValue(call.To, out var target))
                 {
                     continue;
                 }
@@ -712,17 +852,17 @@ public static class FlowBuilder
                 var methodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
                 var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 AppendIndented(builder, indent, $"calls {target.Name}{methodText}{lineText}");
-                AppendRepositoryFlow(builder, document, target, nodesById, edgesByFrom, mapLookup, indent + 1);
+                AppendRepositoryFlow(builder, state, target, indent + 1);
             }
 
             foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
             {
-                AppendMappingEdge(builder, document, mapping, nodesById, edgesByFrom, mapLookup, indent);
+                AppendMappingEdge(builder, state, mapping, indent);
             }
 
             foreach (var service in edges.Where(e => e.Kind == "uses_service"))
             {
-                if (!nodesById.TryGetValue(service.To, out var serviceNode))
+                if (!state.NodesById.TryGetValue(service.To, out var serviceNode))
                 {
                     continue;
                 }
@@ -737,40 +877,80 @@ public static class FlowBuilder
 
             foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
             {
-                if (!nodesById.TryGetValue(requestEdge.To, out var requestNode))
+                if (!state.NodesById.TryGetValue(requestEdge.To, out var requestNode))
                 {
                     continue;
                 }
 
                 var lineText = requestEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 AppendIndented(builder, indent, $"sends_request {requestNode.Name}{lineText}");
-                AppendCommandFlow(builder, document, requestNode, nodesById, edgesByFrom, mapLookup, indent + 1);
+                AppendCommandFlow(builder, state, requestNode, indent + 1);
             }
 
             foreach (var publish in edges.Where(e => e.Kind == "publishes_notification"))
             {
-                if (!nodesById.TryGetValue(publish.To, out var notificationNode))
+                if (!state.NodesById.TryGetValue(publish.To, out var notificationNode))
                 {
                     continue;
                 }
 
                 var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
-                AppendNotificationFlow(
-                    builder,
-                    document,
-                    notificationNode,
-                    nodesById,
-                    edgesByFrom,
-                    mapLookup,
-                    indent + 1,
-                    visitedNotifications,
-                    visitedHandlers);
+                AppendNotificationFlow(builder, state, notificationNode, indent + 1);
             }
         }
         finally
         {
-            visitedHandlers.Remove(handler.Id);
+            state.HandlerStack.Remove(handler.Id);
         }
+    }
+
+    private static void AppendPublisherFlow(
+        StringBuilder builder,
+        FlowRenderState state,
+        GraphNode publisher,
+        int indent)
+    {
+        if (!state.EdgesByFrom.TryGetValue(publisher.Id, out var edges))
+        {
+            return;
+        }
+
+        foreach (var produced in edges.Where(e => e.Kind == "produces_event"))
+        {
+            if (!state.NodesById.TryGetValue(produced.To, out var contract))
+            {
+                continue;
+            }
+
+            var lineText = produced.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+            AppendIndented(builder, indent, $"produces_event {contract.Name}{lineText}");
+        }
+    }
+
+    private static string BuildPublisherDetails(GraphNode publisher)
+    {
+        if (publisher.Props is not { Count: > 0 })
+        {
+            return string.Empty;
+        }
+
+        var details = new List<string>();
+
+        if (publisher.Props.TryGetValue("queue", out var queueValue) &&
+            queueValue is string { Length: > 0 } queue)
+        {
+            details.Add($"queue={queue}");
+        }
+
+        if (publisher.Props.TryGetValue("subject", out var subjectValue) &&
+            subjectValue is string { Length: > 0 } subject)
+        {
+            details.Add($"subject={subject}");
+        }
+
+        return details.Count > 0
+            ? $" ({string.Join(", ", details)})"
+            : string.Empty;
     }
 }
