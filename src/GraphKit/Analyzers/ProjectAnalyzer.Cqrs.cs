@@ -61,24 +61,33 @@ public sealed partial class ProjectAnalyzer
             {
                 if (memberAccess.Expression is IdentifierNameSyntax identifier)
                 {
-                    var fieldName = identifier.Identifier.Text.TrimStart('_');
-                    if (fieldLookup.TryGetValue(fieldName, out var descriptor))
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    var typeName = descriptor.Type;
+                    var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                    var invocation = memberAccess.Parent as InvocationExpressionSyntax;
+                    if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
                     {
-                        var typeName = descriptor.Type;
-                        var resolvedType = ResolveImplementationType(typeName) ?? typeName;
-                        if (IsCacheService(resolvedType) || IsCacheService(typeName))
+                        if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
                         {
-                            var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
-                            if (TryCaptureCacheInvocation(memberAccess, memberAccess.Parent as InvocationExpressionSyntax, cacheType, tree) is { } cacheInvocation)
-                            {
-                                handlerInfo.CacheInvocations.Add(cacheInvocation);
-                            }
-                            continue;
+                            handlerInfo.ConfigurationUsages.Add(configurationUsage);
                         }
 
-                        var invocation = memberAccess.Parent as InvocationExpressionSyntax;
-                        var invocationLineNode = (SyntaxNode?)invocation ?? memberAccess;
-                        var line = GetLineNumber(tree, invocationLineNode);
+                        continue;
+                    }
+                    if (IsCacheService(resolvedType) || IsCacheService(typeName))
+                    {
+                        var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
+                        if (TryCaptureCacheInvocation(memberAccess, invocation, cacheType, tree) is { } cacheInvocation)
+                        {
+                            handlerInfo.CacheInvocations.Add(cacheInvocation);
+                        }
+                        continue;
+                    }
+
+                    var invocationLineNode = (SyntaxNode?)invocation ?? memberAccess;
+                    var line = GetLineNumber(tree, invocationLineNode);
                         var methodName = GetMemberName(memberAccess.Name);
                         var recordedUsage = false;
 
@@ -165,6 +174,31 @@ public sealed partial class ProjectAnalyzer
                             handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                         }
                     }
+                }
+            }
+
+            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            {
+                if (elementAccess.Expression is not IdentifierNameSyntax identifier)
+                {
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
+                {
+                    continue;
+                }
+
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                {
+                    handlerInfo.ConfigurationUsages.Add(configurationUsage);
                 }
             }
 
@@ -456,6 +490,8 @@ public sealed partial class ProjectAnalyzer
                     Evidence = CreateEvidence(handler.FilePath, optionsUsage.Line)
                 });
             }
+
+            EmitConfigurationEdges(id, handler.ConfigurationUsages);
 
             foreach (var notification in handler.PublishedNotifications)
             {

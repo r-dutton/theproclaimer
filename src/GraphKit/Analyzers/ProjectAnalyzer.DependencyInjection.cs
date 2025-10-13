@@ -173,6 +173,18 @@ public sealed partial class ProjectAnalyzer
 
             if (!IsServiceRegistrationMethod(methodName))
             {
+                if (string.Equals(methodName, "AddHostedService", StringComparison.Ordinal) &&
+                    TryRegisterHostedService(project, tree, invocation, memberAccess))
+                {
+                    continue;
+                }
+
+                if (IsDbContextRegistrationMethod(methodName) &&
+                    TryRegisterDbContext(project, tree, invocation, memberAccess, methodName))
+                {
+                    continue;
+                }
+
                 if (string.Equals(methodName, "RegisterType", StringComparison.Ordinal) &&
                     TryCaptureAutofacRegistration(project, tree, invocation, out var autofacRegistrations))
                 {
@@ -301,6 +313,77 @@ public sealed partial class ProjectAnalyzer
 
     private static bool IsServiceRegistrationMethod(string methodName)
         => methodName is "AddScoped" or "AddSingleton" or "AddTransient";
+
+    private static bool IsDbContextRegistrationMethod(string methodName)
+        => methodName is "AddDbContext" or "AddDbContextPool" or "AddDbContextFactory" or "AddPooledDbContextFactory";
+
+    private bool TryRegisterHostedService(ProjectInfo project, SyntaxTree tree, InvocationExpressionSyntax invocation, MemberAccessExpressionSyntax memberAccess)
+    {
+        if (memberAccess.Name is not GenericNameSyntax generic || generic.TypeArgumentList.Arguments.Count == 0)
+        {
+            return false;
+        }
+
+        var hostedType = generic.TypeArgumentList.Arguments[0].ToString();
+        if (string.IsNullOrWhiteSpace(hostedType))
+        {
+            return false;
+        }
+
+        var span = ToGraphSpan(tree, invocation);
+        var filePath = GetRelativePath(tree.FilePath);
+        RegisterServiceRegistration(hostedType, hostedType, "Hosted", filePath, span, project);
+        return true;
+    }
+
+    private bool TryRegisterDbContext(ProjectInfo project, SyntaxTree tree, InvocationExpressionSyntax invocation, MemberAccessExpressionSyntax memberAccess, string methodName)
+    {
+        if (memberAccess.Name is not GenericNameSyntax generic || generic.TypeArgumentList.Arguments.Count == 0)
+        {
+            return false;
+        }
+
+        var contextType = generic.TypeArgumentList.Arguments[0].ToString();
+        if (string.IsNullOrWhiteSpace(contextType))
+        {
+            return false;
+        }
+
+        var implementationType = generic.TypeArgumentList.Arguments.Count > 1
+            ? generic.TypeArgumentList.Arguments[1].ToString()
+            : contextType;
+
+        var span = ToGraphSpan(tree, invocation);
+        var filePath = GetRelativePath(tree.FilePath);
+        var lifetime = methodName switch
+        {
+            "AddDbContextFactory" => "Singleton",
+            "AddPooledDbContextFactory" => "Singleton",
+            _ => "Scoped"
+        };
+
+        RegisterServiceRegistration(contextType, implementationType, lifetime, filePath, span, project);
+
+        if (methodName is "AddDbContextFactory" or "AddPooledDbContextFactory")
+        {
+            var factoryType = $"IDbContextFactory<{contextType}>";
+            RegisterServiceRegistration(factoryType, factoryType, "Singleton", filePath, span, project);
+        }
+
+        return true;
+    }
+
+    private void RegisterServiceRegistration(string serviceType, string implementationType, string lifetime, string filePath, GraphSpan span, ProjectInfo project)
+    {
+        var registration = new ServiceRegistrationInfo(serviceType, implementationType, lifetime, filePath, span, project.AssemblyName, project.RelativeDirectory);
+        AddServiceRegistration(serviceType, registration);
+
+        var simple = serviceType.Split('.').Last();
+        if (!string.Equals(simple, serviceType, StringComparison.Ordinal))
+        {
+            AddServiceRegistration(simple, registration);
+        }
+    }
 
     private bool TryCaptureAutofacRegistration(ProjectInfo project, SyntaxTree tree, InvocationExpressionSyntax registerInvocation, out List<ServiceRegistrationInfo> registrations)
     {
