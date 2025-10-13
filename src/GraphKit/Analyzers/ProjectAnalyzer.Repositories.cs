@@ -46,18 +46,52 @@ public sealed partial class ProjectAnalyzer
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax identifier } access &&
-                    fieldLookup.TryGetValue(identifier.Identifier.Text.TrimStart('_'), out var descriptor) &&
-                    descriptor.Type.Contains("IMapper", StringComparison.Ordinal))
+                    fieldLookup.TryGetValue(identifier.Identifier.Text.TrimStart('_'), out var descriptor))
                 {
-                    if (access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
+                    var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                    if (IsConfigurationType(resolvedType) || IsConfigurationType(descriptor.Type))
                     {
-                        var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                        var sourceExpression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
-                        var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
-                            ? resolved
-                            : null;
-                        var line = GetLineNumber(tree, invocation);
-                        repository.MapperCalls.Add(new RepositoryMapperCall(sourceType, destination, line));
+                        if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                        {
+                            repository.ConfigurationUsages.Add(configurationUsage);
+                        }
+
+                        continue;
+                    }
+
+                    if (descriptor.Type.Contains("IMapper", StringComparison.Ordinal))
+                    {
+                        if (access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
+                        {
+                            var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                            var sourceExpression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
+                            var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
+                                ? resolved
+                                : null;
+                            var line = GetLineNumber(tree, invocation);
+                            repository.MapperCalls.Add(new RepositoryMapperCall(sourceType, destination, line));
+                        }
+                    }
+                    else
+                    {
+                        var cacheType = resolvedType;
+                        if (IsCacheService(cacheType) || IsCacheService(descriptor.Type))
+                        {
+                            var resolvedCacheType = IsCacheService(cacheType) ? cacheType : descriptor.Type;
+                            if (TryCaptureCacheInvocation(access, invocation, resolvedCacheType, tree) is { } cacheInvocation)
+                            {
+                                repository.CacheInvocations.Add(cacheInvocation);
+                            }
+
+                            continue;
+                        }
+
+                        if (TryResolveOptionsType(cacheType) is { } optionsType)
+                        {
+                            var line = GetLineNumber(tree, access);
+                            repository.OptionsUsages.Add(new OptionsUsage(optionsType, line));
+                            continue;
+                        }
                     }
                 }
                 else if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
@@ -83,27 +117,6 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
                 }
-                else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax cacheIdentifier } cacheAccess &&
-                    fieldLookup.TryGetValue(cacheIdentifier.Identifier.Text.TrimStart('_'), out var cacheDescriptor))
-                {
-                    var cacheType = ResolveImplementationType(cacheDescriptor.Type) ?? cacheDescriptor.Type;
-                    if (IsCacheService(cacheType) || IsCacheService(cacheDescriptor.Type))
-                    {
-                        if (TryCaptureCacheInvocation(cacheAccess, invocation, IsCacheService(cacheType) ? cacheType : cacheDescriptor.Type, tree) is { } cacheInvocation)
-                        {
-                            repository.CacheInvocations.Add(cacheInvocation);
-                        }
-
-                        continue;
-                    }
-
-                    if (TryResolveOptionsType(cacheType) is { } optionsType)
-                    {
-                        var line = GetLineNumber(tree, cacheAccess);
-                        repository.OptionsUsages.Add(new OptionsUsage(optionsType, line));
-                        continue;
-                    }
-                }
                 else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax inner, Name.Identifier.Text: var methodName } &&
                     inner.Expression is IdentifierNameSyntax dbIdentifier &&
                     fieldLookup.TryGetValue(dbIdentifier.Identifier.Text.TrimStart('_'), out var dbType) &&
@@ -119,6 +132,31 @@ public sealed partial class ProjectAnalyzer
                 {
                     var line = GetLineNumber(tree, invocation);
                     repository.DbAccesses.Add(new RepositoryDbAccess(contextIdentifier.Identifier.Text, contextMethod, line));
+                }
+            }
+
+            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            {
+                if (elementAccess.Expression is not IdentifierNameSyntax identifier)
+                {
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
+                {
+                    continue;
+                }
+
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                {
+                    repository.ConfigurationUsages.Add(configurationUsage);
                 }
             }
         }
@@ -299,6 +337,8 @@ public sealed partial class ProjectAnalyzer
                     Evidence = CreateEvidence(repository.FilePath, optionsUsage.Line)
                 });
             }
+
+            EmitConfigurationEdges(id, repository.ConfigurationUsages);
         }
     }
 

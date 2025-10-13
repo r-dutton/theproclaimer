@@ -26,11 +26,11 @@ public sealed partial class ProjectAnalyzer
             info.ServiceUsages.Add(new ServiceUsage(descriptor.Type, descriptor.Line));
         }
 
-        foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
-        {
-            foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
             {
-                if (memberAccess.Expression is not IdentifierNameSyntax identifier)
+                foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+                {
+                    if (memberAccess.Expression is not IdentifierNameSyntax identifier)
                 {
                     continue;
                 }
@@ -42,10 +42,21 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var typeName = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                var invocation = memberAccess.Parent as InvocationExpressionSyntax;
+                if (IsConfigurationType(typeName) || IsConfigurationType(descriptor.Type))
+                {
+                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, typeName ?? descriptor.Type, tree) is { } configurationUsage)
+                    {
+                        info.ConfigurationUsages.Add(configurationUsage);
+                    }
+
+                    continue;
+                }
+
                 if (IsCacheService(typeName) || IsCacheService(descriptor.Type))
                 {
                     var cacheType = IsCacheService(typeName) ? typeName : descriptor.Type;
-                    if (TryCaptureCacheInvocation(memberAccess, memberAccess.Parent as InvocationExpressionSyntax, cacheType, tree) is { } cacheInvocation)
+                    if (TryCaptureCacheInvocation(memberAccess, invocation, cacheType, tree) is { } cacheInvocation)
                     {
                         info.CacheInvocations.Add(cacheInvocation);
                     }
@@ -63,6 +74,31 @@ public sealed partial class ProjectAnalyzer
                 {
                     var line = GetLineNumber(tree, memberAccess);
                     info.RepositoryCalls.Add(new BackgroundServiceRepositoryCall(typeName, memberAccess.Name.Identifier.Text, line));
+                }
+            }
+
+            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            {
+                if (elementAccess.Expression is not IdentifierNameSyntax identifier)
+                {
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
+                {
+                    continue;
+                }
+
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                {
+                    info.ConfigurationUsages.Add(configurationUsage);
                 }
             }
         }
@@ -185,6 +221,8 @@ public sealed partial class ProjectAnalyzer
                     Evidence = CreateEvidence(service.FilePath, optionsUsage.Line)
                 });
             }
+
+            EmitConfigurationEdges(id, service.ConfigurationUsages);
 
             foreach (var call in service.RepositoryCalls)
             {
