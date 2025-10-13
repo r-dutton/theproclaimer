@@ -1,15 +1,18 @@
 using System.Text.Json;
 using System.Xml.Linq;
+using System.Linq;
 
 namespace GraphKit.Workspace;
 
 public sealed class WorkspaceLoader
 {
     private readonly string _workspaceRoot;
+    private readonly IReadOnlyList<string>? _explicitSolutions;
 
-    public WorkspaceLoader(string workspaceRoot)
+    public WorkspaceLoader(string workspaceRoot, IReadOnlyList<string>? explicitSolutions = null)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
+        _explicitSolutions = explicitSolutions;
     }
 
     public async Task<IReadOnlyList<ProjectInfo>> LoadAsync(CancellationToken cancellationToken = default)
@@ -17,7 +20,28 @@ public sealed class WorkspaceLoader
         var configPath = Path.Combine(_workspaceRoot, "flow.workspace.json");
         var solutionPaths = new List<string>();
 
-        if (File.Exists(configPath))
+        if (_explicitSolutions is { Count: > 0 })
+        {
+            foreach (var candidate in _explicitSolutions)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    continue;
+                }
+
+                var path = Path.GetFullPath(Path.IsPathRooted(candidate)
+                    ? candidate
+                    : Path.Combine(_workspaceRoot, candidate));
+
+                if (!File.Exists(path))
+                {
+                    throw new FileNotFoundException($"Solution '{candidate}' could not be resolved relative to '{_workspaceRoot}'.", path);
+                }
+
+                solutionPaths.Add(path);
+            }
+        }
+        else if (File.Exists(configPath))
         {
             using var stream = File.OpenRead(configPath);
             var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -41,7 +65,7 @@ public sealed class WorkspaceLoader
         }
 
         var projectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var solutionPath in solutionPaths)
+        foreach (var solutionPath in solutionPaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             foreach (var line in await File.ReadAllLinesAsync(solutionPath, cancellationToken))
             {

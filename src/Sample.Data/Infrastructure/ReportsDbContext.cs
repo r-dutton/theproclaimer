@@ -12,6 +12,7 @@ public class ReportsDbContext : DbContext
     }
 
     public DbSet<Report> Reports => Set<Report>();
+    public DbSet<ReportAudit> ReportAudits => Set<ReportAudit>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

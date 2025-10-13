@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace GraphKit.Analyzers;
 
@@ -35,6 +37,20 @@ public sealed partial class ProjectAnalyzer
         {
             var id = StableId.For("cqrs.request", requestFallback.Fqdn, requestFallback.Assembly, requestFallback.SymbolId);
             reference = new NodeReference(id, requestFallback.FilePath, requestFallback.Span);
+            return true;
+        }
+
+        if (_notifications.TryGetValue(typeName, out var notification))
+        {
+            var id = StableId.For("cqrs.notification", notification.Fqdn, notification.Assembly, notification.SymbolId);
+            reference = new NodeReference(id, notification.FilePath, notification.Span);
+            return true;
+        }
+
+        if (_notifications.Values.FirstOrDefault(n => n.Name.Equals(simple, StringComparison.Ordinal)) is { } notificationFallback)
+        {
+            var id = StableId.For("cqrs.notification", notificationFallback.Fqdn, notificationFallback.Assembly, notificationFallback.SymbolId);
+            reference = new NodeReference(id, notificationFallback.FilePath, notificationFallback.Span);
             return true;
         }
 
@@ -117,9 +133,60 @@ public sealed partial class ProjectAnalyzer
             r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
     }
 
+    private NotificationInfo? FindNotificationByType(string notificationType)
+    {
+        if (_notifications.TryGetValue(notificationType, out var notification))
+        {
+            return notification;
+        }
+
+        var simple = notificationType.Split('.').Last();
+
+        return _notifications.Values.FirstOrDefault(n =>
+            n.Fqdn.Equals(notificationType, StringComparison.OrdinalIgnoreCase) ||
+            n.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
+    }
+
     private string? ResolveImplementationType(string typeName)
     {
         var registration = FindServiceRegistration(typeName);
         return registration?.ImplementationType;
+    }
+
+    private static string? TryResolveExpressionType(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables)
+    {
+        if (expression is IdentifierNameSyntax identifier)
+        {
+            if (localVariables.TryGetValue(identifier.Identifier.Text, out var localType) && !string.Equals(localType, "var", StringComparison.OrdinalIgnoreCase))
+            {
+                return localType;
+            }
+
+            if (parameterTypes.TryGetValue(identifier.Identifier.Text, out var parameterType) && !string.IsNullOrWhiteSpace(parameterType))
+            {
+                return parameterType;
+            }
+        }
+
+        if (expression is ObjectCreationExpressionSyntax creation)
+        {
+            return creation.Type.ToString();
+        }
+
+        return null;
+    }
+
+    private static bool IsOptionsDeclaration(TypeDeclarationSyntax declaration)
+    {
+        if (declaration.Identifier.Text.EndsWith("Options", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return declaration.Members.OfType<FieldDeclarationSyntax>().Any(field =>
+            field.Modifiers.Any(m => m.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ConstKeyword)) &&
+            field.Declaration.Type.ToString().Equals("string", StringComparison.OrdinalIgnoreCase) &&
+            field.Declaration.Variables.Any(variable =>
+                variable.Identifier.Text.Equals("SectionName", StringComparison.OrdinalIgnoreCase)));
     }
 }

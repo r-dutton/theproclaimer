@@ -34,6 +34,11 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, string> _clientTargetServices = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _baseUrlServiceAliases = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentBag<ControllerActionInfo>> _controllerRoutes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, NotificationInfo> _notifications = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, NotificationHandlerInfo> _notificationHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, BackgroundServiceInfo> _backgroundServices = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, OptionsInfo> _options = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CacheInfo> _caches = new(StringComparer.OrdinalIgnoreCase);
 
     public ProjectAnalyzer(string workspaceRoot)
     {
@@ -73,7 +78,10 @@ public sealed partial class ProjectAnalyzer
         PromoteDerivedRequests();
 
         EmitRequests();
+        EmitNotifications();
+        EmitOptions();
         EmitHandlers();
+        EmitNotificationHandlers();
         EmitRepositories();
         EmitControllers();
         EmitMinimalEndpoints();
@@ -85,6 +93,7 @@ public sealed partial class ProjectAnalyzer
         EmitPublishers();
         EmitServiceRegistrations();
         EmitHttpCalls();
+        EmitBackgroundServices();
 
         var nodes = _nodes.Values
             .OrderBy(node => node.Id, StringComparer.Ordinal)

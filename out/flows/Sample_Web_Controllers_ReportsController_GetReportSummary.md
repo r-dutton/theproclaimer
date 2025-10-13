@@ -1,0 +1,5 @@
+[web] GET /api/reports/{id:guid}/summary  (Sample.Web.Controllers.ReportsController.GetReportSummary)  [L37–L47]
+  └─ uses_client ReportsClient [L40]
+    └─ calls GetDetails (GET /api/v2/reports/{*}/details, base=https://localhost:6001, config=Downstream:Reports:BaseUrl, target=ReportsApi) [L30]
+    └─ calls MapGet (GET /api/reports/{*}, base=https://localhost:6001, config=Downstream:Reports:BaseUrl, target=ReportsApi) [L17]
+    └─ calls MapPost (POST /api/reports/search, base=https://localhost:6001, config=Downstream:Reports:BaseUrl, target=ReportsApi) [L22]

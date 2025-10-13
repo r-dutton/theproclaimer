@@ -42,6 +42,23 @@ public sealed partial class ProjectAnalyzer
                 .Where(p => !string.IsNullOrWhiteSpace(p.Identifier.Text))
                 .ToDictionary(p => p.Identifier.Text, p => p.Type?.ToString(), StringComparer.OrdinalIgnoreCase);
 
+            var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            {
+                var declaredType = local.Declaration.Type.ToString();
+                foreach (var variable in local.Declaration.Variables)
+                {
+                    var resolvedType = declaredType;
+                    if (string.Equals(resolvedType, "var", StringComparison.OrdinalIgnoreCase) &&
+                        variable.Initializer?.Value is ObjectCreationExpressionSyntax creation)
+                    {
+                        resolvedType = creation.Type.ToString();
+                    }
+
+                    localVariables[variable.Identifier.Text] = resolvedType;
+                }
+            }
+
             foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
             {
                 if (memberAccess.Expression is IdentifierNameSyntax identifier)
@@ -51,6 +68,27 @@ public sealed partial class ProjectAnalyzer
                     {
                         var typeName = descriptor.Type;
                         var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                        if (IsCacheService(resolvedType) || IsCacheService(typeName))
+                        {
+                            var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
+                            if (TryCaptureCacheInvocation(memberAccess, memberAccess.Parent as InvocationExpressionSyntax, cacheType, tree) is { } cacheInvocation)
+                            {
+                                handlerInfo.CacheInvocations.Add(cacheInvocation);
+                            }
+                            continue;
+                        }
+
+                        if (TryResolveOptionsType(resolvedType) is { } resolvedOptionsType)
+                        {
+                            var line = GetLineNumber(tree, memberAccess);
+                            handlerInfo.OptionsUsages.Add(new OptionsUsage(resolvedOptionsType, line));
+                        }
+                        else if (TryResolveOptionsType(typeName) is { } fieldOptionsType)
+                        {
+                            var line = GetLineNumber(tree, memberAccess);
+                            handlerInfo.OptionsUsages.Add(new OptionsUsage(fieldOptionsType, line));
+                        }
+
                         if (typeName.Contains("DbContext", StringComparison.Ordinal))
                         {
                             var accessedMember = memberAccess.Name.Identifier.Text;
@@ -59,8 +97,21 @@ public sealed partial class ProjectAnalyzer
                         }
                         else if (typeName.Contains("Publisher", StringComparison.Ordinal))
                         {
-                            var line = GetLineNumber(tree, memberAccess);
-                            handlerInfo.PublisherCalls.Add(new HandlerPublisherCall(typeName, memberAccess.Name.Identifier.Text, line));
+                            var invocation = memberAccess.Parent as InvocationExpressionSyntax;
+                            var line = GetLineNumber(tree, invocation ?? memberAccess);
+                            string? messageType = null;
+                            if (invocation is not null)
+                            {
+                                var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                                messageType = argument switch
+                                {
+                                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                                    _ => null
+                                };
+                            }
+
+                            handlerInfo.PublisherCalls.Add(new HandlerPublisherCall(typeName, memberAccess.Name.Identifier.Text, line, messageType));
                         }
                         else if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
                         {
@@ -78,6 +129,26 @@ public sealed partial class ProjectAnalyzer
                                 : null;
                             var line = GetLineNumber(tree, memberAccess);
                             handlerInfo.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
+                        }
+                        else if (typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal))
+                        {
+                            if (memberAccess.Parent is InvocationExpressionSyntax invocation &&
+                                memberAccess.Name.Identifier.Text.StartsWith("Publish", StringComparison.Ordinal))
+                            {
+                                var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                                var notificationType = argument switch
+                                {
+                                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                                    _ => null
+                                };
+
+                                if (!string.IsNullOrWhiteSpace(notificationType))
+                                {
+                                    var line = GetLineNumber(tree, invocation);
+                                    handlerInfo.PublishedNotifications.Add(new HandlerNotificationPublication(notificationType!, line));
+                                }
+                            }
                         }
                     }
                 }
@@ -264,6 +335,92 @@ public sealed partial class ProjectAnalyzer
                     },
                     Props = props,
                     Evidence = CreateEvidence(handler.FilePath, usage.Line)
+                });
+            }
+
+            foreach (var cache in handler.CacheInvocations)
+            {
+                var cacheId = EnsureCacheNode(cache.CacheType);
+                var props = new Dictionary<string, object>
+                {
+                    ["method"] = cache.Method,
+                    ["operation"] = cache.Operation
+                };
+
+                if (!string.IsNullOrWhiteSpace(cache.Key))
+                {
+                    props["key"] = cache.Key!;
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = cacheId,
+                    Kind = "uses_cache",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "cache.operation",
+                        Location = new GraphLocation { File = handler.FilePath, Line = cache.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(handler.FilePath, cache.Line)
+                });
+            }
+
+            foreach (var optionsUsage in handler.OptionsUsages)
+            {
+                var optionsId = EnsureOptionsNode(optionsUsage.OptionsType);
+                if (optionsId is null)
+                {
+                    continue;
+                }
+
+                var props = new Dictionary<string, object>
+                {
+                    ["options_type"] = optionsUsage.OptionsType
+                };
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = optionsId,
+                    Kind = "uses_options",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "options.access",
+                        Location = new GraphLocation { File = handler.FilePath, Line = optionsUsage.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(handler.FilePath, optionsUsage.Line)
+                });
+            }
+
+            foreach (var notification in handler.PublishedNotifications)
+            {
+                var notificationInfo = FindNotificationByType(notification.NotificationType);
+                if (notificationInfo is null)
+                {
+                    continue;
+                }
+
+                var notificationId = StableId.For("cqrs.notification", notificationInfo.Fqdn, notificationInfo.Assembly, notificationInfo.SymbolId);
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = notificationId,
+                    Kind = "publishes_notification",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "mediatr.publish",
+                        Location = new GraphLocation { File = handler.FilePath, Line = notification.Line }
+                    },
+                    Evidence = CreateEvidence(handler.FilePath, notification.Line)
                 });
             }
         }

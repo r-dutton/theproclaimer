@@ -60,9 +60,19 @@ public sealed partial class ProjectAnalyzer
             _messageContracts[fqdn] = new MessageContractInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, classDeclaration.Identifier.Text);
         }
 
+        if (IsOptionsDeclaration(classDeclaration))
+        {
+            RegisterOptions(project, tree, classDeclaration, namespaceName);
+        }
+
+        if (ImplementsInterface(classDeclaration, "INotification"))
+        {
+            RegisterNotification(project, tree, classDeclaration, namespaceName);
+        }
+
         if (IsPublisher(classDeclaration, fieldTypes))
         {
-            _publishers[fqdn] = new PublisherInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, classDeclaration.Identifier.Text, fieldTypes);
+            AnalyzePublisher(project, tree, classDeclaration, namespaceName, fieldTypes);
         }
 
         if (IsController(classDeclaration))
@@ -79,6 +89,11 @@ public sealed partial class ProjectAnalyzer
         if (ImplementsInterface(classDeclaration, "IRequestHandler"))
         {
             AnalyzeHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
+        }
+
+        if (ImplementsInterface(classDeclaration, "INotificationHandler"))
+        {
+            AnalyzeNotificationHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
         }
 
         if (IsRepository(classDeclaration))
@@ -104,6 +119,11 @@ public sealed partial class ProjectAnalyzer
         if (IsEntity(classDeclaration))
         {
             AnalyzeEntity(project, tree, classDeclaration, namespaceName);
+        }
+
+        if (IsBackgroundService(classDeclaration))
+        {
+            AnalyzeBackgroundService(project, tree, classDeclaration, namespaceName, fieldTypes);
         }
 
         if (IsMinimalApiContainer(classDeclaration, tree.FilePath))
@@ -133,6 +153,16 @@ public sealed partial class ProjectAnalyzer
             {
                 _derivedRequestCandidates.Add(new DerivedRequestCandidate(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, recordName, baseTypeName));
             }
+        }
+
+        if (ImplementsInterface(recordDeclaration, "INotification"))
+        {
+            RegisterNotification(project, tree, recordDeclaration, namespaceName);
+        }
+
+        if (IsOptionsDeclaration(recordDeclaration))
+        {
+            RegisterOptions(project, tree, recordDeclaration, namespaceName);
         }
 
         if (recordDeclaration.Modifiers.Any(m => m.Text == "public") && tree.FilePath.Contains("Dtos", StringComparison.OrdinalIgnoreCase))
@@ -229,6 +259,10 @@ public sealed partial class ProjectAnalyzer
 
         return fieldTypes.Values.Any(v => v.Type.Contains("ServiceBus", StringComparison.Ordinal));
     }
+
+    private static bool IsBackgroundService(ClassDeclarationSyntax classDeclaration)
+        => ExtendsType(classDeclaration, "BackgroundService")
+            || classDeclaration.BaseList?.Types.Any(t => t.Type.ToString().EndsWith("IHostedService", StringComparison.Ordinal)) == true;
 
     private static bool IsRepository(ClassDeclarationSyntax classDeclaration)
         => classDeclaration.Identifier.Text.EndsWith("Repository", StringComparison.Ordinal);
