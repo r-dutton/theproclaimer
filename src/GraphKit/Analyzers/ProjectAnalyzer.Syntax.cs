@@ -60,6 +60,20 @@ public sealed partial class ProjectAnalyzer
             _messageContracts[fqdn] = new MessageContractInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, classDeclaration.Identifier.Text);
         }
 
+        if (ImplementsInterface(classDeclaration, "IRequest") || ImplementsInterface(classDeclaration, "IAsyncRequest"))
+        {
+            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
+            _requests[fqdn] = requestInfo;
+        }
+        else if (classDeclaration.BaseList is { Types.Count: > 0 })
+        {
+            var baseTypeName = classDeclaration.BaseList.Types.First().Type.ToString();
+            if (IsLikelyRequestName(baseTypeName))
+            {
+                _derivedRequestCandidates.Add(new DerivedRequestCandidate(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, baseTypeName));
+            }
+        }
+
         if (IsOptionsDeclaration(classDeclaration))
         {
             RegisterOptions(project, tree, classDeclaration, namespaceName);
@@ -86,7 +100,7 @@ public sealed partial class ProjectAnalyzer
             AnalyzeValidator(project, tree, classDeclaration, namespaceName);
         }
 
-        if (ImplementsInterface(classDeclaration, "IRequestHandler"))
+        if (ImplementsInterface(classDeclaration, "IRequestHandler") || ImplementsInterface(classDeclaration, "IAsyncRequestHandler"))
         {
             AnalyzeHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
         }
@@ -129,6 +143,14 @@ public sealed partial class ProjectAnalyzer
         if (IsMinimalApiContainer(classDeclaration, tree.FilePath))
         {
             AnalyzeMinimalApiFromClass(project, tree, classDeclaration, namespaceName);
+        }
+
+        if (classDeclaration.Modifiers.Any(m => m.Text == "public") &&
+            (tree.FilePath.Contains("Dtos", StringComparison.OrdinalIgnoreCase) ||
+             className.EndsWith("Dto", StringComparison.Ordinal) ||
+             className.Contains(".Dtos.", StringComparison.Ordinal)))
+        {
+            _dtos[fqdn] = new DtoInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
         }
     }
 
@@ -216,7 +238,35 @@ public sealed partial class ProjectAnalyzer
         => classDeclaration.BaseList?.Types.Any(t => t.Type is GenericNameSyntax generic && generic.Identifier.Text == "AbstractValidator") == true;
 
     private static bool ImplementsInterface(TypeDeclarationSyntax typeDeclaration, string interfaceName)
-        => typeDeclaration.BaseList?.Types.Any(t => t.Type.ToString().StartsWith(interfaceName, StringComparison.Ordinal)) == true;
+    {
+        if (typeDeclaration.BaseList is not { Types.Count: > 0 })
+        {
+            return false;
+        }
+
+        foreach (var baseType in typeDeclaration.BaseList.Types)
+        {
+            var typeText = baseType.Type.ToString();
+            if (typeText.StartsWith(interfaceName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var genericIndex = typeText.IndexOf('<');
+            if (genericIndex >= 0)
+            {
+                typeText = typeText[..genericIndex];
+            }
+
+            var simpleName = typeText.Split('.').Last();
+            if (simpleName.Equals(interfaceName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static bool ExtendsType(ClassDeclarationSyntax typeDeclaration, string typeName)
         => typeDeclaration.BaseList?.Types.Any(t => t.Type.ToString().EndsWith(typeName, StringComparison.Ordinal)) == true;
@@ -238,8 +288,34 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
-        return classDeclaration.AttributeLists.SelectMany(list => list.Attributes)
-            .Any(attr => attr.Name.ToString().Contains("Table", StringComparison.Ordinal));
+        if (classDeclaration.AttributeLists.SelectMany(list => list.Attributes)
+            .Any(attr => attr.Name.ToString().Contains("Table", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (classDeclaration.BaseList is not { Types.Count: > 0 })
+        {
+            return false;
+        }
+
+        foreach (var baseType in classDeclaration.BaseList.Types)
+        {
+            var typeName = baseType.Type.ToString();
+            var genericIndex = typeName.IndexOf('<');
+            if (genericIndex >= 0)
+            {
+                typeName = typeName[..genericIndex];
+            }
+
+            if (typeName.EndsWith("Entity", StringComparison.Ordinal) ||
+                typeName.EndsWith("Aggregate", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsMinimalApiContainer(ClassDeclarationSyntax classDeclaration, string filePath)

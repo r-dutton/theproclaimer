@@ -43,11 +43,6 @@ public sealed partial class ProjectAnalyzer
         var handler = new NotificationHandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, notificationType);
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var descriptor in fieldTypes.Values)
-        {
-            handler.ServiceUsages.Add(new ServiceUsage(descriptor.Type, descriptor.Line));
-        }
-
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
             var parameterTypes = method.ParameterList.Parameters
@@ -97,70 +92,88 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
+                var invocation = memberAccess.Parent as InvocationExpressionSyntax;
+                var invocationNode = (SyntaxNode?)invocation ?? memberAccess;
+                var line = GetLineNumber(tree, invocationNode);
+                var methodName = GetMemberName(memberAccess.Name);
+                var recordedUsage = false;
+
                 if (TryResolveOptionsType(resolvedType) is { } resolvedOptionsType)
                 {
-                    var line = GetLineNumber(tree, memberAccess);
                     handler.OptionsUsages.Add(new OptionsUsage(resolvedOptionsType, line));
+                    recordedUsage = true;
                 }
                 else if (TryResolveOptionsType(typeName) is { } descriptorOptionsType)
                 {
-                    var line = GetLineNumber(tree, memberAccess);
                     handler.OptionsUsages.Add(new OptionsUsage(descriptorOptionsType, line));
+                    recordedUsage = true;
                 }
 
                 if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
                 {
-                    var line = GetLineNumber(tree, memberAccess);
-                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, memberAccess.Name.Identifier.Text, line));
+                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line));
+                    continue;
                 }
-                else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
+
+                if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
                 {
                     var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                    var sourceExpression = memberAccess.Parent is InvocationExpressionSyntax invocation
-                        ? invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString()
-                        : null;
+                    var sourceExpression = invocation
+                        ?.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
                     var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
                         ? resolved
                         : null;
-                    var line = GetLineNumber(tree, memberAccess);
                     handler.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
+                    recordedUsage = true;
                 }
-                else if ((typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal)) &&
-                         memberAccess.Parent is InvocationExpressionSyntax invocationExpression)
+                else if (typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal))
                 {
-                    var methodName = memberAccess.Name.Identifier.Text;
-                    if (methodName.StartsWith("Send", StringComparison.Ordinal))
+                    if (invocation is not null && methodName is { Length: > 0 })
                     {
-                        var argument = invocationExpression.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                        var requestType = argument switch
+                        if (methodName.StartsWith("Send", StringComparison.Ordinal))
                         {
-                            ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                            IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
-                            _ => null
-                        };
+                            var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                            var requestType = argument switch
+                            {
+                                ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                                IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                                _ => null
+                            };
 
-                        if (!string.IsNullOrWhiteSpace(requestType))
+                            if (!string.IsNullOrWhiteSpace(requestType))
+                            {
+                                handler.RequestInvocations.Add(new NotificationHandlerRequestInvocation(requestType!, line));
+                            }
+                            recordedUsage = true;
+                        }
+                        else if (methodName.StartsWith("Publish", StringComparison.Ordinal))
                         {
-                            var line = GetLineNumber(tree, invocationExpression);
-                            handler.RequestInvocations.Add(new NotificationHandlerRequestInvocation(requestType!, line));
+                            var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                            var notification = argument switch
+                            {
+                                ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                                IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                                _ => null
+                            };
+
+                            if (!string.IsNullOrWhiteSpace(notification))
+                            {
+                                handler.PublishedNotifications.Add(new HandlerNotificationPublication(notification!, line));
+                            }
+                            recordedUsage = true;
                         }
                     }
-                    else if (methodName.StartsWith("Publish", StringComparison.Ordinal))
-                    {
-                        var argument = invocationExpression.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                        var notification = argument switch
-                        {
-                            ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                            IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
-                            _ => null
-                        };
+                }
 
-                        if (!string.IsNullOrWhiteSpace(notification))
-                        {
-                            var line = GetLineNumber(tree, invocationExpression);
-                            handler.PublishedNotifications.Add(new HandlerNotificationPublication(notification!, line));
-                        }
-                    }
+                if (!recordedUsage)
+                {
+                    var serviceType = resolvedType ?? typeName;
+                    handler.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
+                }
+                else if (!resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                {
+                    var serviceType = resolvedType ?? typeName;
+                    handler.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                 }
             }
         }
@@ -314,6 +327,11 @@ public sealed partial class ProjectAnalyzer
                 if (registration is not null)
                 {
                     props["lifetime"] = registration.Lifetime;
+                }
+
+                if (!string.IsNullOrWhiteSpace(service.Method))
+                {
+                    props["method"] = service.Method!;
                 }
 
                 _edges.Add(new GraphEdge

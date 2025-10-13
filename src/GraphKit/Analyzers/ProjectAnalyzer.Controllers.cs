@@ -69,49 +69,82 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
-                if (invocation.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "Send" } memberAccess)
+                if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
                 {
-                    var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                    string? requestType = null;
-                    if (argument is ObjectCreationExpressionSyntax objectCreation)
-                    {
-                        requestType = objectCreation.Type.ToString();
-                    }
-                    else if (argument is IdentifierNameSyntax identifierArgument &&
-                        info.LocalVariables.TryGetValue(identifierArgument.Identifier.Text, out var resolvedType) &&
-                        !string.Equals(resolvedType, "var", StringComparison.OrdinalIgnoreCase))
-                    {
-                        requestType = resolvedType;
-                    }
+                    var methodIdentifier = memberAccess.Name.Identifier.Text;
+                    var isMediatorInvocation = methodIdentifier.Equals("Send", StringComparison.Ordinal) || methodIdentifier.Equals("SendAsync", StringComparison.Ordinal);
+                    var isRequestProcessorInvocation = methodIdentifier.Equals("Process", StringComparison.Ordinal) || methodIdentifier.Equals("ProcessAsync", StringComparison.Ordinal);
 
-                    if (requestType is not null)
+                    if (isRequestProcessorInvocation)
                     {
-                        var line = GetLineNumber(tree, invocation);
-                        info.RequestInvocations.Add(new ControllerRequestInvocation(requestType, line));
-
-                        if (invocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax assignTarget })
+                        var targetType = TryResolveExpressionType(memberAccess.Expression, parameterTypes, info.LocalVariables);
+                        if (targetType is null && memberAccess.Expression is IdentifierNameSyntax targetIdentifier &&
+                            fieldLookup.TryGetValue(targetIdentifier.Identifier.Text.TrimStart('_'), out var descriptor))
                         {
-                            var handler = FindHandlerForRequest(requestType);
-                            if (handler is not null)
+                            targetType = descriptor.Type;
+                        }
+                        else if (targetType is null && memberAccess.Expression is MemberAccessExpressionSyntax nestedAccess &&
+                                 nestedAccess.Name is IdentifierNameSyntax nestedIdentifier &&
+                                 fieldLookup.TryGetValue(nestedIdentifier.Identifier.Text.TrimStart('_'), out var nestedDescriptor))
+                        {
+                            targetType = nestedDescriptor.Type;
+                        }
+
+                        if (targetType is not null)
+                        {
+                            var resolvedTarget = ResolveImplementationType(targetType);
+                            if (!IsRequestProcessorType(resolvedTarget) && !IsRequestProcessorType(targetType))
                             {
-                                info.LocalVariables[assignTarget.Identifier.Text] = handler.ResponseType;
+                                isRequestProcessorInvocation = false;
                             }
                         }
-                        else if (invocation.Parent is AwaitExpressionSyntax awaitExpression &&
-                                 awaitExpression.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax awaitAssign })
+                        else
                         {
-                            var handler = FindHandlerForRequest(requestType);
-                            if (handler is not null)
-                            {
-                                info.LocalVariables[awaitAssign.Identifier.Text] = handler.ResponseType;
-                            }
+                            isRequestProcessorInvocation = false;
                         }
-                        else if (invocation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
+                    }
+
+                    if (isMediatorInvocation || isRequestProcessorInvocation)
+                    {
+                        var argumentExpression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                        var requestType = argumentExpression is null
+                            ? null
+                            : TryResolveExpressionType(argumentExpression, parameterTypes, info.LocalVariables);
+
+                        if (requestType is null && argumentExpression is IdentifierNameSyntax identifierArgument &&
+                            info.LocalVariables.TryGetValue(identifierArgument.Identifier.Text, out var resolvedType) &&
+                            !string.Equals(resolvedType, "var", StringComparison.OrdinalIgnoreCase))
                         {
-                            var handler = FindHandlerForRequest(requestType);
+                            requestType = resolvedType;
+                        }
+
+                        if (requestType is null && argumentExpression is IdentifierNameSyntax fieldIdentifier &&
+                            fieldLookup.TryGetValue(fieldIdentifier.Identifier.Text.TrimStart('_'), out var fieldDescriptor))
+                        {
+                            requestType = fieldDescriptor.Type;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(requestType))
+                        {
+                            var line = GetLineNumber(tree, invocation);
+                            info.RequestInvocations.Add(new ControllerRequestInvocation(requestType!, line));
+
+                            var handler = FindHandlerForRequest(requestType!);
                             if (handler is not null)
                             {
-                                info.LocalVariables[declarator.Identifier.Text] = handler.ResponseType;
+                                if (invocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax assignTarget })
+                                {
+                                    info.LocalVariables[assignTarget.Identifier.Text] = handler.ResponseType;
+                                }
+                                else if (invocation.Parent is AwaitExpressionSyntax awaitExpression &&
+                                         awaitExpression.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax awaitAssign })
+                                {
+                                    info.LocalVariables[awaitAssign.Identifier.Text] = handler.ResponseType;
+                                }
+                                else if (invocation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
+                                {
+                                    info.LocalVariables[declarator.Identifier.Text] = handler.ResponseType;
+                                }
                             }
                         }
                     }
@@ -123,14 +156,28 @@ public sealed partial class ProjectAnalyzer
                     if (fieldLookup.TryGetValue(fieldName, out var descriptor))
                     {
                         var typeName = descriptor.Type;
+                        var baseTypeName = GetTypeNameWithoutGenerics(typeName);
                         var resolvedType = ResolveImplementationType(typeName) ?? typeName;
-                        if (typeName.Contains("Client", StringComparison.Ordinal))
+                        if (string.IsNullOrWhiteSpace(resolvedType))
+                        {
+                            continue;
+                        }
+                        var resolvedBaseType = GetTypeNameWithoutGenerics(resolvedType);
+                        SyntaxNode invocationNode = invocation;
+                        var serviceLine = GetLineNumber(tree, invocationNode);
+                        var serviceMethod = GetMemberName(access.Name);
+                        var serviceTypeName = resolvedType;
+                        var recordedServiceUsage = false;
+                        if (IsClientType(baseTypeName) || IsClientType(resolvedBaseType))
                         {
                             var callMethod = access.Name.Identifier.Text.ToUpperInvariant();
                             var routeLiteral = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
                             var relativePath = ExtractRouteLiteral(tree, routeLiteral);
+                            var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
+                                ? resolvedBaseType
+                                : baseTypeName;
                             var line = GetLineNumber(tree, invocation);
-                            info.HttpClientInvocations.Add(new ControllerClientInvocation(typeName, callMethod, relativePath, line));
+                            info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, callMethod, relativePath, line));
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
                         {
@@ -147,6 +194,7 @@ public sealed partial class ProjectAnalyzer
                             }
 
                             info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
+                            recordedServiceUsage = true;
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && access.Name is IdentifierNameSyntax { Identifier.Text: "Map" })
                         {
@@ -163,6 +211,7 @@ public sealed partial class ProjectAnalyzer
                             }
 
                             info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
+                            recordedServiceUsage = true;
                         }
                         else if (typeName.StartsWith("IValidator", StringComparison.OrdinalIgnoreCase))
                         {
@@ -181,17 +230,29 @@ public sealed partial class ProjectAnalyzer
                                 info.CacheInvocations.Add(cacheInvocation);
                             }
                         }
+                        else if (IsRepositoryType(resolvedType) || IsRepositoryType(typeName))
+                        {
+                            var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : typeName;
+                            if (TryCaptureRepositoryInvocation(access, invocation, repositoryType, typeName, tree) is { } repositoryInvocation)
+                            {
+                                info.RepositoryInvocations.Add(repositoryInvocation);
+                            }
+                            recordedServiceUsage = true;
+                        }
                         else if (TryResolveOptionsType(resolvedType) is { } optionsType)
                         {
-                            var line = GetLineNumber(tree, access);
-                            info.OptionsUsages.Add(new OptionsUsage(optionsType, line));
+                            info.OptionsUsages.Add(new OptionsUsage(optionsType, serviceLine));
+                            recordedServiceUsage = true;
+                        }
+                        else if (IsServiceType(resolvedType) || IsServiceType(typeName))
+                        {
+                            recordedServiceUsage = true;
                         }
                         else if (typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal))
                         {
                             var methodIdentifier = access.Name.Identifier.Text;
                             if (methodIdentifier.StartsWith("Publish", StringComparison.Ordinal))
                             {
-                                var line = GetLineNumber(tree, invocation);
                                 var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
                                 var notificationType = argument switch
                                 {
@@ -202,9 +263,37 @@ public sealed partial class ProjectAnalyzer
 
                                 if (!string.IsNullOrWhiteSpace(notificationType))
                                 {
-                                    info.NotificationInvocations.Add(new ControllerNotificationInvocation(notificationType!, line));
+                                    info.NotificationInvocations.Add(new ControllerNotificationInvocation(notificationType!, serviceLine));
                                 }
+
+                                recordedServiceUsage = true;
                             }
+                        }
+
+                        if (recordedServiceUsage)
+                        {
+                            info.ServiceUsages.Add(new ServiceUsage(serviceTypeName, serviceLine, serviceMethod));
+                        }
+                    }
+                }
+                else if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
+                {
+                    if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
+                    {
+                        var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                        if (!string.IsNullOrWhiteSpace(destination))
+                        {
+                            var line = GetLineNumber(tree, invocation);
+                            info.MappingInvocations.Add(new ControllerMappingInvocation(null, destination, null, line));
+                        }
+                    }
+                    else if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectByIdAsync" } projectById)
+                    {
+                        var destination = projectById.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                        if (!string.IsNullOrWhiteSpace(destination))
+                        {
+                            var line = GetLineNumber(tree, invocation);
+                            info.MappingInvocations.Add(new ControllerMappingInvocation(null, destination, null, line));
                         }
                     }
                 }
@@ -317,6 +406,29 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var request in action.RequestInvocations)
             {
+                if (FindRequestByType(request.RequestType) is { } requestInfo)
+                {
+                    var requestId = StableId.For("cqrs.request", requestInfo.Fqdn, requestInfo.Assembly, requestInfo.SymbolId);
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = requestId,
+                        Kind = "sends_request",
+                        Source = "static",
+                        Confidence = 1.0,
+                        Transform = new GraphTransform
+                        {
+                            Type = "controller.action",
+                            Location = new GraphLocation { File = action.FilePath, Line = request.Line }
+                        },
+                        Props = new Dictionary<string, object>
+                        {
+                            ["request_type"] = request.RequestType
+                        },
+                        Evidence = CreateEvidence(action.FilePath, request.Line)
+                    });
+                }
+
                 if (FindHandlerForRequest(request.RequestType) is { } handler)
                 {
                     var handlerId = StableId.For("cqrs.handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
@@ -335,6 +447,113 @@ public sealed partial class ProjectAnalyzer
                         Evidence = CreateEvidence(action.FilePath, request.Line)
                     });
                 }
+            }
+
+            foreach (var repository in action.RepositoryInvocations
+                .GroupBy(r => new { r.RepositoryType, r.Method, r.Operation, r.EntityType })
+                .Select(group => group.OrderBy(r => r.Line).First()))
+            {
+                NodeReference? repositoryReference = null;
+                if (!string.IsNullOrWhiteSpace(repository.RepositoryType) &&
+                    TryResolveNodeReference(repository.RepositoryType, out var directReference))
+                {
+                    repositoryReference = directReference;
+                }
+                else if (!string.IsNullOrWhiteSpace(repository.EntityType))
+                {
+                    var derivedRepositoryType = repository.EntityType.EndsWith("Repository", StringComparison.Ordinal)
+                        ? repository.EntityType
+                        : $"{repository.EntityType}Repository";
+                    if (TryResolveNodeReference(derivedRepositoryType, out var derivedReference))
+                    {
+                        repositoryReference = derivedReference;
+                    }
+                }
+
+                if (repositoryReference is not null)
+                {
+                    var props = new Dictionary<string, object>
+                    {
+                        ["method"] = repository.Method
+                    };
+
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = repositoryReference.Id,
+                        Kind = "calls",
+                        Source = "static",
+                        Confidence = 1.0,
+                        Transform = new GraphTransform
+                        {
+                            Type = "controller.repository",
+                            Location = new GraphLocation { File = action.FilePath, Line = repository.Line }
+                        },
+                        Props = props,
+                        Evidence = CreateEvidence(action.FilePath, repository.Line)
+                    });
+                }
+
+                if (!string.IsNullOrWhiteSpace(repository.EntityType) &&
+                    TryResolveNodeReference(repository.EntityType, out var entityReference))
+                {
+                    var kind = repository.Operation.Equals("write", StringComparison.OrdinalIgnoreCase) ? "writes_to" : "queries";
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = entityReference.Id,
+                        Kind = kind,
+                        Source = "static",
+                        Confidence = 1.0,
+                        Transform = new GraphTransform
+                        {
+                            Type = kind == "writes_to" ? "repository.write" : "repository.query",
+                            Location = new GraphLocation { File = action.FilePath, Line = repository.Line }
+                        },
+                        Evidence = CreateEvidence(action.FilePath, repository.Line)
+                    });
+                }
+            }
+
+            foreach (var serviceUsage in action.ServiceUsages
+                .GroupBy(s => s.ServiceType, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderBy(s => s.Line).First()))
+            {
+                if (!TryEnsureServiceNode(serviceUsage.ServiceType, out var serviceId, out var registration))
+                {
+                    continue;
+                }
+
+                var props = new Dictionary<string, object>
+                {
+                    ["service_type"] = serviceUsage.ServiceType
+                };
+
+                if (registration is not null)
+                {
+                    props["lifetime"] = registration.Lifetime;
+                }
+
+                if (!string.IsNullOrWhiteSpace(serviceUsage.Method))
+                {
+                    props["method"] = serviceUsage.Method!;
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = serviceId!,
+                    Kind = "uses_service",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "ioc.resolve",
+                        Location = new GraphLocation { File = action.FilePath, Line = serviceUsage.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
+                });
             }
 
             foreach (var clientInvocation in action.HttpClientInvocations)
@@ -359,6 +578,31 @@ public sealed partial class ProjectAnalyzer
                             ["verb"] = clientInvocation.HttpMethod,
                             ["route"] = clientInvocation.RelativePath ?? string.Empty
                         },
+                        Evidence = CreateEvidence(action.FilePath, clientInvocation.Line)
+                    });
+                }
+                else
+                {
+                    var clientId = EnsureHttpClientNode(clientInvocation.ClientType);
+                    var props = new Dictionary<string, object>
+                    {
+                        ["verb"] = clientInvocation.HttpMethod,
+                        ["route"] = clientInvocation.RelativePath ?? string.Empty
+                    };
+
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = clientId,
+                        Kind = "uses_client",
+                        Source = "static",
+                        Confidence = 0.7,
+                        Transform = new GraphTransform
+                        {
+                            Type = "httpclient.request",
+                            Location = new GraphLocation { File = action.FilePath, Line = clientInvocation.Line }
+                        },
+                        Props = props,
                         Evidence = CreateEvidence(action.FilePath, clientInvocation.Line)
                     });
                 }
@@ -564,6 +808,163 @@ public sealed partial class ProjectAnalyzer
             }
         }
     }
+
+    private ControllerRepositoryInvocation? TryCaptureRepositoryInvocation(
+        MemberAccessExpressionSyntax access,
+        InvocationExpressionSyntax invocation,
+        string repositoryType,
+        string originalRepositoryType,
+        SyntaxTree tree)
+    {
+        var methodName = access.Name.Identifier.Text;
+        if (string.IsNullOrWhiteSpace(methodName))
+        {
+            return null;
+        }
+
+        var operation = DetermineRepositoryOperation(methodName);
+        var entityType = ExtractRepositoryEntityType(repositoryType)
+            ?? ExtractRepositoryEntityType(originalRepositoryType)
+            ?? TryDeriveEntityTypeFromRepositoryName(repositoryType)
+            ?? TryDeriveEntityTypeFromRepositoryName(originalRepositoryType);
+
+        var line = GetLineNumber(tree, invocation);
+        return new ControllerRepositoryInvocation(repositoryType, entityType, methodName, operation, line);
+    }
+
+    private static string DetermineRepositoryOperation(string methodName)
+    {
+        if (string.IsNullOrWhiteSpace(methodName))
+        {
+            return "query";
+        }
+
+        if (methodName.StartsWith("Write", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Add", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Update", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Create", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Insert", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Save", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Commit", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Upsert", StringComparison.OrdinalIgnoreCase))
+        {
+            return "write";
+        }
+
+        return "query";
+    }
+
+    private static string? ExtractRepositoryEntityType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        var start = typeName.IndexOf('<');
+        var end = typeName.LastIndexOf('>');
+        if (start >= 0 && end > start)
+        {
+            var content = typeName.Substring(start + 1, end - start - 1).Trim();
+            if (content.Length == 0)
+            {
+                return null;
+            }
+
+            var comma = content.IndexOf(',');
+            if (comma > 0)
+            {
+                content = content[..comma].Trim();
+            }
+
+            return content;
+        }
+
+        return null;
+    }
+
+    private static string? TryDeriveEntityTypeFromRepositoryName(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        var simple = typeName.Split('.').Last();
+        const string suffix = "Repository";
+        if (simple.EndsWith(suffix, StringComparison.Ordinal) && simple.Length > suffix.Length)
+        {
+            return simple[..^suffix.Length];
+        }
+
+        return null;
+    }
+
+    private static bool IsRepositoryType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        return typeName.Contains("Repository", StringComparison.Ordinal) ||
+               typeName.Contains("IControlledRepository", StringComparison.Ordinal) ||
+               typeName.Contains("IReadOnlyRepository", StringComparison.Ordinal);
+    }
+
+    private static bool IsServiceType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        var baseType = GetTypeNameWithoutGenerics(typeName);
+        return baseType.EndsWith("Service", StringComparison.Ordinal) ||
+               baseType.Contains(".Services", StringComparison.Ordinal) ||
+               baseType.Contains("Service.", StringComparison.Ordinal) ||
+               IsClientType(baseType);
+    }
+
+    private static bool IsClientType(string typeName)
+        => typeName.EndsWith("Client", StringComparison.Ordinal) ||
+           typeName.Contains(".Client", StringComparison.Ordinal);
+
+    private static string GetTypeNameWithoutGenerics(string typeName)
+    {
+        var genericIndex = typeName.IndexOf('<');
+        return genericIndex >= 0 ? typeName[..genericIndex] : typeName;
+    }
+
+    private string EnsureHttpClientNode(string clientType)
+    {
+        var assembly = GuessAssemblyName(clientType);
+        var symbolId = $"T:{clientType}";
+        var id = StableId.For("http.client", clientType, assembly, symbolId);
+        if (!_nodes.ContainsKey(id))
+        {
+            _nodes[id] = new GraphNode
+            {
+                Id = id,
+                Type = "http.client",
+                Name = clientType.Split('.').Last(),
+                Fqdn = clientType,
+                Assembly = assembly,
+                Project = string.Empty,
+                FilePath = string.Empty,
+                Span = null,
+                SymbolId = symbolId,
+                Tags = new[] { "integration" }
+            };
+        }
+
+        return id;
+    }
+
+    private static bool IsRequestProcessorType(string? typeName)
+        => !string.IsNullOrWhiteSpace(typeName) && typeName.Contains("IRequestProcessor", StringComparison.Ordinal);
 
     private static string? ExtractGenericArgument(string typeName)
     {
