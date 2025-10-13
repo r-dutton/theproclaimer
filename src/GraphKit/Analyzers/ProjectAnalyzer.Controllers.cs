@@ -127,24 +127,52 @@ public sealed partial class ProjectAnalyzer
 
                         if (!string.IsNullOrWhiteSpace(requestType))
                         {
-                            var line = GetLineNumber(tree, invocation);
-                            info.RequestInvocations.Add(new ControllerRequestInvocation(requestType!, line));
+                            var invocationLine = GetLineNumber(tree, invocation);
+                            info.RequestInvocations.Add(new ControllerRequestInvocation(requestType!, invocationLine));
 
                             var handler = FindHandlerForRequest(requestType!);
                             if (handler is not null)
                             {
+                                var responseType = handler.ResponseType;
                                 if (invocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax assignTarget })
                                 {
-                                    info.LocalVariables[assignTarget.Identifier.Text] = handler.ResponseType;
+                                    info.LocalVariables[assignTarget.Identifier.Text] = responseType;
+                                    if (IsMeaningfulResponseType(responseType))
+                                    {
+                                        info.ResponseUsages.Add(new ControllerResponseUsage(responseType, assignTarget.Identifier.Text, GetLineNumber(tree, invocation), false));
+                                    }
                                 }
-                                else if (invocation.Parent is AwaitExpressionSyntax awaitExpression &&
-                                         awaitExpression.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax awaitAssign })
+                                else if (invocation.Parent is AwaitExpressionSyntax awaitedInvocation &&
+                                         awaitedInvocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax awaitAssign })
                                 {
-                                    info.LocalVariables[awaitAssign.Identifier.Text] = handler.ResponseType;
+                                    info.LocalVariables[awaitAssign.Identifier.Text] = responseType;
+                                    if (IsMeaningfulResponseType(responseType))
+                                    {
+                                        info.ResponseUsages.Add(new ControllerResponseUsage(responseType, awaitAssign.Identifier.Text, GetLineNumber(tree, awaitedInvocation), false));
+                                    }
                                 }
                                 else if (invocation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
                                 {
-                                    info.LocalVariables[declarator.Identifier.Text] = handler.ResponseType;
+                                    info.LocalVariables[declarator.Identifier.Text] = responseType;
+                                    if (IsMeaningfulResponseType(responseType))
+                                    {
+                                        info.ResponseUsages.Add(new ControllerResponseUsage(responseType, declarator.Identifier.Text, GetLineNumber(tree, invocation), false));
+                                    }
+                                }
+                                else
+                                {
+                                    ExpressionSyntax contextNode = invocation;
+                                    if (invocation.Parent is AwaitExpressionSyntax awaitedContext)
+                                    {
+                                        contextNode = awaitedContext;
+                                    }
+
+                                    if (IsMeaningfulResponseType(responseType))
+                                    {
+                                        var responseLine = GetLineNumber(tree, contextNode.Parent is ReturnStatementSyntax returnStatement ? returnStatement : contextNode);
+                                        var isReturn = contextNode.Parent is ReturnStatementSyntax;
+                                        info.ResponseUsages.Add(new ControllerResponseUsage(responseType, null, responseLine, isReturn));
+                                    }
                                 }
                             }
                         }
@@ -282,19 +310,21 @@ public sealed partial class ProjectAnalyzer
                     if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
                     {
                         var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, info.LocalVariables, fieldLookup);
                         if (!string.IsNullOrWhiteSpace(destination))
                         {
                             var line = GetLineNumber(tree, invocation);
-                            info.MappingInvocations.Add(new ControllerMappingInvocation(null, destination, null, line));
+                            info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, null, line));
                         }
                     }
                     else if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectByIdAsync" } projectById)
                     {
                         var destination = projectById.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, info.LocalVariables, fieldLookup);
                         if (!string.IsNullOrWhiteSpace(destination))
                         {
                             var line = GetLineNumber(tree, invocation);
-                            info.MappingInvocations.Add(new ControllerMappingInvocation(null, destination, null, line));
+                            info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, null, line));
                         }
                     }
                 }
@@ -652,6 +682,48 @@ public sealed partial class ProjectAnalyzer
                 });
             }
 
+            foreach (var response in action.ResponseUsages
+                .Where(r => IsMeaningfulResponseType(r.ResponseType))
+                .GroupBy(r => new { r.ResponseType, r.Variable, r.IsReturn })
+                .Select(group => group.OrderBy(r => r.Line).First()))
+            {
+                if (!TryResolveNodeReference(response.ResponseType, out var responseNode))
+                {
+                    continue;
+                }
+
+                var props = new Dictionary<string, object>
+                {
+                    ["response_type"] = response.ResponseType
+                };
+
+                if (!string.IsNullOrWhiteSpace(response.Variable))
+                {
+                    props["variable"] = response.Variable!;
+                }
+
+                if (response.IsReturn)
+                {
+                    props["kind"] = "return";
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = responseNode.Id,
+                    Kind = "returns",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "controller.response",
+                        Location = new GraphLocation { File = action.FilePath, Line = response.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(action.FilePath, response.Line)
+                });
+            }
+
             foreach (var cast in action.CastInvocations)
             {
                 if (string.IsNullOrWhiteSpace(cast.DestinationType))
@@ -965,6 +1037,19 @@ public sealed partial class ProjectAnalyzer
 
     private static bool IsRequestProcessorType(string? typeName)
         => !string.IsNullOrWhiteSpace(typeName) && typeName.Contains("IRequestProcessor", StringComparison.Ordinal);
+
+    private static bool IsMeaningfulResponseType(string? responseType)
+    {
+        if (string.IsNullOrWhiteSpace(responseType))
+        {
+            return false;
+        }
+
+        return !responseType.Equals("Unit", StringComparison.OrdinalIgnoreCase) &&
+               !responseType.Equals("MediatR.Unit", StringComparison.OrdinalIgnoreCase) &&
+               !responseType.Equals("void", StringComparison.OrdinalIgnoreCase) &&
+               !responseType.Equals("System.Void", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string? ExtractGenericArgument(string typeName)
     {

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
 using GraphKit.Workspace;
@@ -25,6 +26,23 @@ public sealed partial class ProjectAnalyzer
                 .Where(p => !string.IsNullOrWhiteSpace(p.Identifier.Text))
                 .ToDictionary(p => p.Identifier.Text, p => p.Type?.ToString(), StringComparer.OrdinalIgnoreCase);
 
+            var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            {
+                var declaredType = local.Declaration.Type.ToString();
+                foreach (var variable in local.Declaration.Variables)
+                {
+                    var resolvedType = declaredType;
+                    if (string.Equals(resolvedType, "var", StringComparison.OrdinalIgnoreCase) &&
+                        variable.Initializer?.Value is ObjectCreationExpressionSyntax creation)
+                    {
+                        resolvedType = creation.Type.ToString();
+                    }
+
+                    localVariables[variable.Identifier.Text] = resolvedType;
+                }
+            }
+
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax identifier } access &&
@@ -40,6 +58,29 @@ public sealed partial class ProjectAnalyzer
                             : null;
                         var line = GetLineNumber(tree, invocation);
                         repository.MapperCalls.Add(new RepositoryMapperCall(sourceType, destination, line));
+                    }
+                }
+                else if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
+                {
+                    if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
+                    {
+                        var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                        if (!string.IsNullOrWhiteSpace(destination))
+                        {
+                            var line = GetLineNumber(tree, invocation);
+                            repository.MapperCalls.Add(new RepositoryMapperCall(sourceType, destination, line));
+                        }
+                    }
+                    else if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectByIdAsync" } projectById)
+                    {
+                        var destination = projectById.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                        if (!string.IsNullOrWhiteSpace(destination))
+                        {
+                            var line = GetLineNumber(tree, invocation);
+                            repository.MapperCalls.Add(new RepositoryMapperCall(sourceType, destination, line));
+                        }
                     }
                 }
                 else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax cacheIdentifier } cacheAccess &&
