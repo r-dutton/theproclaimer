@@ -78,6 +78,20 @@ public sealed partial class ProjectAnalyzer
         public List<CacheInvocation> CacheInvocations { get; } = new();
     }
 
+    private sealed record PipelineBehaviorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType)
+    {
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+    }
+
+    private sealed record RequestProcessorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType, string Kind)
+    {
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+    }
+
     private sealed record HandlerDbAccess(string DbContextType, string Member, int Line);
 
     private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType);
