@@ -20,6 +20,8 @@ public sealed partial class ProjectAnalyzer
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ControllerRepositoryInvocation> RepositoryInvocations { get; } = new();
         public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<EndpointAuthorization> Authorizations { get; } = new();
+        public bool AllowsAnonymous { get; set; }
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
@@ -41,6 +43,8 @@ public sealed partial class ProjectAnalyzer
     private sealed record MinimalEndpointInfo(string Route, string HttpMethod, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
     {
         public string Fqdn => $"{Assembly}.Endpoints.{Name}";
+        public List<EndpointAuthorization> Authorizations { get; } = new();
+        public bool AllowsAnonymous { get; set; }
     }
 
     private sealed record RequestInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name);
@@ -168,4 +172,8 @@ public sealed partial class ProjectAnalyzer
     }
 
     private sealed record OptionsUsage(string OptionsType, int Line);
+
+    private sealed record EndpointAuthorization(string? Policy, string? Roles, string? AuthenticationSchemes, string Source, int Line);
+
+    private sealed record AuthorizationMetadata(List<EndpointAuthorization> Requirements, bool AllowsAnonymous);
 }
