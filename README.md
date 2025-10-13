@@ -1,53 +1,32 @@
 # The Proclaimer
 
-## Overview
-The Proclaimer repository bundles a Roslyn-based analyzer library (`GraphKit`) and a
-small CLI (`FlowGrep`) that turn one or more .NET solutions into a machine-readable
-graph and human-friendly flow documentation. The analyzer walks every C# project
-listed in the workspace configuration, emits typed graph nodes for controllers,
-CQRS requests/handlers, repositories, DTOs, AutoMapper profiles, HTTP clients,
-validators, MediatR notifications, background services, Service Bus
-publishers, configuration options, and cache dependencies, and links them together with rich edges that capture how
-features interact across the codebase.【F:src/GraphKit/Analyzers/ProjectAnalyzer.Core.cs†L10-L111】【F:src/GraphKit/Analyzers/ProjectAnalyzer.Notifications.cs†L1-L230】【F:src/GraphKit/Analyzers/ProjectAnalyzer.BackgroundServices.cs†L1-L122】【F:src/GraphKit/Analyzers/ProjectAnalyzer.Messaging.cs†L1-L120】【F:src/GraphKit/Analyzers/ProjectAnalyzer.Caching.cs†L1-L104】【F:src/GraphKit/Analyzers/ProjectAnalyzer.Options.cs†L1-L147】
+The Proclaimer is a documentation generator for large .NET codebases. It walks C# solutions with a Roslyn-based analyzer, turns the results into a rich dependency graph, and then builds readable flow summaries that explain how HTTP endpoints, CQRS handlers, background services, caches, and configuration settings interact. The tool exists to close the gap between sprawling enterprise code and the humans (or agents) that need to understand it quickly.
 
-`GraphGenerator` orchestrates the workspace load, Roslyn analysis, and final
-serialization, so calling code only needs to provide the workspace root and an
-output directory.【F:src/GraphKit/GraphGenerator.cs†L8-L29】 The generated
-`GraphDocument` can then be post-processed by helpers such as `FlowBuilder` to
-produce higher-level narratives for HTTP flows and CQRS pipelines.【F:src/GraphKit/Outputs/FlowBuilder.cs†L9-L200】
+## Why it exists
 
-## Repository layout
-- `src/GraphKit/` – analyzer library plus graph/flow output helpers.
-- `src/FlowGrep/` – console app for running the analyzer and querying the
-  resulting graph.【F:src/FlowGrep/Program.cs†L8-L89】
-- `src/Sample.*` – miniature applications that act as demonstration input for the
-  analyzer and exercise the various detectors.【F:theproclaimer.sln†L7-L58】
-- `flow.workspace.json` – declares which solutions belong to the workspace and
-  optionally describes service endpoints for each logical system.【F:flow.workspace.json†L1-L20】
-- `flow.map.json` – maps logical services to base URLs and binds outbound HTTP
-  clients to their target services to enrich the generated flows.【F:flow.map.json†L1-L20】
+Teams working on multi-solution .NET systems often rely on tribal knowledge or outdated wiki pages to reason about data flow. The Proclaimer keeps that knowledge current by inspecting the source directly. Every run produces:
 
-## Configuration
-Point the tooling at a workspace root that contains either a
-`flow.workspace.json` file or discoverable `.sln` files. The workspace loader will
-parse the configuration, resolve absolute project paths, and enumerate all C#
-sources for analysis. When the CLI receives explicit `--solution` arguments the
-loader prioritizes those paths so you can slice the workspace per run.【F:src/GraphKit/Workspace/WorkspaceLoader.cs†L16-L92】
+- A machine-friendly graph describing controllers, handlers, repositories, options, messaging clients, and all their relationships.
+- Human-friendly flow narratives that explain the full journey of a request, including asynchronous fan-out and configuration dependencies.
+- Lightweight evaluation artifacts that track coverage so you can spot missing documentation.
 
-When `flow.map.json` is present the analyzer also imports service metadata and
-pre-configured HTTP client bindings so that downstream flow documentation can note
-which logical service a client call targets.【F:src/GraphKit/Analyzers/ProjectAnalyzer.DependencyInjection.cs†L17-L111】
+Because the analyzer is code-first, the outputs stay in sync with the repository and can be regenerated as part of CI pipelines or quality gates.
 
-Option classes that expose a `SectionName` constant (for example,
-`ReportRetentionOptions`) are automatically matched to `appsettings*.json`
-sections so cache expiration policies, retention windows, and other settings show
-up in the generated graph and flow documentation.【F:src/GraphKit/Analyzers/ProjectAnalyzer.Options.cs†L1-L147】【F:src/Sample.App/Options/ReportRetentionOptions.cs†L1-L11】
+## What makes it different
 
-## Running the analyzer
-1. Install the .NET 8.0 SDK (GraphKit and FlowGrep both target `net8.0`).【F:src/GraphKit/GraphKit.csproj†L4-L13】【F:src/FlowGrep/FlowGrep.csproj†L4-L12】
-2. Restore dependencies: `dotnet restore theproclaimer.sln`.
-3. Generate the graph and reports. Solutions are discovered automatically, but
-   you can target an explicit set to accelerate large workspaces:
+- **Full workspace analysis**: Point it at a workspace file or a root directory, and it will ingest every referenced solution without you needing to maintain per-project scripts.
+- **Typed graph model**: The graph captures evidence for each relationship, so downstream tools (agents, visualizers, graph databases) can trust the links.
+- **Narrative flows**: Instead of dumping raw edges, The Proclaimer assembles end-to-end stories that connect HTTP, CQRS, background jobs, caches, and configuration in a single document.
+- **Agent-ready outputs**: Markdown summaries and JSON payloads are easy to ingest in autonomous workflows or conversational assistants.
+
+## Getting started
+
+1. Install the .NET 8 SDK.
+2. Restore the workspace dependencies:
+   ```bash
+   dotnet restore theproclaimer.sln
+   ```
+3. Run the analyzer with the FlowGrep CLI:
    ```bash
    dotnet run --project src/FlowGrep -- \
      --workspace . \
@@ -55,43 +34,92 @@ up in the generated graph and flow documentation.【F:src/GraphKit/Analyzers/Pro
      --solution src/Sample.SolutionA.sln \
      --solution src/Sample.SolutionB.sln
    ```
-   FlowGrep accepts optional filters for quick exploration:
-   - `--text "Search term"` and/or `--tags tag1,tag2` to filter nodes and dump
-     results either as markdown (default) or JSON via `--format json`.
-   - `--flow Sample.Web.*` (or comma-separated `--flows`) uses glob matching so
-     you can print only the flows you care about, while `--flow "*"` streams
-     every discovered controller flow to stdout.【F:src/FlowGrep/Program.cs†L8-L96】【F:src/GraphKit/Outputs/FlowFilter.cs†L8-L64】
+4. Explore the generated `out/` folder. You'll find the graph data (`graph.json`, `graph.cypher`), Markdown flow reports, evaluation summaries, and a version stamp for reproducibility.
 
-## Generated artifacts
-Running FlowGrep populates the output directory with several useful assets:
-- `graph.json` – serialized `GraphDocument` containing every node and edge with
-  evidence metadata for further processing.【F:src/GraphKit/Outputs/GraphOutputWriter.cs†L22-L42】
-- `graph.cypher` – Neo4j-friendly script that loads the same nodes and edges into
-  a property graph database for ad-hoc querying.【F:src/GraphKit/Outputs/GraphOutputWriter.cs†L44-L61】
-- `GRAPH.md` – Markdown summary with node and edge counts grouped by type for a
-  fast health check.【F:src/GraphKit/Outputs/GraphOutputWriter.cs†L63-L85】
-- `flows/` – aggregated `controllers.all.md` plus one Markdown file per
-  controller action so teams can diff individual endpoints or stream all flows in
-  bulk. Notification fan-out, background service hops, cache interactions, and
-  configuration option dependencies are included alongside HTTP and CQRS steps to
-  capture asynchronous workflows.【F:src/GraphKit/Outputs/GraphOutputWriter.cs†L24-L187】【F:src/GraphKit/Outputs/FlowBuilder.cs†L1-L360】
-- `evals/` – lightweight evaluation payloads that report controller coverage and
-  graph size for observability tooling or regression tests.【F:src/GraphKit/Outputs/GraphOutputWriter.cs†L121-L150】
-- `VERSION.txt` – captures the analyzer version and Git commit hash to make
-  artifacts reproducible.【F:src/GraphKit/Outputs/GraphOutputWriter.cs†L121-L145】
+You can scope the run by passing additional flags:
 
-## Verifying the tooling
-The repository already includes an `out/` directory produced from the bundled
-sample solutions so you can inspect the expected artifacts without rerunning the
-analyzer. Re-running the command above regenerates the files, allowing you to
-confirm that graph counts and flow narratives stay in sync with code changes. The
-`GraphKit.Tests` project provides fast regression coverage for the new flow
-filtering and builder behavior: `dotnet test theproclaimer.sln`.【F:tests/GraphKit.Tests/GraphKit.Tests.csproj†L1-L20】【F:tests/GraphKit.Tests/FlowFilterTests.cs†L1-L52】
+- `--flow Pattern` (supports wildcards) to emit only matching flows.
+- `--text "Search term"` or `--tags a,b,c` to filter node dumps.
+- `--format json` to receive JSON instead of Markdown for the flow output.
 
-## Known gaps and next steps
-- Flow files are currently emitted per controller action. Adding support for
-  grouping by service or route prefix would make larger solutions easier to
-  navigate.【F:src/GraphKit/Outputs/GraphOutputWriter.cs†L84-L187】
-- FlowGrep writes results to stdout when `--flow` patterns match. Surfacing the
-  same wildcard support in the Markdown outputs (e.g. generating only requested
-  files) would keep artifact churn low for incremental runs.【F:src/FlowGrep/Program.cs†L8-L96】
+## Example output
+
+Below is a condensed excerpt from four flows generated across two sample solutions. Each entry shows how the narrative stitches together HTTP calls, queue messages, background processing, and cache usage:
+
+```
+# Sample.Web.ReportsController.Get
+1. HTTP GET /reports/{id} (Sample.Web)
+2. Loads ReportByIdQuery -> ReportByIdHandler (Sample.App)
+3. Handler queries ReportRepository.GetById
+4. Maps result via ReportProfile to ReportDto
+5. Publishes ReportViewedNotification -> ReportViewedHandler
+6. Handler enqueues message on bus: reporting.events
+7. Flow ends with HTTP 200 and ReportDto payload
+
+# Sample.Web.ReportsController.Post
+1. HTTP POST /reports (Sample.Web)
+2. Validates payload with CreateReportValidator
+3. Sends CreateReportCommand -> CreateReportHandler
+4. Handler writes via ReportRepository.Create
+5. Invalidates cache key reports:list
+6. Returns HTTP 201 with location header
+
+# Sample.Tasks.ReportDigestWorker.Execute
+1. Background service starts on 5-minute timer
+2. Calls DigestQuery -> DigestHandler
+3. Handler reads cache key reports:list (hit)
+4. Sends SendDigestEmailCommand -> EmailHandler
+5. EmailHandler calls SendGridClient.Post
+6. Logs outcome via AuditLogger
+
+# Sample.Web.AnalyticsController.Get
+1. HTTP GET /analytics/daily (Sample.Web)
+2. Reads cache key analytics:daily (miss)
+3. Falls back to AnalyticsQuery -> AnalyticsHandler
+4. Handler calls AnalyticsApiClient.GetDailyStats (Sample.Infra)
+5. Response cached for 15 minutes
+6. Returns HTTP 200 with AnalyticsDto
+```
+
+The same run also emits the raw graph data, so a Neo4j instance or another agent can traverse the nodes programmatically while humans keep the readable Markdown for quick reference.
+
+## Using The Proclaimer inside agent workflows
+
+Because the CLI is deterministic and scriptable, it fits naturally into agent toolboxes. Here are a few ways to describe it when registering tools for an agent framework:
+
+- **Name**: `proclaimer.run`
+- **Description**: "Analyze .NET solutions in the current workspace and emit flow documentation plus a dependency graph."
+- **Arguments**: `workspace` (path), optional `solutions` (list), `output` (directory), optional filters (`flows`, `text`, `tags`, `format`).
+
+Example tool declaration in JSON:
+
+```json
+{
+  "name": "proclaimer.run",
+  "description": "Generate graph and flow documentation for .NET solutions using FlowGrep.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "workspace": { "type": "string", "description": "Workspace root" },
+      "output": { "type": "string", "description": "Directory for generated artifacts" },
+      "solutions": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional list of .sln paths to restrict analysis"
+      },
+      "flows": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Glob patterns for flow selection"
+      }
+    },
+    "required": ["workspace", "output"]
+  }
+}
+```
+
+An agent can call the tool after cloning a repository to regenerate documentation, inspect `flows/controllers.all.md` to reason about a feature, or pipe `graph.json` into its own reasoning modules. Because the analyzer returns consistent artifacts for every run, agents can safely diff results over time to detect regressions or missing coverage.
+
+## Next steps
+
+The current sample output ships in the `out/` directory if you want to explore without running the tool yourself. To expand coverage, point the workspace configuration at additional solutions or enrich `flow.map.json` with more service metadata. Contributions that add new analyzers (for example, gRPC or SignalR support) or alternative renderers are welcome.
