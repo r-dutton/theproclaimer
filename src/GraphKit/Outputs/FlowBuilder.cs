@@ -104,7 +104,7 @@ public static class FlowBuilder
                 continue;
             }
 
-            var method = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
                 ? methodValue?.ToString()
                 : null;
             var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
@@ -114,7 +114,7 @@ public static class FlowBuilder
                 ? keyValue?.ToString()
                 : null;
             var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var methodText = string.IsNullOrWhiteSpace(method) ? string.Empty : $".{method}";
+            var methodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
             var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
             var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
             AppendIndented(builder, 1, $"uses_cache {cacheNode.Name}{methodText}{operationText}{keyText}{lineText}");
@@ -242,10 +242,10 @@ public static class FlowBuilder
                 continue;
             }
 
-            var method = call.Props is { } props && props.TryGetValue("method", out var methodValue)
+            var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue)
                 ? methodValue?.ToString()
                 : null;
-            var methodText = string.IsNullOrWhiteSpace(method) ? string.Empty : $".{method}";
+            var methodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
             var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             AppendIndented(builder, indent, $"calls {target.Name}{methodText}{lineText}");
             AppendRepositoryFlow(builder, document, target, nodesById, edgesByFrom, mapLookup, indent + 1);
@@ -278,7 +278,7 @@ public static class FlowBuilder
                 continue;
             }
 
-            var method = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
                 ? methodValue?.ToString()
                 : null;
             var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
@@ -288,7 +288,7 @@ public static class FlowBuilder
                 ? keyValue?.ToString()
                 : null;
             var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var methodText = string.IsNullOrWhiteSpace(method) ? string.Empty : $".{method}";
+            var methodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
             var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
             var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
             AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodText}{operationText}{keyText}{lineText}");
@@ -369,7 +369,7 @@ public static class FlowBuilder
                 continue;
             }
 
-            var method = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
                 ? methodValue?.ToString()
                 : null;
             var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
@@ -379,7 +379,7 @@ public static class FlowBuilder
                 ? keyValue?.ToString()
                 : null;
             var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var methodText = string.IsNullOrWhiteSpace(method) ? string.Empty : $".{method}";
+            var methodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
             var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
             var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
             AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodText}{operationText}{keyText}{lineText}");
@@ -706,10 +706,10 @@ public static class FlowBuilder
                     continue;
                 }
 
-                var method = call.Props is { } props && props.TryGetValue("method", out var methodValue)
+                var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue)
                     ? methodValue?.ToString()
                     : null;
-                var methodText = string.IsNullOrWhiteSpace(method) ? string.Empty : $".{method}";
+                var methodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
                 var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 AppendIndented(builder, indent, $"calls {target.Name}{methodText}{lineText}");
                 AppendRepositoryFlow(builder, document, target, nodesById, edgesByFrom, mapLookup, indent + 1);

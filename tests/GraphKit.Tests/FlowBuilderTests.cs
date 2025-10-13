@@ -78,6 +78,10 @@ public class FlowBuilderTests
             Type = "endpoint.controller",
             Name = "Create",
             Fqdn = "Controller",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controller.cs",
+            SymbolId = "Controller",
             Span = new GraphSpan { StartLine = 1, EndLine = 10 },
             Props = new Dictionary<string, object>
             {
@@ -92,6 +96,10 @@ public class FlowBuilderTests
             Type = "cqrs.request",
             Name = "CreateThing",
             Fqdn = "Request",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Request.cs",
+            SymbolId = "Request",
             Span = new GraphSpan { StartLine = 5, EndLine = 6 }
         };
 
@@ -101,6 +109,10 @@ public class FlowBuilderTests
             Type = "cqrs.handler",
             Name = "CreateThingHandler",
             Fqdn = "Handler",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Handler.cs",
+            SymbolId = "Handler",
             Span = new GraphSpan { StartLine = 10, EndLine = 30 }
         };
 
@@ -110,6 +122,10 @@ public class FlowBuilderTests
             Type = "cqrs.notification",
             Name = "ThingCreated",
             Fqdn = "Notification",
+            Assembly = "Sample.Msg",
+            Project = "Sample.Msg",
+            FilePath = "Notification.cs",
+            SymbolId = "Notification",
             Span = new GraphSpan { StartLine = 15, EndLine = 20 }
         };
 
@@ -119,6 +135,10 @@ public class FlowBuilderTests
             Type = "cqrs.notification_handler",
             Name = "ThingCreatedHandler",
             Fqdn = "NotificationHandler",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "NotificationHandler.cs",
+            SymbolId = "NotificationHandler",
             Span = new GraphSpan { StartLine = 20, EndLine = 40 }
         };
 
@@ -128,6 +148,10 @@ public class FlowBuilderTests
             Type = "app.repository",
             Name = "ThingRepository",
             Fqdn = "Repository",
+            Assembly = "Sample.Data",
+            Project = "Sample.Data",
+            FilePath = "Repository.cs",
+            SymbolId = "Repository",
             Span = new GraphSpan { StartLine = 50, EndLine = 60 }
         };
 
@@ -142,6 +166,7 @@ public class FlowBuilderTests
                     From = controller.Id,
                     To = request.Id,
                     Kind = "maps_to",
+                    Source = "analysis",
                     Transform = new GraphTransform { Location = new GraphLocation { File = "Controller.cs", Line = 5 } }
                 },
                 new GraphEdge
@@ -149,6 +174,7 @@ public class FlowBuilderTests
                     From = request.Id,
                     To = handler.Id,
                     Kind = "handled_by",
+                    Source = "analysis",
                     Transform = new GraphTransform { MethodSpan = handler.Span }
                 },
                 new GraphEdge
@@ -156,6 +182,7 @@ public class FlowBuilderTests
                     From = handler.Id,
                     To = notification.Id,
                     Kind = "publishes_notification",
+                    Source = "analysis",
                     Transform = new GraphTransform { Location = new GraphLocation { File = "Handler.cs", Line = 25 } }
                 },
                 new GraphEdge
@@ -163,6 +190,7 @@ public class FlowBuilderTests
                     From = notification.Id,
                     To = notificationHandler.Id,
                     Kind = "handled_by",
+                    Source = "analysis",
                     Transform = new GraphTransform { MethodSpan = notificationHandler.Span }
                 },
                 new GraphEdge
@@ -170,6 +198,7 @@ public class FlowBuilderTests
                     From = notificationHandler.Id,
                     To = repository.Id,
                     Kind = "calls",
+                    Source = "analysis",
                     Props = new Dictionary<string, object> { ["method"] = "RecordAsync" },
                     Transform = new GraphTransform { Location = new GraphLocation { File = "NotificationHandler.cs", Line = 30 } }
                 }
@@ -192,6 +221,10 @@ public class FlowBuilderTests
             Type = "endpoint.controller",
             Name = "Create",
             Fqdn = "Controller",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controller.cs",
+            SymbolId = "Controller",
             Span = new GraphSpan { StartLine = 1, EndLine = 10 },
             Props = new Dictionary<string, object>
             {
@@ -206,6 +239,10 @@ public class FlowBuilderTests
             Type = "cqrs.notification",
             Name = "ThingCreated",
             Fqdn = "Notification",
+            Assembly = "Sample.Msg",
+            Project = "Sample.Msg",
+            FilePath = "Notification.cs",
+            SymbolId = "Notification",
             Span = new GraphSpan { StartLine = 5, EndLine = 6 }
         };
 
@@ -215,6 +252,10 @@ public class FlowBuilderTests
             Type = "cqrs.notification_handler",
             Name = "ThingCreatedHandler",
             Fqdn = "NotificationHandler",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "NotificationHandler.cs",
+            SymbolId = "NotificationHandler",
             Span = new GraphSpan { StartLine = 10, EndLine = 20 }
         };
 
@@ -229,6 +270,7 @@ public class FlowBuilderTests
                     From = controller.Id,
                     To = notification.Id,
                     Kind = "publishes_notification",
+                    Source = "analysis",
                     Transform = new GraphTransform { Location = new GraphLocation { File = "Controller.cs", Line = 5 } }
                 },
                 new GraphEdge
@@ -236,6 +278,7 @@ public class FlowBuilderTests
                     From = notification.Id,
                     To = handler.Id,
                     Kind = "handled_by",
+                    Source = "analysis",
                     Transform = new GraphTransform { MethodSpan = handler.Span }
                 },
                 new GraphEdge
@@ -243,6 +286,7 @@ public class FlowBuilderTests
                     From = handler.Id,
                     To = notification.Id,
                     Kind = "publishes_notification",
+                    Source = "analysis",
                     Transform = new GraphTransform { Location = new GraphLocation { File = "Handler.cs", Line = 15 } }
                 }
             }
@@ -264,6 +308,10 @@ public class FlowBuilderTests
             Type = "endpoint.controller",
             Name = "GetReport",
             Fqdn = "Controller",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controller.cs",
+            SymbolId = "Controller",
             Span = new GraphSpan { StartLine = 1, EndLine = 20 },
             Props = new Dictionary<string, object>
             {
@@ -277,7 +325,11 @@ public class FlowBuilderTests
             Id = "Cache",
             Type = "cache.memory",
             Name = "MemoryCache",
-            Fqdn = "Microsoft.Extensions.Caching.Memory.MemoryCache"
+            Fqdn = "Microsoft.Extensions.Caching.Memory.MemoryCache",
+            Assembly = "Microsoft.Extensions.Caching.Memory",
+            Project = "Microsoft.Extensions.Caching.Memory",
+            FilePath = "MemoryCache.cs",
+            SymbolId = "Microsoft.Extensions.Caching.Memory.MemoryCache"
         };
 
         var options = new GraphNode
@@ -286,6 +338,10 @@ public class FlowBuilderTests
             Type = "config.options",
             Name = "ReportRetentionOptions",
             Fqdn = "Sample.App.Options.ReportRetentionOptions",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Options/ReportRetentionOptions.cs",
+            SymbolId = "Sample.App.Options.ReportRetentionOptions",
             Props = new Dictionary<string, object>
             {
                 ["section"] = "Retention"
@@ -303,6 +359,7 @@ public class FlowBuilderTests
                     From = controller.Id,
                     To = cache.Id,
                     Kind = "uses_cache",
+                    Source = "analysis",
                     Props = new Dictionary<string, object>
                     {
                         ["method"] = "GetOrCreateAsync",
@@ -319,6 +376,7 @@ public class FlowBuilderTests
                     From = controller.Id,
                     To = options.Id,
                     Kind = "uses_options",
+                    Source = "analysis",
                     Transform = new GraphTransform
                     {
                         Location = new GraphLocation { File = "Controller.cs", Line = 15 }

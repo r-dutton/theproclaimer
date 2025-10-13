@@ -212,9 +212,9 @@ public sealed partial class ProjectAnalyzer
                 Tags = new[] { "app", "event" }
             };
 
-            if (FindNotificationByType(handler.NotificationType) is { } notification)
+            if (FindNotificationByType(handler.NotificationType) is { } notificationInfo)
             {
-                var notificationId = StableId.For("cqrs.notification", notification.Fqdn, notification.Assembly, notification.SymbolId);
+                var notificationId = StableId.For("cqrs.notification", notificationInfo.Fqdn, notificationInfo.Assembly, notificationInfo.SymbolId);
                 _edges.Add(new GraphEdge
                 {
                     From = notificationId,
@@ -421,13 +421,13 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var publication in handler.PublishedNotifications)
             {
-                var notification = FindNotificationByType(publication.NotificationType);
-                if (notification is null)
+                var publishedNotification = FindNotificationByType(publication.NotificationType);
+                if (publishedNotification is null)
                 {
                     continue;
                 }
 
-                var notificationId = StableId.For("cqrs.notification", notification.Fqdn, notification.Assembly, notification.SymbolId);
+                var notificationId = StableId.For("cqrs.notification", publishedNotification.Fqdn, publishedNotification.Assembly, publishedNotification.SymbolId);
                 _edges.Add(new GraphEdge
                 {
                     From = id,

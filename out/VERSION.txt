@@ -1,2 +1,2 @@
 AnalyzerVersion=0.1.0
-GitCommit=dadb26adcb07b575fe05153beb666950b30273e6
+GitCommit=ca28a24567c23082b227022dec9fba5a3c3d07d5

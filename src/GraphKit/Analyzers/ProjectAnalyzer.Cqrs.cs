@@ -98,7 +98,8 @@ public sealed partial class ProjectAnalyzer
                         else if (typeName.Contains("Publisher", StringComparison.Ordinal))
                         {
                             var invocation = memberAccess.Parent as InvocationExpressionSyntax;
-                            var line = GetLineNumber(tree, invocation ?? memberAccess);
+                            var locationNode = (SyntaxNode?)invocation ?? memberAccess;
+                            var line = GetLineNumber(tree, locationNode);
                             string? messageType = null;
                             if (invocation is not null)
                             {

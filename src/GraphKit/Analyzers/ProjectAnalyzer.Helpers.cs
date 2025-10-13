@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace GraphKit.Analyzers;
@@ -184,7 +186,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         return declaration.Members.OfType<FieldDeclarationSyntax>().Any(field =>
-            field.Modifiers.Any(m => m.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ConstKeyword)) &&
+            field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)) &&
             field.Declaration.Type.ToString().Equals("string", StringComparison.OrdinalIgnoreCase) &&
             field.Declaration.Variables.Any(variable =>
                 variable.Identifier.Text.Equals("SectionName", StringComparison.OrdinalIgnoreCase)));

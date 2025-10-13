@@ -113,7 +113,7 @@ public sealed class GraphOutputWriter
                 continue;
             }
 
-            var fileName = SanitizeFileName(controller.Id) + ".md";
+            var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(controller.Fqdn) ? controller.Name : controller.Fqdn) + ".md";
             await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
         }
     }

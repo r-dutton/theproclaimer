@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
 using GraphKit.Workspace;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace GraphKit.Analyzers;
@@ -29,7 +31,7 @@ public sealed partial class ProjectAnalyzer
 
             if ((string.Equals(name, "CreateSender", StringComparison.Ordinal) || string.Equals(name, "CreateTopicSender", StringComparison.Ordinal)) &&
                 invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is LiteralExpressionSyntax literal &&
-                literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))
+                literal.IsKind(SyntaxKind.StringLiteralExpression))
             {
                 queueOrTopic ??= literal.Token.ValueText;
             }
@@ -50,7 +52,7 @@ public sealed partial class ProjectAnalyzer
             foreach (var assignment in creation.Initializer.Expressions.OfType<AssignmentExpressionSyntax>())
             {
                 if (assignment.Left is IdentifierNameSyntax { Identifier.Text: "Subject" } &&
-                    assignment.Right is LiteralExpressionSyntax literal && literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))
+                    assignment.Right is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
                 {
                     subject ??= literal.Token.ValueText;
                 }
