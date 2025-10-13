@@ -1,3 +1,4 @@
+using System.Linq;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
@@ -9,17 +10,18 @@ public sealed partial class ProjectAnalyzer
 {
     private void AnalyzeHandler(ProjectInfo project, SyntaxTree tree, ClassDeclarationSyntax classDeclaration, string namespaceName, IReadOnlyDictionary<string, FieldDescriptor> fieldTypes)
     {
-        var generic = classDeclaration.BaseList?.Types
-            .FirstOrDefault(t => t.Type is GenericNameSyntax { Identifier.Text: "IRequestHandler" } g)
-            ?.Type as GenericNameSyntax;
+        var handlerInterface = classDeclaration.BaseList?.Types
+            .Select(t => t.Type)
+            .OfType<GenericNameSyntax>()
+            .FirstOrDefault(g => g.Identifier.Text is "IRequestHandler" or "IAsyncRequestHandler");
 
-        if (generic is null)
+        if (handlerInterface is null)
         {
             return;
         }
 
-        var requestType = generic.TypeArgumentList.Arguments.FirstOrDefault()?.ToString() ?? string.Empty;
-        var responseType = generic.TypeArgumentList.Arguments.Skip(1).FirstOrDefault()?.ToString() ?? "void";
+        var requestType = handlerInterface.TypeArgumentList.Arguments.FirstOrDefault()?.ToString() ?? string.Empty;
+        var responseType = handlerInterface.TypeArgumentList.Arguments.Skip(1).FirstOrDefault()?.ToString() ?? "void";
 
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
@@ -30,11 +32,6 @@ public sealed partial class ProjectAnalyzer
         var handlerInfo = new HandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, requestType, responseType);
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
-
-        foreach (var descriptor in fieldTypes.Values)
-        {
-            handlerInfo.ServiceUsages.Add(new ServiceUsage(descriptor.Type, descriptor.Line));
-        }
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -61,102 +58,132 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
             {
-                if (memberAccess.Expression is IdentifierNameSyntax identifier)
+                if (memberAccess.Expression is not IdentifierNameSyntax identifier)
                 {
-                    var fieldName = identifier.Identifier.Text.TrimStart('_');
-                    if (fieldLookup.TryGetValue(fieldName, out var descriptor))
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var typeName = descriptor.Type;
+                var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                var invocation = memberAccess.Parent as InvocationExpressionSyntax;
+                var invocationLineNode = (SyntaxNode?)invocation ?? memberAccess;
+                var line = GetLineNumber(tree, invocationLineNode);
+                var methodName = GetMemberName(memberAccess.Name);
+                var recordedUsage = false;
+
+                if (IsCacheService(resolvedType) || IsCacheService(typeName))
+                {
+                    var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
+                    if (TryCaptureCacheInvocation(memberAccess, invocation, cacheType, tree) is { } cacheInvocation)
                     {
-                        var typeName = descriptor.Type;
-                        var resolvedType = ResolveImplementationType(typeName) ?? typeName;
-                        if (IsCacheService(resolvedType) || IsCacheService(typeName))
-                        {
-                            var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
-                            if (TryCaptureCacheInvocation(memberAccess, memberAccess.Parent as InvocationExpressionSyntax, cacheType, tree) is { } cacheInvocation)
-                            {
-                                handlerInfo.CacheInvocations.Add(cacheInvocation);
-                            }
-                            continue;
-                        }
-
-                        if (TryResolveOptionsType(resolvedType) is { } resolvedOptionsType)
-                        {
-                            var line = GetLineNumber(tree, memberAccess);
-                            handlerInfo.OptionsUsages.Add(new OptionsUsage(resolvedOptionsType, line));
-                        }
-                        else if (TryResolveOptionsType(typeName) is { } fieldOptionsType)
-                        {
-                            var line = GetLineNumber(tree, memberAccess);
-                            handlerInfo.OptionsUsages.Add(new OptionsUsage(fieldOptionsType, line));
-                        }
-
-                        if (typeName.Contains("DbContext", StringComparison.Ordinal))
-                        {
-                            var accessedMember = memberAccess.Name.Identifier.Text;
-                            var line = GetLineNumber(tree, memberAccess);
-                            handlerInfo.DbContextAccesses.Add(new HandlerDbAccess(typeName, accessedMember, line));
-                        }
-                        else if (typeName.Contains("Publisher", StringComparison.Ordinal))
-                        {
-                            var invocation = memberAccess.Parent as InvocationExpressionSyntax;
-                            var locationNode = (SyntaxNode?)invocation ?? memberAccess;
-                            var line = GetLineNumber(tree, locationNode);
-                            string? messageType = null;
-                            if (invocation is not null)
-                            {
-                                var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                                messageType = argument switch
-                                {
-                                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
-                                    _ => null
-                                };
-                            }
-
-                            handlerInfo.PublisherCalls.Add(new HandlerPublisherCall(typeName, memberAccess.Name.Identifier.Text, line, messageType));
-                        }
-                        else if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
-                        {
-                            var line = GetLineNumber(tree, memberAccess);
-                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(resolvedType, memberAccess.Name.Identifier.Text, line));
-                        }
-                        else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
-                        {
-                            var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                            var sourceExpression = memberAccess.Parent is InvocationExpressionSyntax invocation
-                                ? invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString()
-                                : null;
-                            var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
-                                ? resolved
-                                : null;
-                            var line = GetLineNumber(tree, memberAccess);
-                            handlerInfo.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
-                        }
-                        else if (typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal))
-                        {
-                            if (memberAccess.Parent is InvocationExpressionSyntax invocation &&
-                                memberAccess.Name.Identifier.Text.StartsWith("Publish", StringComparison.Ordinal))
-                            {
-                                var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                                var notificationType = argument switch
-                                {
-                                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
-                                    _ => null
-                                };
-
-                                if (!string.IsNullOrWhiteSpace(notificationType))
-                                {
-                                    var line = GetLineNumber(tree, invocation);
-                                    handlerInfo.PublishedNotifications.Add(new HandlerNotificationPublication(notificationType!, line));
-                                }
-                            }
-                        }
+                        handlerInfo.CacheInvocations.Add(cacheInvocation);
                     }
+
+                    continue;
+                }
+
+                if (TryResolveOptionsType(resolvedType) is { } resolvedOptionsType)
+                {
+                    handlerInfo.OptionsUsages.Add(new OptionsUsage(resolvedOptionsType, line));
+                    recordedUsage = true;
+                }
+                else if (TryResolveOptionsType(typeName) is { } fieldOptionsType)
+                {
+                    handlerInfo.OptionsUsages.Add(new OptionsUsage(fieldOptionsType, line));
+                    recordedUsage = true;
+                }
+
+                if (typeName.Contains("DbContext", StringComparison.Ordinal))
+                {
+                    handlerInfo.DbContextAccesses.Add(new HandlerDbAccess(typeName, methodName ?? string.Empty, line));
+                    continue;
+                }
+
+                if (typeName.Contains("Publisher", StringComparison.Ordinal))
+                {
+                    string? messageType = null;
+                    if (invocation is not null)
+                    {
+                        var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                        messageType = argument switch
+                        {
+                            ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                            IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                            _ => null
+                        };
+                    }
+
+                    handlerInfo.PublisherCalls.Add(new HandlerPublisherCall(typeName, methodName ?? string.Empty, line, messageType));
+                    recordedUsage = true;
+                }
+                else if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                {
+                    handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line));
+                    continue;
+                }
+                else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
+                {
+                    var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                    var sourceExpression = invocation
+                        ?.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
+                    var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
+                        ? resolved
+                        : null;
+                    handlerInfo.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
+                    recordedUsage = true;
+                }
+                else if (typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal))
+                {
+                    if (invocation is not null &&
+                        methodName is { Length: > 0 } &&
+                        methodName.StartsWith("Publish", StringComparison.Ordinal))
+                    {
+                        var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                        var notificationType = argument switch
+                        {
+                            ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                            IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                            _ => null
+                        };
+
+                        if (!string.IsNullOrWhiteSpace(notificationType))
+                        {
+                            handlerInfo.PublishedNotifications.Add(new HandlerNotificationPublication(notificationType!, line));
+                        }
+                        recordedUsage = true;
+                    }
+                }
+
+                if (!recordedUsage)
+                {
+                    var serviceType = resolvedType ?? typeName;
+                    handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
+                }
+                else if (!resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                {
+                    var serviceType = resolvedType ?? typeName;
+                    handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                 }
             }
         }
 
         _handlers[fqdn] = handlerInfo;
+    }
+
+    private static string? GetMemberName(SimpleNameSyntax nameSyntax)
+    {
+        return nameSyntax switch
+        {
+            IdentifierNameSyntax identifier => identifier.Identifier.Text,
+            GenericNameSyntax generic => generic.Identifier.Text,
+            _ => null
+        };
     }
 
     private void PromoteDerivedRequests()
@@ -320,6 +347,11 @@ public sealed partial class ProjectAnalyzer
                 if (registration is not null)
                 {
                     props["lifetime"] = registration.Lifetime;
+                }
+
+                if (!string.IsNullOrWhiteSpace(usage.Method))
+                {
+                    props["method"] = usage.Method!;
                 }
 
                 _edges.Add(new GraphEdge

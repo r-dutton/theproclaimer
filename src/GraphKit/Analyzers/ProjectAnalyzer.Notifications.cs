@@ -43,11 +43,6 @@ public sealed partial class ProjectAnalyzer
         var handler = new NotificationHandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, notificationType);
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var descriptor in fieldTypes.Values)
-        {
-            handler.ServiceUsages.Add(new ServiceUsage(descriptor.Type, descriptor.Line));
-        }
-
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
             var parameterTypes = method.ParameterList.Parameters
@@ -314,6 +309,11 @@ public sealed partial class ProjectAnalyzer
                 if (registration is not null)
                 {
                     props["lifetime"] = registration.Lifetime;
+                }
+
+                if (!string.IsNullOrWhiteSpace(service.Method))
+                {
+                    props["method"] = service.Method!;
                 }
 
                 _edges.Add(new GraphEdge
