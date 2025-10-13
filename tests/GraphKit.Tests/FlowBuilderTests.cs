@@ -214,6 +214,236 @@ public class FlowBuilderTests
     }
 
     [Fact]
+    public void BuildFlows_ShowsReturnFlowFromHandlers()
+    {
+        var controller = new GraphNode
+        {
+            Id = "Controller",
+            Type = "endpoint.controller",
+            Name = "Update",
+            Fqdn = "Controller",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controller.cs",
+            SymbolId = "Controller",
+            Span = new GraphSpan { StartLine = 5, EndLine = 40 },
+            Props = new Dictionary<string, object>
+            {
+                ["route"] = "/api/reports/{id}",
+                ["http_method"] = "PUT"
+            }
+        };
+
+        var request = new GraphNode
+        {
+            Id = "Request",
+            Type = "cqrs.request",
+            Name = "UpdateReport",
+            Fqdn = "Request",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Request.cs",
+            SymbolId = "Request"
+        };
+
+        var handler = new GraphNode
+        {
+            Id = "Handler",
+            Type = "cqrs.handler",
+            Name = "UpdateReportHandler",
+            Fqdn = "Handler",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Handler.cs",
+            SymbolId = "Handler",
+            Span = new GraphSpan { StartLine = 10, EndLine = 30 }
+        };
+
+        var repository = new GraphNode
+        {
+            Id = "Repository",
+            Type = "app.repository",
+            Name = "ReportRepository",
+            Fqdn = "Repository",
+            Assembly = "Sample.Data",
+            Project = "Sample.Data",
+            FilePath = "Repository.cs",
+            SymbolId = "Repository"
+        };
+
+        var entity = new GraphNode
+        {
+            Id = "Entity",
+            Type = "ef.entity",
+            Name = "Report",
+            Fqdn = "Report",
+            Assembly = "Sample.Data",
+            Project = "Sample.Data",
+            FilePath = "Report.cs",
+            SymbolId = "Report"
+        };
+
+        var table = new GraphNode
+        {
+            Id = "Table",
+            Type = "db.table",
+            Name = "Reports",
+            Fqdn = "Reports",
+            Assembly = "Sample.Data",
+            Project = "Sample.Data",
+            FilePath = "Reports.sql",
+            SymbolId = "Reports"
+        };
+
+        var dto = new GraphNode
+        {
+            Id = "Dto",
+            Type = "dto",
+            Name = "ReportDto",
+            Fqdn = "Dto",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Dto.cs",
+            SymbolId = "Dto"
+        };
+
+        var profile = new GraphNode
+        {
+            Id = "Profile",
+            Type = "mapping.automapper.profile",
+            Name = "ReportProfile",
+            Fqdn = "Profile",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Profile.cs",
+            SymbolId = "Profile"
+        };
+
+        var map = new GraphNode
+        {
+            Id = "Map",
+            Type = "mapping.automapper.map",
+            Name = "Report->ReportDto",
+            Fqdn = "Profile.Map",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Profile.cs",
+            SymbolId = "Map",
+            Span = new GraphSpan { StartLine = 20, EndLine = 20 },
+            Props = new Dictionary<string, object>
+            {
+                ["source_type"] = "Report",
+                ["destination_type"] = "ReportDto"
+            }
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1",
+            Nodes = new[] { controller, request, handler, repository, entity, table, dto, profile, map },
+            Edges = new[]
+            {
+                new GraphEdge
+                {
+                    From = controller.Id,
+                    To = request.Id,
+                    Kind = "sends_request",
+                    Source = "analysis",
+                    Transform = new GraphTransform { Location = new GraphLocation { File = controller.FilePath, Line = 12 } }
+                },
+                new GraphEdge
+                {
+                    From = request.Id,
+                    To = handler.Id,
+                    Kind = "handled_by",
+                    Source = "analysis",
+                    Transform = new GraphTransform { MethodSpan = handler.Span }
+                },
+                new GraphEdge
+                {
+                    From = handler.Id,
+                    To = repository.Id,
+                    Kind = "calls",
+                    Source = "analysis",
+                    Props = new Dictionary<string, object> { ["method"] = "UpdateAsync" },
+                    Transform = new GraphTransform { Location = new GraphLocation { File = handler.FilePath, Line = 18 } }
+                },
+                new GraphEdge
+                {
+                    From = repository.Id,
+                    To = entity.Id,
+                    Kind = "writes_to",
+                    Source = "analysis",
+                    Transform = new GraphTransform { Location = new GraphLocation { File = repository.FilePath, Line = 25 } }
+                },
+                new GraphEdge
+                {
+                    From = entity.Id,
+                    To = table.Id,
+                    Kind = "writes_to",
+                    Source = "analysis",
+                    Transform = new GraphTransform { Location = new GraphLocation { File = repository.FilePath, Line = 25 } }
+                },
+                new GraphEdge
+                {
+                    From = handler.Id,
+                    To = dto.Id,
+                    Kind = "maps_to",
+                    Source = "analysis",
+                    Props = new Dictionary<string, object>
+                    {
+                        ["source_type"] = "Report",
+                        ["destination_type"] = "ReportDto"
+                    },
+                    Transform = new GraphTransform { Location = new GraphLocation { File = handler.FilePath, Line = 22 } }
+                },
+                new GraphEdge
+                {
+                    From = controller.Id,
+                    To = dto.Id,
+                    Kind = "returns",
+                    Source = "analysis",
+                    Props = new Dictionary<string, object>
+                    {
+                        ["response_type"] = "ReportDto",
+                        ["variable"] = "result",
+                        ["kind"] = "return"
+                    },
+                    Transform = new GraphTransform { Location = new GraphLocation { File = controller.FilePath, Line = 30 } }
+                },
+                new GraphEdge
+                {
+                    From = map.Id,
+                    To = dto.Id,
+                    Kind = "maps_to",
+                    Source = "analysis",
+                    Props = new Dictionary<string, object>
+                    {
+                        ["source_type"] = "Report",
+                        ["destination_type"] = "ReportDto"
+                    },
+                    Transform = new GraphTransform { Location = new GraphLocation { File = map.FilePath, Line = 20 } }
+                },
+                new GraphEdge
+                {
+                    From = map.Id,
+                    To = profile.Id,
+                    Kind = "generated_from",
+                    Source = "analysis",
+                    Transform = new GraphTransform { Location = new GraphLocation { File = map.FilePath, Line = 20 } }
+                }
+            }
+        };
+
+        var flows = FlowBuilder.BuildFlows(document, node => true);
+
+        Assert.Contains("returns ReportDto (var result) [L30] [return]", flows);
+        Assert.Contains("handled_by Handler.Handle", flows);
+        Assert.Contains("writes_to Report", flows);
+        Assert.Contains("writes_to Reports", flows);
+    }
+
+    [Fact]
     public void BuildFlows_IncludesRepositoryQueries()
     {
         var controller = new GraphNode

@@ -11,6 +11,7 @@ public sealed partial class ProjectAnalyzer
         public List<ControllerRequestInvocation> RequestInvocations { get; } = new();
         public List<ControllerClientInvocation> HttpClientInvocations { get; } = new();
         public List<ControllerMappingInvocation> MappingInvocations { get; } = new();
+        public List<ControllerResponseUsage> ResponseUsages { get; } = new();
         public List<ControllerValidatorInvocation> ValidatorInvocations { get; } = new();
         public List<ControllerCastInvocation> CastInvocations { get; } = new();
         public List<ControllerNotificationInvocation> NotificationInvocations { get; } = new();
@@ -26,6 +27,8 @@ public sealed partial class ProjectAnalyzer
     private sealed record ControllerClientInvocation(string ClientType, string HttpMethod, string? RelativePath, int Line);
 
     private sealed record ControllerMappingInvocation(string? SourceType, string? DestinationType, string? AssignedVariable, int Line);
+
+    private sealed record ControllerResponseUsage(string ResponseType, string? Variable, int Line, bool IsReturn);
 
     private sealed record ControllerValidatorInvocation(string ValidatorType, int Line);
 

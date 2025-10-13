@@ -230,6 +230,14 @@ public static class FlowBuilder
                 AppendCommandFlow(builder, state, requestNode, childIndent + 1);
             }
 
+            foreach (var returnEdge in edges.Where(e => e.Kind == "returns"))
+            {
+                var annotation = returnEdge.Props is { } props && props.TryGetValue("kind", out var kindValue)
+                    ? kindValue?.ToString()
+                    : null;
+                AppendMappingEdge(builder, state, returnEdge, childIndent, label: "returns", annotation: annotation);
+            }
+
             foreach (var notificationEdge in edges.Where(e => e.Kind == "publishes_notification"))
             {
                 if (!state.NodesById.TryGetValue(notificationEdge.To, out var notificationNode))

@@ -155,6 +155,58 @@ public sealed partial class ProjectAnalyzer
         return registration?.ImplementationType;
     }
 
+    private string? TryResolveProjectionSource(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables, IReadOnlyDictionary<string, FieldDescriptor> fieldLookup)
+    {
+        var resolved = TryResolveExpressionType(expression, parameterTypes, localVariables);
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            return ExtractInnermostGenericType(resolved);
+        }
+
+        if (expression is IdentifierNameSyntax identifier)
+        {
+            var identifierName = identifier.Identifier.Text.TrimStart('_');
+            if (fieldLookup.TryGetValue(identifierName, out var descriptor))
+            {
+                return ExtractInnermostGenericType(descriptor.Type) ?? descriptor.Type;
+            }
+        }
+
+        if (expression is MemberAccessExpressionSyntax member)
+        {
+            if (member.Expression is IdentifierNameSyntax rootIdentifier)
+            {
+                var rootName = rootIdentifier.Identifier.Text.TrimStart('_');
+                if (fieldLookup.TryGetValue(rootName, out var descriptor) && descriptor.Type.Contains("DbContext", StringComparison.Ordinal))
+                {
+                    var propertyName = member.Name.Identifier.Text;
+                    var entity = _entities.Values.FirstOrDefault(e => e.DbSetProperties.Any(p => p.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase)));
+                    if (entity is not null)
+                    {
+                        return entity.Fqdn;
+                    }
+                }
+            }
+
+            var nested = TryResolveProjectionSource(member.Expression, parameterTypes, localVariables, fieldLookup);
+            if (!string.IsNullOrWhiteSpace(nested))
+            {
+                return nested;
+            }
+        }
+
+        if (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax invocationAccess)
+        {
+            var nested = TryResolveProjectionSource(invocationAccess.Expression, parameterTypes, localVariables, fieldLookup);
+            if (!string.IsNullOrWhiteSpace(nested))
+            {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
     private static string? TryResolveExpressionType(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables)
     {
         if (expression is IdentifierNameSyntax identifier)
@@ -176,6 +228,32 @@ public sealed partial class ProjectAnalyzer
         }
 
         return null;
+    }
+
+    private static string? ExtractInnermostGenericType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        var current = typeName;
+        while (true)
+        {
+            var generic = ExtractGenericArgument(current);
+            if (string.IsNullOrWhiteSpace(generic))
+            {
+                return current;
+            }
+
+            var separator = generic.IndexOf(',');
+            if (separator >= 0)
+            {
+                generic = generic[..separator];
+            }
+
+            current = generic;
+        }
     }
 
     private static bool IsOptionsDeclaration(TypeDeclarationSyntax declaration)

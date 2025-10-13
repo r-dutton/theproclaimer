@@ -176,6 +176,35 @@ public sealed partial class ProjectAnalyzer
                     handler.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                 }
             }
+
+            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (invocation.Expression is not MemberAccessExpressionSyntax extensionAccess)
+                {
+                    continue;
+                }
+
+                if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
+                {
+                    var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                    if (!string.IsNullOrWhiteSpace(destination))
+                    {
+                        var line = GetLineNumber(tree, invocation);
+                        handler.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
+                    }
+                }
+                else if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectByIdAsync" } projectById)
+                {
+                    var destination = projectById.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                    if (!string.IsNullOrWhiteSpace(destination))
+                    {
+                        var line = GetLineNumber(tree, invocation);
+                        handler.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
+                    }
+                }
+            }
         }
 
         _notificationHandlers[fqdn] = handler;

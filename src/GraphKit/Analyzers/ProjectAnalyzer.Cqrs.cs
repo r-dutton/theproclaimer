@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
 using GraphKit.Workspace;
@@ -163,6 +164,35 @@ public sealed partial class ProjectAnalyzer
                             var serviceType = resolvedType ?? typeName;
                             handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                         }
+                    }
+                }
+            }
+
+            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (invocation.Expression is not MemberAccessExpressionSyntax extensionAccess)
+                {
+                    continue;
+                }
+
+                if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
+                {
+                    var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                    if (!string.IsNullOrWhiteSpace(destination))
+                    {
+                        var line = GetLineNumber(tree, invocation);
+                        handlerInfo.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
+                    }
+                }
+                else if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectByIdAsync" } projectById)
+                {
+                    var destination = projectById.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                    if (!string.IsNullOrWhiteSpace(destination))
+                    {
+                        var line = GetLineNumber(tree, invocation);
+                        handlerInfo.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
                     }
                 }
             }
