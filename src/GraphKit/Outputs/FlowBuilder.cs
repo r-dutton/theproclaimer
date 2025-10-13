@@ -629,23 +629,48 @@ public static class FlowBuilder
         IReadOnlyDictionary<string, GraphNode> nodesById,
         IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
         IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
-        int indent)
+        int indent,
+        HashSet<string>? visitedNotifications = null,
+        HashSet<string>? visitedHandlers = null)
     {
-        if (!edgesByFrom.TryGetValue(notification.Id, out var edges))
+        visitedNotifications ??= new HashSet<string>(StringComparer.Ordinal);
+        if (!visitedNotifications.Add(notification.Id))
         {
             return;
         }
 
-        foreach (var handlerEdge in edges.Where(e => e.Kind == "handled_by"))
+        if (!edgesByFrom.TryGetValue(notification.Id, out var edges))
         {
-            if (!nodesById.TryGetValue(handlerEdge.To, out var handlerNode))
-            {
-                continue;
-            }
+            visitedNotifications.Remove(notification.Id);
+            return;
+        }
 
-            var span = handlerNode.Span;
-            AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
-            AppendNotificationHandlerFlow(builder, document, handlerNode, nodesById, edgesByFrom, mapLookup, indent + 1);
+        try
+        {
+            foreach (var handlerEdge in edges.Where(e => e.Kind == "handled_by"))
+            {
+                if (!nodesById.TryGetValue(handlerEdge.To, out var handlerNode))
+                {
+                    continue;
+                }
+
+                var span = handlerNode.Span;
+                AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
+                AppendNotificationHandlerFlow(
+                    builder,
+                    document,
+                    handlerNode,
+                    nodesById,
+                    edgesByFrom,
+                    mapLookup,
+                    indent + 1,
+                    visitedNotifications,
+                    visitedHandlers);
+            }
+        }
+        finally
+        {
+            visitedNotifications.Remove(notification.Id);
         }
     }
 
@@ -656,71 +681,96 @@ public static class FlowBuilder
         IReadOnlyDictionary<string, GraphNode> nodesById,
         IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
         IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
-        int indent)
+        int indent,
+        HashSet<string> visitedNotifications,
+        HashSet<string>? visitedHandlers = null)
     {
-        if (!edgesByFrom.TryGetValue(handler.Id, out var edges))
+        visitedHandlers ??= new HashSet<string>(StringComparer.Ordinal);
+        if (!visitedHandlers.Add(handler.Id))
         {
             return;
         }
 
-        foreach (var call in edges.Where(e => e.Kind == "calls"))
+        if (!edgesByFrom.TryGetValue(handler.Id, out var edges))
         {
-            if (!nodesById.TryGetValue(call.To, out var target))
-            {
-                continue;
-            }
-
-            var method = call.Props is { } props && props.TryGetValue("method", out var methodValue)
-                ? methodValue?.ToString()
-                : null;
-            var methodText = string.IsNullOrWhiteSpace(method) ? string.Empty : $".{method}";
-            var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"calls {target.Name}{methodText}{lineText}");
-            AppendRepositoryFlow(builder, document, target, nodesById, edgesByFrom, mapLookup, indent + 1);
+            visitedHandlers.Remove(handler.Id);
+            return;
         }
 
-        foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
+        try
         {
-            AppendMappingEdge(builder, document, mapping, nodesById, edgesByFrom, mapLookup, indent);
-        }
-
-        foreach (var service in edges.Where(e => e.Kind == "uses_service"))
-        {
-            if (!nodesById.TryGetValue(service.To, out var serviceNode))
+            foreach (var call in edges.Where(e => e.Kind == "calls"))
             {
-                continue;
+                if (!nodesById.TryGetValue(call.To, out var target))
+                {
+                    continue;
+                }
+
+                var method = call.Props is { } props && props.TryGetValue("method", out var methodValue)
+                    ? methodValue?.ToString()
+                    : null;
+                var methodText = string.IsNullOrWhiteSpace(method) ? string.Empty : $".{method}";
+                var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                AppendIndented(builder, indent, $"calls {target.Name}{methodText}{lineText}");
+                AppendRepositoryFlow(builder, document, target, nodesById, edgesByFrom, mapLookup, indent + 1);
             }
 
-            var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
-                ? lifetimeValue?.ToString()
-                : null;
-            var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
-            AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{lineText}");
-        }
-
-        foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
-        {
-            if (!nodesById.TryGetValue(requestEdge.To, out var requestNode))
+            foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
             {
-                continue;
+                AppendMappingEdge(builder, document, mapping, nodesById, edgesByFrom, mapLookup, indent);
             }
 
-            var lineText = requestEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"sends_request {requestNode.Name}{lineText}");
-            AppendCommandFlow(builder, document, requestNode, nodesById, edgesByFrom, mapLookup, indent + 1);
-        }
-
-        foreach (var publish in edges.Where(e => e.Kind == "publishes_notification"))
-        {
-            if (!nodesById.TryGetValue(publish.To, out var notificationNode))
+            foreach (var service in edges.Where(e => e.Kind == "uses_service"))
             {
-                continue;
+                if (!nodesById.TryGetValue(service.To, out var serviceNode))
+                {
+                    continue;
+                }
+
+                var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
+                    ? lifetimeValue?.ToString()
+                    : null;
+                var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
+                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{lineText}");
             }
 
-            var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
-            AppendNotificationFlow(builder, document, notificationNode, nodesById, edgesByFrom, mapLookup, indent + 1);
+            foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
+            {
+                if (!nodesById.TryGetValue(requestEdge.To, out var requestNode))
+                {
+                    continue;
+                }
+
+                var lineText = requestEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                AppendIndented(builder, indent, $"sends_request {requestNode.Name}{lineText}");
+                AppendCommandFlow(builder, document, requestNode, nodesById, edgesByFrom, mapLookup, indent + 1);
+            }
+
+            foreach (var publish in edges.Where(e => e.Kind == "publishes_notification"))
+            {
+                if (!nodesById.TryGetValue(publish.To, out var notificationNode))
+                {
+                    continue;
+                }
+
+                var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
+                AppendNotificationFlow(
+                    builder,
+                    document,
+                    notificationNode,
+                    nodesById,
+                    edgesByFrom,
+                    mapLookup,
+                    indent + 1,
+                    visitedNotifications,
+                    visitedHandlers);
+            }
+        }
+        finally
+        {
+            visitedHandlers.Remove(handler.Id);
         }
     }
 }

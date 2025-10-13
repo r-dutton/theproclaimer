@@ -184,6 +184,78 @@ public class FlowBuilderTests
     }
 
     [Fact]
+    public void BuildFlows_StopsNotificationCycles()
+    {
+        var controller = new GraphNode
+        {
+            Id = "Controller",
+            Type = "endpoint.controller",
+            Name = "Create",
+            Fqdn = "Controller",
+            Span = new GraphSpan { StartLine = 1, EndLine = 10 },
+            Props = new Dictionary<string, object>
+            {
+                ["route"] = "/api/notifications",
+                ["http_method"] = "POST"
+            }
+        };
+
+        var notification = new GraphNode
+        {
+            Id = "Notification",
+            Type = "cqrs.notification",
+            Name = "ThingCreated",
+            Fqdn = "Notification",
+            Span = new GraphSpan { StartLine = 5, EndLine = 6 }
+        };
+
+        var handler = new GraphNode
+        {
+            Id = "NotificationHandler",
+            Type = "cqrs.notification_handler",
+            Name = "ThingCreatedHandler",
+            Fqdn = "NotificationHandler",
+            Span = new GraphSpan { StartLine = 10, EndLine = 20 }
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1",
+            Nodes = new[] { controller, notification, handler },
+            Edges = new[]
+            {
+                new GraphEdge
+                {
+                    From = controller.Id,
+                    To = notification.Id,
+                    Kind = "publishes_notification",
+                    Transform = new GraphTransform { Location = new GraphLocation { File = "Controller.cs", Line = 5 } }
+                },
+                new GraphEdge
+                {
+                    From = notification.Id,
+                    To = handler.Id,
+                    Kind = "handled_by",
+                    Transform = new GraphTransform { MethodSpan = handler.Span }
+                },
+                new GraphEdge
+                {
+                    From = handler.Id,
+                    To = notification.Id,
+                    Kind = "publishes_notification",
+                    Transform = new GraphTransform { Location = new GraphLocation { File = "Handler.cs", Line = 15 } }
+                }
+            }
+        };
+
+        var flows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "Controller" }));
+
+        Assert.Contains("publishes_notification ThingCreated", flows);
+        var occurrences = flows.Split("handled_by NotificationHandler.Handle", StringSplitOptions.None).Length - 1;
+        Assert.Equal(1, occurrences);
+    }
+
+    [Fact]
     public void BuildFlows_FormatsCacheAndOptionsEdges()
     {
         var controller = new GraphNode
