@@ -70,6 +70,38 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
+        if (_dbContexts.TryGetValue(typeName, out var dbContext))
+        {
+            var id = StableId.For("ef.db_context", dbContext.Fqdn, dbContext.Assembly, dbContext.SymbolId);
+            reference = new NodeReference(id, dbContext.FilePath, dbContext.Span);
+            return true;
+        }
+
+        if (_dbContexts.Values.FirstOrDefault(c =>
+                c.Fqdn.Equals(typeName, StringComparison.OrdinalIgnoreCase) ||
+                c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)) is { } contextFallback)
+        {
+            var id = StableId.For("ef.db_context", contextFallback.Fqdn, contextFallback.Assembly, contextFallback.SymbolId);
+            reference = new NodeReference(id, contextFallback.FilePath, contextFallback.Span);
+            return true;
+        }
+
+        if (_backgroundServices.TryGetValue(typeName, out var backgroundService))
+        {
+            var id = StableId.For("app.background_service", backgroundService.Fqdn, backgroundService.Assembly, backgroundService.SymbolId);
+            reference = new NodeReference(id, backgroundService.FilePath, backgroundService.Span);
+            return true;
+        }
+
+        if (_backgroundServices.Values.FirstOrDefault(s =>
+                s.Fqdn.Equals(typeName, StringComparison.OrdinalIgnoreCase) ||
+                s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)) is { } backgroundFallback)
+        {
+            var id = StableId.For("app.background_service", backgroundFallback.Fqdn, backgroundFallback.Assembly, backgroundFallback.SymbolId);
+            reference = new NodeReference(id, backgroundFallback.FilePath, backgroundFallback.Span);
+            return true;
+        }
+
         if (_handlers.TryGetValue(typeName, out var handler))
         {
             var id = StableId.For("cqrs.handler", handler.Fqdn, handler.Assembly, handler.SymbolId);

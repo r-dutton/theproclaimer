@@ -78,6 +78,13 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record DbSetInfo(string Name, int Line);
 
+    private sealed record DbContextInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
+    {
+        public List<DbContextDbSet> DbSets { get; } = new();
+    }
+
+    private sealed record DbContextDbSet(string EntityType, string PropertyName, int Line);
+
     private sealed record TableInfo(string Name, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId);
 
     private sealed record HttpClientInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)

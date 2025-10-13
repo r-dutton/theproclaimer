@@ -39,6 +39,7 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, BackgroundServiceInfo> _backgroundServices = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, OptionsInfo> _options = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CacheInfo> _caches = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DbContextInfo> _dbContexts = new(StringComparer.OrdinalIgnoreCase);
 
     public ProjectAnalyzer(string workspaceRoot)
     {
@@ -87,6 +88,7 @@ public sealed partial class ProjectAnalyzer
         EmitMinimalEndpoints();
         EmitDtos();
         EmitValidators();
+        EmitDbContexts();
         EmitEntities();
         EmitMappings();
         EmitHttpClients();
