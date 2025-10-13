@@ -1,0 +1,23 @@
+{
+  "services": {
+    "SampleWeb": {
+      "solution": "src/Sample.SolutionA.sln",
+      "base_urls": {
+        "dev": "https://localhost:5001"
+      }
+    },
+    "ReportsApi": {
+      "solution": "src/Sample.SolutionB.sln",
+      "base_urls": {
+        "dev": "https://localhost:6001"
+      }
+    }
+  },
+  "bindings": [
+    {
+      "caller": "SampleWeb",
+      "client": "Sample.Web.HttpClients.ReportsClient",
+      "target_service": "ReportsApi"
+    }
+  ]
+}

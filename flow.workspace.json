@@ -1,0 +1,22 @@
+{
+  "solutions": [
+    "src/Sample.SolutionA.sln",
+    "src/Sample.SolutionB.sln"
+  ],
+  "services": {
+    "SampleWeb": {
+      "solution": "src/Sample.SolutionA.sln",
+      "assembly_names": ["Sample.Web"],
+      "base_addresses": {
+        "dev": "https://localhost:5001"
+      }
+    },
+    "ReportsApi": {
+      "solution": "src/Sample.SolutionB.sln",
+      "assembly_names": ["Sample.ReportsApi"],
+      "base_addresses": {
+        "dev": "https://localhost:6001"
+      }
+    }
+  }
+}
