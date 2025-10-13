@@ -17,6 +17,8 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, MinimalEndpointInfo> _minimalEndpoints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RequestInfo> _requests = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HandlerInfo> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, PipelineBehaviorInfo> _pipelineBehaviors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, RequestProcessorInfo> _requestProcessors = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RepositoryInfo> _repositories = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DtoInfo> _dtos = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<ValidatorInfo> _validators = new();
@@ -81,6 +83,8 @@ public sealed partial class ProjectAnalyzer
         EmitNotifications();
         EmitOptions();
         EmitHandlers();
+        EmitPipelineBehaviors();
+        EmitRequestProcessors();
         EmitNotificationHandlers();
         EmitRepositories();
         EmitControllers();

@@ -10,6 +10,34 @@ namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
+    private static GenericNameSyntax? MatchGenericInterface(TypeSyntax typeSyntax, params string[] interfaceNames)
+    {
+        if (typeSyntax is GenericNameSyntax generic)
+        {
+            foreach (var name in interfaceNames)
+            {
+                if (generic.Identifier.Text.Equals(name, StringComparison.Ordinal))
+                {
+                    return generic;
+                }
+            }
+
+            return null;
+        }
+
+        if (typeSyntax is QualifiedNameSyntax qualified)
+        {
+            return MatchGenericInterface(qualified.Right, interfaceNames);
+        }
+
+        if (typeSyntax is AliasQualifiedNameSyntax alias)
+        {
+            return MatchGenericInterface(alias.Name, interfaceNames);
+        }
+
+        return null;
+    }
+
     private bool TryResolveNodeReference(string typeName, out NodeReference reference)
     {
         var simple = typeName.Split('.').Last();
@@ -81,6 +109,34 @@ public sealed partial class ProjectAnalyzer
         {
             var id = StableId.For("cqrs.handler", handlerFallback.Fqdn, handlerFallback.Assembly, handlerFallback.SymbolId);
             reference = new NodeReference(id, handlerFallback.FilePath, handlerFallback.Span);
+            return true;
+        }
+
+        if (_pipelineBehaviors.TryGetValue(typeName, out var pipeline))
+        {
+            var id = StableId.For("cqrs.pipeline_behavior", pipeline.Fqdn, pipeline.Assembly, pipeline.SymbolId);
+            reference = new NodeReference(id, pipeline.FilePath, pipeline.Span);
+            return true;
+        }
+
+        if (_pipelineBehaviors.Values.FirstOrDefault(p => p.Name.Equals(simple, StringComparison.Ordinal)) is { } pipelineFallback)
+        {
+            var id = StableId.For("cqrs.pipeline_behavior", pipelineFallback.Fqdn, pipelineFallback.Assembly, pipelineFallback.SymbolId);
+            reference = new NodeReference(id, pipelineFallback.FilePath, pipelineFallback.Span);
+            return true;
+        }
+
+        if (_requestProcessors.TryGetValue(typeName, out var processor))
+        {
+            var id = StableId.For("cqrs.request_processor", processor.Fqdn, processor.Assembly, processor.SymbolId);
+            reference = new NodeReference(id, processor.FilePath, processor.Span);
+            return true;
+        }
+
+        if (_requestProcessors.Values.FirstOrDefault(p => p.Name.Equals(simple, StringComparison.Ordinal)) is { } processorFallback)
+        {
+            var id = StableId.For("cqrs.request_processor", processorFallback.Fqdn, processorFallback.Assembly, processorFallback.SymbolId);
+            reference = new NodeReference(id, processorFallback.FilePath, processorFallback.Span);
             return true;
         }
 

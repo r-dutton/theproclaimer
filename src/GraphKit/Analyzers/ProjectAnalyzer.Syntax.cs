@@ -119,6 +119,16 @@ public sealed partial class ProjectAnalyzer
             AnalyzeHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
         }
 
+        if (ImplementsInterface(classDeclaration, "IPipelineBehavior"))
+        {
+            AnalyzePipelineBehavior(project, tree, classDeclaration, namespaceName, fieldTypes);
+        }
+
+        if (ImplementsInterface(classDeclaration, "IRequestPreProcessor") || ImplementsInterface(classDeclaration, "IRequestPostProcessor"))
+        {
+            AnalyzeRequestProcessor(project, tree, classDeclaration, namespaceName, fieldTypes);
+        }
+
         if (ImplementsInterface(classDeclaration, "INotificationHandler"))
         {
             AnalyzeNotificationHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
