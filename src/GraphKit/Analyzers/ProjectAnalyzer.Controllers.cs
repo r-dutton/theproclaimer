@@ -67,6 +67,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
+
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
@@ -298,7 +299,6 @@ public sealed partial class ProjectAnalyzer
                     }
                 }
             }
-
             foreach (var binary in method.DescendantNodes().OfType<BinaryExpressionSyntax>())
             {
                 if (binary.IsKind(SyntaxKind.AsExpression) && binary.Right is TypeSyntax asType)
@@ -403,6 +403,7 @@ public sealed partial class ProjectAnalyzer
                 }
             };
             _nodes[id] = node;
+
 
             foreach (var request in action.RequestInvocations)
             {
@@ -608,6 +609,23 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = clientId,
+                        Kind = "uses_client",
+                        Source = "static",
+                        Confidence = 0.7,
+                        Transform = new GraphTransform
+                        {
+                            Type = "httpclient.request",
+                            Location = new GraphLocation { File = action.FilePath, Line = clientInvocation.Line }
+                        },
+                        Props = props,
+                        Evidence = CreateEvidence(action.FilePath, clientInvocation.Line)
+                    });
+                }
+            }
             foreach (var mapping in action.MappingInvocations)
             {
                 if (string.IsNullOrWhiteSpace(mapping.DestinationType))

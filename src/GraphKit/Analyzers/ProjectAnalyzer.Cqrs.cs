@@ -58,22 +58,32 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
             {
-                if (memberAccess.Expression is IdentifierNameSyntax identifier)
+                if (memberAccess.Expression is not IdentifierNameSyntax identifier)
                 {
-                    var fieldName = identifier.Identifier.Text.TrimStart('_');
-                    if (fieldLookup.TryGetValue(fieldName, out var descriptor))
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var typeName = descriptor.Type;
+                var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                var invocation = memberAccess.Parent as InvocationExpressionSyntax;
+                var invocationLineNode = (SyntaxNode?)invocation ?? memberAccess;
+                var line = GetLineNumber(tree, invocationLineNode);
+                var methodName = GetMemberName(memberAccess.Name);
+                var recordedUsage = false;
+
+                if (IsCacheService(resolvedType) || IsCacheService(typeName))
+                {
+                    var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
+                    if (TryCaptureCacheInvocation(memberAccess, invocation, cacheType, tree) is { } cacheInvocation)
                     {
-                        var typeName = descriptor.Type;
-                        var resolvedType = ResolveImplementationType(typeName) ?? typeName;
-                        if (IsCacheService(resolvedType) || IsCacheService(typeName))
-                        {
-                            var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
-                            if (TryCaptureCacheInvocation(memberAccess, memberAccess.Parent as InvocationExpressionSyntax, cacheType, tree) is { } cacheInvocation)
-                            {
-                                handlerInfo.CacheInvocations.Add(cacheInvocation);
-                            }
-                            continue;
-                        }
+                        handlerInfo.CacheInvocations.Add(cacheInvocation);
+                    }
 
                         var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                         var invocationLineNode = (SyntaxNode?)invocation ?? memberAccess;
@@ -164,6 +174,17 @@ public sealed partial class ProjectAnalyzer
                             handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                         }
                     }
+                }
+
+                if (!recordedUsage)
+                {
+                    var serviceType = resolvedType ?? typeName;
+                    handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
+                }
+                else if (!resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                {
+                    var serviceType = resolvedType ?? typeName;
+                    handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                 }
             }
         }
