@@ -4,6 +4,7 @@ using System.Linq;
 using GraphKit;
 using GraphKit.Graph;
 using GraphKit.Outputs;
+using GraphKit.Workspace;
 
 var argsList = args.ToList();
 string workspace = Environment.CurrentDirectory;
@@ -51,11 +52,12 @@ var document = await generator.GenerateAsync(new GraphGenerationOptions(
     workspace,
     output,
     solutions.Count > 0 ? solutions : null));
+var workspaceIndex = FlowWorkspaceIndex.Load(workspace);
 
 if (flowPatterns.Count > 0)
 {
     var predicate = FlowFilter.BuildPredicate(flowPatterns);
-    var flow = FlowBuilder.BuildFlows(document, predicate);
+    var flow = FlowBuilder.BuildFlows(document, predicate, workspaceIndex);
 
     if (string.IsNullOrWhiteSpace(flow))
     {
