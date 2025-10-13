@@ -608,24 +608,6 @@ public sealed partial class ProjectAnalyzer
                     });
                 }
             }
-
-                    _edges.Add(new GraphEdge
-                    {
-                        From = id,
-                        To = clientId,
-                        Kind = "uses_client",
-                        Source = "static",
-                        Confidence = 0.7,
-                        Transform = new GraphTransform
-                        {
-                            Type = "httpclient.request",
-                            Location = new GraphLocation { File = action.FilePath, Line = clientInvocation.Line }
-                        },
-                        Props = props,
-                        Evidence = CreateEvidence(action.FilePath, clientInvocation.Line)
-                    });
-                }
-            }
             foreach (var mapping in action.MappingInvocations)
             {
                 if (string.IsNullOrWhiteSpace(mapping.DestinationType))
