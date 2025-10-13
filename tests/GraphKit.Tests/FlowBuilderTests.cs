@@ -672,7 +672,8 @@ public class FlowBuilderTests
 
         var flows = FlowBuilder.BuildFlows(document, node => true);
 
-        Assert.Contains("uses_cache MemoryCache.GetOrCreateAsync [read_write] (key=report:{id}) [L12]", flows);
+        Assert.Contains("uses_cache MemoryCache", flows);
+        Assert.Contains("method GetOrCreateAsync [read_write] (key=report:{id}) [L12]", flows);
         Assert.Contains("uses_options ReportRetentionOptions (Retention) [L15]", flows);
     }
 

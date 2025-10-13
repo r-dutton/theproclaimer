@@ -133,10 +133,15 @@ public static class FlowBuilder
                     ? keyValue?.ToString()
                     : null;
                 var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var serviceMethodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+                var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
                 var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
                 var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-                AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{serviceMethodText}{operationText}{keyText}{lineText}");
+                AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{cacheLineText}");
+
+                if (!string.IsNullOrWhiteSpace(cacheMethod))
+                {
+                    AppendIndented(builder, childIndent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
+                }
             }
 
             foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -204,8 +209,13 @@ public static class FlowBuilder
                 var serviceMethodName = serviceEdge.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
                     ? methodValue?.ToString()
                     : null;
-                var serviceMethodText = string.IsNullOrWhiteSpace(serviceMethodName) ? string.Empty : $".{serviceMethodName}";
-                AppendIndented(builder, childIndent, $"uses_service {serviceNode.Name}{suffix}{serviceMethodText}{lineText}");
+                var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
+                AppendIndented(builder, childIndent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
+
+                if (!string.IsNullOrWhiteSpace(serviceMethodName))
+                {
+                    AppendIndented(builder, childIndent + 1, $"method {serviceMethodName}{lineText}");
+                }
             }
 
             foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
@@ -371,8 +381,13 @@ public static class FlowBuilder
                 var serviceMethodName = service.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
                     ? methodValue?.ToString()
                     : null;
-                var serviceMethodText = string.IsNullOrWhiteSpace(serviceMethodName) ? string.Empty : $".{serviceMethodName}";
-                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceMethodText}{lineText}");
+                var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
+                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
+
+                if (!string.IsNullOrWhiteSpace(serviceMethodName))
+                {
+                    AppendIndented(builder, indent + 1, $"method {serviceMethodName}{lineText}");
+                }
             }
 
             foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
@@ -392,10 +407,15 @@ public static class FlowBuilder
                     ? keyValue?.ToString()
                     : null;
                 var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var serviceMethodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+                var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
                 var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
                 var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-                AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{serviceMethodText}{operationText}{keyText}{lineText}");
+                AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{cacheLineText}");
+
+                if (!string.IsNullOrWhiteSpace(cacheMethod))
+                {
+                    AppendIndented(builder, indent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
+                }
             }
 
             foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -488,10 +508,15 @@ public static class FlowBuilder
                 ? keyValue?.ToString()
                 : null;
             var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var serviceMethodText = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+            var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
             var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
             var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-            AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{serviceMethodText}{operationText}{keyText}{lineText}");
+            AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{cacheLineText}");
+
+            if (!string.IsNullOrWhiteSpace(cacheMethod))
+            {
+                AppendIndented(builder, indent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
+            }
         }
 
         foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -947,8 +972,13 @@ public static class FlowBuilder
                 var serviceMethodName = service.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
                     ? methodValue?.ToString()
                     : null;
-                var serviceMethodText = string.IsNullOrWhiteSpace(serviceMethodName) ? string.Empty : $".{serviceMethodName}";
-                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceMethodText}{lineText}");
+                var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
+                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
+
+                if (!string.IsNullOrWhiteSpace(serviceMethodName))
+                {
+                    AppendIndented(builder, indent + 1, $"method {serviceMethodName}{lineText}");
+                }
             }
 
             foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))

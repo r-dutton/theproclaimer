@@ -74,6 +74,20 @@ public sealed partial class ProjectAnalyzer
             _messageContracts[fqdn] = new MessageContractInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, classDeclaration.Identifier.Text);
         }
 
+        if (ImplementsInterface(classDeclaration, "IRequest") || ImplementsInterface(classDeclaration, "IAsyncRequest"))
+        {
+            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
+            _requests[fqdn] = requestInfo;
+        }
+        else if (classDeclaration.BaseList is { Types.Count: > 0 })
+        {
+            var baseTypeName = classDeclaration.BaseList.Types.First().Type.ToString();
+            if (IsLikelyRequestName(baseTypeName))
+            {
+                _derivedRequestCandidates.Add(new DerivedRequestCandidate(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, baseTypeName));
+            }
+        }
+
         if (IsOptionsDeclaration(classDeclaration))
         {
             RegisterOptions(project, tree, classDeclaration, namespaceName);

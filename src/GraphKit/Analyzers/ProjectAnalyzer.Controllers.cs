@@ -159,21 +159,25 @@ public sealed partial class ProjectAnalyzer
                         var typeName = descriptor.Type;
                         var baseTypeName = GetTypeNameWithoutGenerics(typeName);
                         var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                        if (string.IsNullOrWhiteSpace(resolvedType))
+                        {
+                            continue;
+                        }
                         var resolvedBaseType = GetTypeNameWithoutGenerics(resolvedType);
-                        var invocationNode = (SyntaxNode?)invocation ?? access;
+                        SyntaxNode invocationNode = invocation;
                         var serviceLine = GetLineNumber(tree, invocationNode);
                         var serviceMethod = GetMemberName(access.Name);
-                        var serviceTypeName = resolvedType ?? typeName;
+                        var serviceTypeName = resolvedType;
                         var recordedServiceUsage = false;
                         if (IsClientType(baseTypeName) || IsClientType(resolvedBaseType))
                         {
                             var callMethod = access.Name.Identifier.Text.ToUpperInvariant();
                             var routeLiteral = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
                             var relativePath = ExtractRouteLiteral(tree, routeLiteral);
-                            var line = GetLineNumber(tree, invocation);
                             var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
                                 ? resolvedBaseType
                                 : baseTypeName;
+                            var line = GetLineNumber(tree, invocation);
                             info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, callMethod, relativePath, line));
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
@@ -191,6 +195,7 @@ public sealed partial class ProjectAnalyzer
                             }
 
                             info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
+                            recordedServiceUsage = true;
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && access.Name is IdentifierNameSyntax { Identifier.Text: "Map" })
                         {
@@ -207,6 +212,7 @@ public sealed partial class ProjectAnalyzer
                             }
 
                             info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
+                            recordedServiceUsage = true;
                         }
                         else if (typeName.StartsWith("IValidator", StringComparison.OrdinalIgnoreCase))
                         {
@@ -232,6 +238,7 @@ public sealed partial class ProjectAnalyzer
                             {
                                 info.RepositoryInvocations.Add(repositoryInvocation);
                             }
+                            recordedServiceUsage = true;
                         }
                         else if (TryResolveOptionsType(resolvedType) is { } optionsType)
                         {
@@ -801,7 +808,6 @@ public sealed partial class ProjectAnalyzer
             }
         }
     }
-
 
     private ControllerRepositoryInvocation? TryCaptureRepositoryInvocation(
         MemberAccessExpressionSyntax access,
