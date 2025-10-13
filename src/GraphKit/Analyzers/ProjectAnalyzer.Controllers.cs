@@ -22,6 +22,7 @@ public sealed partial class ProjectAnalyzer
         var controllerRoute = ResolveRoute(classDeclaration.AttributeLists, className);
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var classAuthorization = CollectAuthorizationAttributes(tree, classDeclaration.AttributeLists, "class_attribute");
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -50,6 +51,32 @@ public sealed partial class ProjectAnalyzer
             }
 
             var info = new ControllerActionInfo(actionFqdn, project.AssemblyName, project.RelativeDirectory, filePath, methodSpan, methodSymbolId, methodName, route, httpMethod, symbolId);
+
+            foreach (var authorization in classAuthorization.Requirements)
+            {
+                info.Authorizations.Add(authorization);
+            }
+
+            info.AllowsAnonymous = classAuthorization.AllowsAnonymous;
+
+            var methodAuthorization = CollectAuthorizationAttributes(tree, method.AttributeLists, "method_attribute");
+            if (methodAuthorization.AllowsAnonymous)
+            {
+                info.Authorizations.Clear();
+                info.AllowsAnonymous = true;
+            }
+            else
+            {
+                if (methodAuthorization.Requirements.Count > 0)
+                {
+                    info.AllowsAnonymous = false;
+                }
+
+                foreach (var authorization in methodAuthorization.Requirements)
+                {
+                    info.Authorizations.Add(authorization);
+                }
+            }
 
             foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
             {
@@ -187,6 +214,15 @@ public sealed partial class ProjectAnalyzer
                         var typeName = descriptor.Type;
                         var baseTypeName = GetTypeNameWithoutGenerics(typeName);
                         var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                        if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
+                        {
+                            if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
+                            {
+                                info.ConfigurationUsages.Add(configurationUsage);
+                            }
+
+                            continue;
+                        }
                         if (string.IsNullOrWhiteSpace(resolvedType))
                         {
                             continue;
@@ -329,6 +365,31 @@ public sealed partial class ProjectAnalyzer
                     }
                 }
             }
+
+            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            {
+                if (elementAccess.Expression is not IdentifierNameSyntax identifier)
+                {
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
+                {
+                    continue;
+                }
+
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                {
+                    info.ConfigurationUsages.Add(configurationUsage);
+                }
+            }
             foreach (var binary in method.DescendantNodes().OfType<BinaryExpressionSyntax>())
             {
                 if (binary.IsKind(SyntaxKind.AsExpression) && binary.Right is TypeSyntax asType)
@@ -414,6 +475,24 @@ public sealed partial class ProjectAnalyzer
         foreach (var action in _controllerActions.Values)
         {
             var id = StableId.For("endpoint.controller", action.Fqdn, action.Assembly, action.SymbolId);
+            var nodeProps = new Dictionary<string, object>
+            {
+                ["route"] = action.Route,
+                ["http_method"] = action.HttpMethod
+            };
+
+            if (action.Authorizations.Count > 0)
+            {
+                nodeProps["authorization"] = action.Authorizations
+                    .Select(CreateAuthorizationProps)
+                    .ToList();
+            }
+
+            if (action.AllowsAnonymous)
+            {
+                nodeProps["allow_anonymous"] = true;
+            }
+
             var node = new GraphNode
             {
                 Id = id,
@@ -426,11 +505,7 @@ public sealed partial class ProjectAnalyzer
                 Span = action.Span,
                 SymbolId = action.SymbolId,
                 Tags = new[] { "web" },
-                Props = new Dictionary<string, object>
-                {
-                    ["route"] = action.Route,
-                    ["http_method"] = action.HttpMethod
-                }
+                Props = nodeProps
             };
             _nodes[id] = node;
 
@@ -586,6 +661,8 @@ public sealed partial class ProjectAnalyzer
                     Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
                 });
             }
+
+            EmitConfigurationEdges(id, action.ConfigurationUsages);
 
             foreach (var clientInvocation in action.HttpClientInvocations)
             {
@@ -1117,6 +1194,7 @@ public sealed partial class ProjectAnalyzer
                 var line = GetLineNumber(tree, invocation);
                 var symbolId = $"M:{namespaceName}.{classDeclaration.Identifier.Text}.{methodName}";
                 var info = new MinimalEndpointInfo(route, verb, project.AssemblyName, project.RelativeDirectory, GetRelativePath(tree.FilePath), new GraphSpan { StartLine = line, EndLine = line }, symbolId, methodName);
+                ApplyMinimalEndpointAuthorization(tree, invocation, info);
                 _minimalEndpoints[$"{verb}:{CanonicalizeRoute(route)}"] = info;
             }
         }
@@ -1140,6 +1218,7 @@ public sealed partial class ProjectAnalyzer
                 var line = GetLineNumber(tree, invocation);
                 var symbolId = $"M:Program.{methodName}";
                 var info = new MinimalEndpointInfo(route, verb, project.AssemblyName, project.RelativeDirectory, GetRelativePath(tree.FilePath), new GraphSpan { StartLine = line, EndLine = line }, symbolId, methodName);
+                ApplyMinimalEndpointAuthorization(tree, invocation, info);
                 _minimalEndpoints[$"{verb}:{CanonicalizeRoute(route)}"] = info;
             }
         }
@@ -1156,6 +1235,24 @@ public sealed partial class ProjectAnalyzer
         foreach (var endpoint in _minimalEndpoints.Values)
         {
             var id = StableId.For("endpoint.minimal_api", endpoint.Fqdn, endpoint.Assembly, endpoint.SymbolId);
+            var props = new Dictionary<string, object>
+            {
+                ["route"] = endpoint.Route,
+                ["http_method"] = endpoint.HttpMethod
+            };
+
+            if (endpoint.Authorizations.Count > 0)
+            {
+                props["authorization"] = endpoint.Authorizations
+                    .Select(CreateAuthorizationProps)
+                    .ToList();
+            }
+
+            if (endpoint.AllowsAnonymous)
+            {
+                props["allow_anonymous"] = true;
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -1168,13 +1265,386 @@ public sealed partial class ProjectAnalyzer
                 Span = endpoint.Span,
                 SymbolId = endpoint.SymbolId,
                 Tags = new[] { "web" },
-                Props = new Dictionary<string, object>
-                {
-                    ["route"] = endpoint.Route,
-                    ["http_method"] = endpoint.HttpMethod
-                }
+                Props = props
             };
         }
+    }
+
+    private AuthorizationMetadata CollectAuthorizationAttributes(SyntaxTree tree, SyntaxList<AttributeListSyntax> attributeLists, string source)
+    {
+        var requirements = new List<EndpointAuthorization>();
+        var allowsAnonymous = false;
+
+        foreach (var attribute in attributeLists.SelectMany(list => list.Attributes))
+        {
+            var attributeName = attribute.Name.ToString();
+            if (AttributeNameEquals(attributeName, "Authorize"))
+            {
+                requirements.Add(ParseAuthorizeAttribute(tree, attribute, source));
+            }
+            else if (AttributeNameEquals(attributeName, "AllowAnonymous"))
+            {
+                allowsAnonymous = true;
+            }
+        }
+
+        return new AuthorizationMetadata(requirements, allowsAnonymous);
+    }
+
+    private void ApplyMinimalEndpointAuthorization(SyntaxTree tree, InvocationExpressionSyntax mapInvocation, MinimalEndpointInfo endpoint)
+    {
+        SyntaxNode? current = mapInvocation;
+        while (current.Parent is MemberAccessExpressionSyntax memberAccess &&
+               memberAccess.Parent is InvocationExpressionSyntax parentInvocation)
+        {
+            var methodName = memberAccess.Name.Identifier.Text;
+            var metadata = CollectAuthorizationFromEndpointInvocation(tree, parentInvocation, methodName);
+
+            if (metadata.AllowsAnonymous)
+            {
+                endpoint.Authorizations.Clear();
+                endpoint.AllowsAnonymous = true;
+            }
+
+            if (metadata.Requirements.Count > 0)
+            {
+                endpoint.AllowsAnonymous = false;
+                endpoint.Authorizations.AddRange(metadata.Requirements);
+            }
+
+            current = parentInvocation;
+        }
+    }
+
+    private AuthorizationMetadata CollectAuthorizationFromEndpointInvocation(SyntaxTree tree, InvocationExpressionSyntax invocation, string source)
+    {
+        var requirements = new List<EndpointAuthorization>();
+        var allowsAnonymous = false;
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+        {
+            return new AuthorizationMetadata(requirements, allowsAnonymous);
+        }
+
+        var methodName = memberAccess.Name.Identifier.Text;
+        if (methodName.Equals("RequireAuthorization", StringComparison.OrdinalIgnoreCase))
+        {
+            CollectAuthorizationFromRequireAuthorization(tree, invocation, $"require_authorization:{source}", requirements);
+        }
+        else if (methodName.Equals("AllowAnonymous", StringComparison.OrdinalIgnoreCase))
+        {
+            allowsAnonymous = true;
+        }
+        else if (methodName.Equals("WithMetadata", StringComparison.OrdinalIgnoreCase))
+        {
+            CollectAuthorizationFromMetadata(tree, invocation, $"metadata:{source}", requirements, ref allowsAnonymous);
+        }
+
+        return new AuthorizationMetadata(requirements, allowsAnonymous);
+    }
+
+    private void CollectAuthorizationFromRequireAuthorization(SyntaxTree tree, InvocationExpressionSyntax invocation, string source, List<EndpointAuthorization> requirements)
+    {
+        var line = GetLineNumber(tree, invocation);
+        if (invocation.ArgumentList is null || invocation.ArgumentList.Arguments.Count == 0)
+        {
+            requirements.Add(new EndpointAuthorization(null, null, null, source, line));
+            return;
+        }
+
+        foreach (var argument in invocation.ArgumentList.Arguments)
+        {
+            var allowAnonymous = false;
+            if (TryExtractAuthorizationMetadata(tree, argument.Expression, source, requirements, ref allowAnonymous))
+            {
+                continue;
+            }
+
+            var value = ExtractStringValue(argument.Expression);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                var argumentLine = GetLineNumber(tree, argument.Expression);
+                requirements.Add(new EndpointAuthorization(value, null, null, source, argumentLine));
+            }
+            else
+            {
+                requirements.Add(new EndpointAuthorization(null, null, null, source, line));
+            }
+        }
+    }
+
+    private void CollectAuthorizationFromMetadata(SyntaxTree tree, InvocationExpressionSyntax invocation, string source, List<EndpointAuthorization> requirements, ref bool allowsAnonymous)
+    {
+        if (invocation.ArgumentList is null)
+        {
+            return;
+        }
+
+        foreach (var argument in invocation.ArgumentList.Arguments)
+        {
+            TryExtractAuthorizationMetadata(tree, argument.Expression, source, requirements, ref allowsAnonymous);
+        }
+    }
+
+    private bool TryExtractAuthorizationMetadata(SyntaxTree tree, ExpressionSyntax expression, string source, List<EndpointAuthorization> requirements, ref bool allowsAnonymous)
+    {
+        switch (expression)
+        {
+            case ObjectCreationExpressionSyntax creation:
+                var typeName = creation.Type.ToString();
+                if (typeName.EndsWith("AuthorizeAttribute", StringComparison.Ordinal))
+                {
+                    requirements.Add(ParseAuthorizeObjectCreation(tree, creation, source));
+                    return true;
+                }
+
+                if (typeName.EndsWith("AllowAnonymousAttribute", StringComparison.Ordinal))
+                {
+                    allowsAnonymous = true;
+                    return true;
+                }
+
+                break;
+            case ArrayCreationExpressionSyntax array:
+                if (array.Initializer is null)
+                {
+                    return false;
+                }
+
+                var handledAny = false;
+                foreach (var element in array.Initializer.Expressions)
+                {
+                    if (TryExtractAuthorizationMetadata(tree, element, source, requirements, ref allowsAnonymous))
+                    {
+                        handledAny = true;
+                    }
+                    else
+                    {
+                        var value = ExtractStringValue(element);
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            var elementLine = GetLineNumber(tree, element);
+                            requirements.Add(new EndpointAuthorization(value, null, null, source, elementLine));
+                            handledAny = true;
+                        }
+                    }
+                }
+
+                return handledAny;
+            case ImplicitArrayCreationExpressionSyntax implicitArray:
+                var handled = false;
+                foreach (var element in implicitArray.Initializer.Expressions)
+                {
+                    if (TryExtractAuthorizationMetadata(tree, element, source, requirements, ref allowsAnonymous))
+                    {
+                        handled = true;
+                    }
+                    else
+                    {
+                        var value = ExtractStringValue(element);
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            var elementLine = GetLineNumber(tree, element);
+                            requirements.Add(new EndpointAuthorization(value, null, null, source, elementLine));
+                            handled = true;
+                        }
+                    }
+                }
+
+                return handled;
+        }
+
+        return false;
+    }
+
+    private EndpointAuthorization ParseAuthorizeAttribute(SyntaxTree tree, AttributeSyntax attribute, string source)
+    {
+        string? policy = null;
+        string? roles = null;
+        string? authenticationSchemes = null;
+
+        if (attribute.ArgumentList is not null)
+        {
+            foreach (var argument in attribute.ArgumentList.Arguments)
+            {
+                var value = ExtractStringValue(argument.Expression);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                var argumentName = GetArgumentName(argument);
+                if (string.IsNullOrWhiteSpace(argumentName))
+                {
+                    policy ??= value;
+                }
+                else
+                {
+                    switch (argumentName)
+                    {
+                        case "Policy":
+                            policy = value;
+                            break;
+                        case "Roles":
+                            roles = value;
+                            break;
+                        case "AuthenticationSchemes":
+                            authenticationSchemes = value;
+                            break;
+                    }
+                }
+            }
+        }
+
+        var line = GetLineNumber(tree, attribute);
+        return new EndpointAuthorization(policy, roles, authenticationSchemes, source, line);
+    }
+
+    private EndpointAuthorization ParseAuthorizeObjectCreation(SyntaxTree tree, ObjectCreationExpressionSyntax creation, string source)
+    {
+        string? policy = null;
+        string? roles = null;
+        string? authenticationSchemes = null;
+
+        if (creation.ArgumentList is not null)
+        {
+            foreach (var argument in creation.ArgumentList.Arguments)
+            {
+                var value = ExtractStringValue(argument.Expression);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                var argumentName = GetArgumentName(argument);
+                if (string.IsNullOrWhiteSpace(argumentName))
+                {
+                    policy ??= value;
+                }
+                else
+                {
+                    switch (argumentName)
+                    {
+                        case "policy":
+                        case "Policy":
+                            policy = value;
+                            break;
+                        case "roles":
+                        case "Roles":
+                            roles = value;
+                            break;
+                        case "authenticationSchemes":
+                        case "AuthenticationSchemes":
+                            authenticationSchemes = value;
+                            break;
+                    }
+                }
+            }
+        }
+
+        if (creation.Initializer is not null)
+        {
+            foreach (var assignment in creation.Initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+            {
+                if (assignment.Left is IdentifierNameSyntax { Identifier.Text: var propertyName })
+                {
+                    var value = ExtractStringValue(assignment.Right);
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        continue;
+                    }
+
+                    switch (propertyName)
+                    {
+                        case "Policy":
+                            policy = value;
+                            break;
+                        case "Roles":
+                            roles = value;
+                            break;
+                        case "AuthenticationSchemes":
+                            authenticationSchemes = value;
+                            break;
+                    }
+                }
+            }
+        }
+
+        var line = GetLineNumber(tree, creation);
+        return new EndpointAuthorization(policy, roles, authenticationSchemes, source, line);
+    }
+
+    private static string? ExtractStringValue(ExpressionSyntax expression)
+    {
+        switch (expression)
+        {
+            case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression):
+                return literal.Token.ValueText;
+            case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.NullLiteralExpression):
+                return null;
+            case InterpolatedStringExpressionSyntax interpolated:
+                return string.Concat(interpolated.Contents.Select(content => content switch
+                {
+                    InterpolatedStringTextSyntax text => text.TextToken.ValueText,
+                    _ => "{*}"
+                }));
+            case InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "nameof" } } nameofInvocation:
+                return nameofInvocation.ArgumentList?.Arguments.FirstOrDefault()?.Expression.ToString();
+            default:
+                return expression.ToString().Trim('"');
+        }
+    }
+
+    private static string? GetArgumentName(ArgumentSyntax argument)
+        => argument.NameColon?.Name.Identifier.Text;
+
+    private static string? GetArgumentName(AttributeArgumentSyntax argument)
+        => argument.NameEquals?.Name.Identifier.Text ?? argument.NameColon?.Name.Identifier.Text;
+
+    private static bool AttributeNameEquals(string attributeName, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(attributeName))
+        {
+            return false;
+        }
+
+        var simpleName = attributeName.Split('.').Last();
+        if (simpleName.EndsWith("Attribute", StringComparison.OrdinalIgnoreCase))
+        {
+            simpleName = simpleName[..^9];
+        }
+
+        return simpleName.Equals(expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, object> CreateAuthorizationProps(EndpointAuthorization authorization)
+    {
+        var props = new Dictionary<string, object>
+        {
+            ["source"] = authorization.Source
+        };
+
+        if (!string.IsNullOrWhiteSpace(authorization.Policy))
+        {
+            props["policy"] = authorization.Policy!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(authorization.Roles))
+        {
+            props["roles"] = authorization.Roles!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(authorization.AuthenticationSchemes))
+        {
+            props["authentication_schemes"] = authorization.AuthenticationSchemes!;
+        }
+
+        if (authorization.Line > 0)
+        {
+            props["line"] = authorization.Line;
+        }
+
+        return props;
     }
 
     private static string? ResolveRoute(SyntaxList<AttributeListSyntax> attributes, string className)

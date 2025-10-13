@@ -20,6 +20,9 @@ public sealed partial class ProjectAnalyzer
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ControllerRepositoryInvocation> RepositoryInvocations { get; } = new();
         public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+        public List<EndpointAuthorization> Authorizations { get; } = new();
+        public bool AllowsAnonymous { get; set; }
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
@@ -41,6 +44,9 @@ public sealed partial class ProjectAnalyzer
     private sealed record MinimalEndpointInfo(string Route, string HttpMethod, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
     {
         public string Fqdn => $"{Assembly}.Endpoints.{Name}";
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+        public List<EndpointAuthorization> Authorizations { get; } = new();
+        public bool AllowsAnonymous { get; set; }
     }
 
     private sealed record RequestInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name);
@@ -55,6 +61,21 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerNotificationPublication> PublishedNotifications { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+    }
+
+    private sealed record PipelineBehaviorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType)
+    {
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+    }
+
+    private sealed record RequestProcessorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType, string Kind)
+    {
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
     }
 
     private sealed record HandlerDbAccess(string DbContextType, string Member, int Line);
@@ -77,6 +98,13 @@ public sealed partial class ProjectAnalyzer
     }
 
     private sealed record DbSetInfo(string Name, int Line);
+
+    private sealed record DbContextInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
+    {
+        public List<DbContextDbSet> DbSets { get; } = new();
+    }
+
+    private sealed record DbContextDbSet(string EntityType, string PropertyName, int Line);
 
     private sealed record TableInfo(string Name, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId);
 
@@ -111,6 +139,7 @@ public sealed partial class ProjectAnalyzer
         public List<RepositoryMapperCall> MapperCalls { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record RepositoryDbAccess(string Member, string Method, int Line);
@@ -142,6 +171,7 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerNotificationPublication> PublishedNotifications { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line);
@@ -154,6 +184,7 @@ public sealed partial class ProjectAnalyzer
         public List<BackgroundServiceRepositoryCall> RepositoryCalls { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
     private sealed record BackgroundServiceRepositoryCall(string RepositoryType, string Method, int Line);
@@ -168,4 +199,10 @@ public sealed partial class ProjectAnalyzer
     }
 
     private sealed record OptionsUsage(string OptionsType, int Line);
+
+    private sealed record ConfigurationUsage(string ConfigurationType, string Accessor, string? Key, int Line, string FilePath);
+
+    private sealed record EndpointAuthorization(string? Policy, string? Roles, string? AuthenticationSchemes, string Source, int Line);
+
+    private sealed record AuthorizationMetadata(List<EndpointAuthorization> Requirements, bool AllowsAnonymous);
 }
