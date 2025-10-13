@@ -56,7 +56,14 @@ public sealed partial class ProjectAnalyzer
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
                 {
-                    info.LocalVariables[variable.Identifier.Text] = declaredType;
+                    var resolvedType = declaredType;
+                    if (string.Equals(resolvedType, "var", StringComparison.OrdinalIgnoreCase) &&
+                        variable.Initializer?.Value is ObjectCreationExpressionSyntax creation)
+                    {
+                        resolvedType = creation.Type.ToString();
+                    }
+
+                    info.LocalVariables[variable.Identifier.Text] = resolvedType;
                 }
             }
 
@@ -116,6 +123,7 @@ public sealed partial class ProjectAnalyzer
                     if (fieldLookup.TryGetValue(fieldName, out var descriptor))
                     {
                         var typeName = descriptor.Type;
+                        var resolvedType = ResolveImplementationType(typeName) ?? typeName;
                         if (typeName.Contains("Client", StringComparison.Ordinal))
                         {
                             var callMethod = access.Name.Identifier.Text.ToUpperInvariant();
@@ -163,6 +171,39 @@ public sealed partial class ProjectAnalyzer
                             if (!string.IsNullOrWhiteSpace(validatorType))
                             {
                                 info.ValidatorInvocations.Add(new ControllerValidatorInvocation(validatorType, line));
+                            }
+                        }
+                        else if (IsCacheService(resolvedType) || IsCacheService(typeName))
+                        {
+                            var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
+                            if (TryCaptureCacheInvocation(access, invocation, cacheType, tree) is { } cacheInvocation)
+                            {
+                                info.CacheInvocations.Add(cacheInvocation);
+                            }
+                        }
+                        else if (TryResolveOptionsType(resolvedType) is { } optionsType)
+                        {
+                            var line = GetLineNumber(tree, access);
+                            info.OptionsUsages.Add(new OptionsUsage(optionsType, line));
+                        }
+                        else if (typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal))
+                        {
+                            var methodIdentifier = access.Name.Identifier.Text;
+                            if (methodIdentifier.StartsWith("Publish", StringComparison.Ordinal))
+                            {
+                                var line = GetLineNumber(tree, invocation);
+                                var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                                var notificationType = argument switch
+                                {
+                                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, info.LocalVariables),
+                                    _ => null
+                                };
+
+                                if (!string.IsNullOrWhiteSpace(notificationType))
+                                {
+                                    info.NotificationInvocations.Add(new ControllerNotificationInvocation(notificationType!, line));
+                                }
                             }
                         }
                     }
@@ -435,6 +476,92 @@ public sealed partial class ProjectAnalyzer
                     Evidence = CreateEvidence(action.FilePath, validator.Line)
                 });
             }
+
+            foreach (var notification in action.NotificationInvocations)
+            {
+                var notificationInfo = FindNotificationByType(notification.NotificationType);
+                if (notificationInfo is null)
+                {
+                    continue;
+                }
+
+                var notificationId = StableId.For("cqrs.notification", notificationInfo.Fqdn, notificationInfo.Assembly, notificationInfo.SymbolId);
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = notificationId,
+                    Kind = "publishes_notification",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "mediatr.publish",
+                        Location = new GraphLocation { File = action.FilePath, Line = notification.Line }
+                    },
+                    Evidence = CreateEvidence(action.FilePath, notification.Line)
+                });
+            }
+
+            foreach (var cache in action.CacheInvocations)
+            {
+                var cacheId = EnsureCacheNode(cache.CacheType);
+                var props = new Dictionary<string, object>
+                {
+                    ["method"] = cache.Method,
+                    ["operation"] = cache.Operation
+                };
+
+                if (!string.IsNullOrWhiteSpace(cache.Key))
+                {
+                    props["key"] = cache.Key!;
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = cacheId,
+                    Kind = "uses_cache",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "cache.operation",
+                        Location = new GraphLocation { File = action.FilePath, Line = cache.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(action.FilePath, cache.Line)
+                });
+            }
+
+            foreach (var optionsUsage in action.OptionsUsages)
+            {
+                var optionsId = EnsureOptionsNode(optionsUsage.OptionsType);
+                if (optionsId is null)
+                {
+                    continue;
+                }
+
+                var props = new Dictionary<string, object>
+                {
+                    ["options_type"] = optionsUsage.OptionsType
+                };
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = optionsId,
+                    Kind = "uses_options",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "options.access",
+                        Location = new GraphLocation { File = action.FilePath, Line = optionsUsage.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(action.FilePath, optionsUsage.Line)
+                });
+            }
         }
     }
 
@@ -481,24 +608,6 @@ public sealed partial class ProjectAnalyzer
         if (expression.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
         {
             return declarator.Identifier.Text;
-        }
-
-        return null;
-    }
-
-    private static string? TryResolveExpressionType(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables)
-    {
-        if (expression is IdentifierNameSyntax identifier)
-        {
-            if (localVariables.TryGetValue(identifier.Identifier.Text, out var localType) && !string.Equals(localType, "var", StringComparison.OrdinalIgnoreCase))
-            {
-                return localType;
-            }
-
-            if (parameterTypes.TryGetValue(identifier.Identifier.Text, out var parameterType) && !string.IsNullOrWhiteSpace(parameterType))
-            {
-                return parameterType;
-            }
         }
 
         return null;

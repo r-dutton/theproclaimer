@@ -25,7 +25,7 @@ public sealed class GraphOutputWriter
         await WriteGraphJsonAsync(document, cancellationToken);
         await WriteGraphCypherAsync(document, cancellationToken);
         await WriteGraphMarkdownAsync(document, analyzerVersion, cancellationToken);
-        await WriteReportFlowAsync(document, cancellationToken);
+        await WriteControllerFlowsAsync(document, cancellationToken);
         await WriteVersionAsync(analyzerVersion, cancellationToken);
         await WriteEvalAsync(document, cancellationToken);
     }
@@ -84,37 +84,37 @@ public sealed class GraphOutputWriter
         await File.WriteAllTextAsync(Path.Combine(_outputDirectory, "GRAPH.md"), sb.ToString(), cancellationToken);
     }
 
-    private async Task WriteReportFlowAsync(GraphDocument document, CancellationToken cancellationToken)
+    private async Task WriteControllerFlowsAsync(GraphDocument document, CancellationToken cancellationToken)
     {
-        var allReportsFlow = FlowBuilder.BuildFlows(document, controller =>
-            controller.Props is { } props &&
-            props.TryGetValue("route", out var routeValue) &&
-            routeValue?.ToString()?.Contains("report", StringComparison.OrdinalIgnoreCase) == true);
-
         var flowDirectory = Path.Combine(_outputDirectory, "flows");
         Directory.CreateDirectory(flowDirectory);
 
-        if (!string.IsNullOrWhiteSpace(allReportsFlow))
+        var controllers = document.Nodes
+            .Where(n => string.Equals(n.Type, "endpoint.controller", StringComparison.Ordinal))
+            .OrderBy(n => n.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (controllers.Count == 0)
         {
-            await File.WriteAllTextAsync(Path.Combine(flowDirectory, "report.web.db.md"), allReportsFlow, cancellationToken);
+            return;
         }
 
-        var createFlow = FlowBuilder.BuildFlows(document, controller =>
+        var allFlows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "*" }));
+        if (!string.IsNullOrWhiteSpace(allFlows))
         {
-            if (controller.Props is not { } props)
+            await File.WriteAllTextAsync(Path.Combine(flowDirectory, "controllers.all.md"), allFlows, cancellationToken);
+        }
+
+        foreach (var controller in controllers)
+        {
+            var flow = FlowBuilder.BuildFlows(document, node => string.Equals(node.Id, controller.Id, StringComparison.Ordinal));
+            if (string.IsNullOrWhiteSpace(flow))
             {
-                return false;
+                continue;
             }
 
-            var method = props.TryGetValue("http_method", out var methodValue) ? methodValue?.ToString() : null;
-            var route = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
-            return string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(route, "/api/reports", StringComparison.OrdinalIgnoreCase);
-        });
-
-        if (!string.IsNullOrWhiteSpace(createFlow))
-        {
-            await File.WriteAllTextAsync(Path.Combine(flowDirectory, "report.create.full.md"), createFlow, cancellationToken);
+            var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(controller.Fqdn) ? controller.Name : controller.Fqdn) + ".md";
+            await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
         }
     }
 
@@ -149,14 +149,36 @@ public sealed class GraphOutputWriter
     {
         var evalDir = Path.Combine(_outputDirectory, "evals");
         Directory.CreateDirectory(evalDir);
+        var controllerCount = document.Nodes.Count(n => string.Equals(n.Type, "endpoint.controller", StringComparison.Ordinal));
         var payload = new
         {
-            name = "report-flow",
-            status = "informational",
+            name = "controller-flows",
+            status = controllerCount > 0 ? "informational" : "warning",
+            controllers = controllerCount,
             nodes = document.Nodes.Count,
             edges = document.Edges.Count
         };
-        await File.WriteAllTextAsync(Path.Combine(evalDir, "report.json"), JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(evalDir, "controllers.json"), JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(name.Length);
+
+        foreach (var ch in name)
+        {
+            if (ch == '.' || ch == ':' || ch == ' ' || Array.IndexOf(invalid, ch) >= 0)
+            {
+                builder.Append('_');
+            }
+            else
+            {
+                builder.Append(ch);
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string? GetPropValue(GraphNode node, string key)

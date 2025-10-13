@@ -109,6 +109,8 @@ public sealed partial class ProjectAnalyzer
                 // Ignore malformed configuration files; best-effort hints only.
             }
         }
+
+        UpdateOptionsFromConfiguration();
     }
 
     private static void FlattenConfiguration(JsonElement element, string prefix, Action<string, string> capture)

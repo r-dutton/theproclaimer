@@ -7,7 +7,9 @@ using Microsoft.EntityFrameworkCore;
 using Sample.App.Handlers;
 using Sample.App.Mapping;
 using Sample.App.Repositories;
+using Sample.App.Services;
 using Sample.App.Validation;
+using Sample.App.Options;
 using Sample.Data.Infrastructure;
 using Sample.Msg.Publishing;
 using Sample.Web.HttpClients;
@@ -22,6 +24,7 @@ builder.Services.AddMediatR(typeof(GetReportHandler));
 builder.Services.AddAutoMapper(typeof(ReportProfile).Assembly);
 builder.Services.AddValidatorsFromAssemblyContaining<ReportDtoValidator>();
 builder.Services.AddFluentValidationAutoValidation();
+builder.Services.Configure<ReportRetentionOptions>(builder.Configuration.GetSection(ReportRetentionOptions.SectionName));
 
 var connectionString = builder.Configuration.GetConnectionString("Reports") ?? "Data Source=reports.db";
 builder.Services.AddDbContext<ReportsDbContext>(options => options.UseSqlite(connectionString));
@@ -29,6 +32,8 @@ builder.Services.AddDbContext<ReportsDbContext>(options => options.UseSqlite(con
 builder.Services.AddSingleton(_ => new ServiceBusClient(builder.Configuration.GetValue<string>("ServiceBus:ConnectionString") ?? "Endpoint=sb://local/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
 builder.Services.AddScoped<IReportPublisher, ReportPublisher>();
 builder.Services.AddScoped<IReportRepository, ReportRepository>();
+builder.Services.AddScoped<IReportAuditRepository, ReportAuditRepository>();
+builder.Services.AddHostedService<ReportRetentionWorker>();
 
 builder.Services.AddHttpClient<ReportsClient>((sp, client) =>
 {

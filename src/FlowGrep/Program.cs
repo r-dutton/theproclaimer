@@ -11,7 +11,8 @@ string output = "out";
 string? textFilter = null;
 HashSet<string>? tagFilter = null;
 string format = "md";
-string? flowFilter = null;
+var flowPatterns = new List<string>();
+var solutions = new List<string>();
 
 for (int i = 0; i < argsList.Count; i++)
 {
@@ -33,24 +34,32 @@ for (int i = 0; i < argsList.Count; i++)
             format = argsList[++i];
             break;
         case "--flow":
-            flowFilter = argsList[++i];
+        case "--flows":
+            flowPatterns.AddRange(argsList[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            break;
+        case "--solution":
+            solutions.Add(argsList[++i]);
+            break;
+        case "--solutions":
+            solutions.AddRange(argsList[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             break;
     }
 }
 
 var generator = new GraphGenerator();
-var document = await generator.GenerateAsync(new GraphGenerationOptions(workspace, output));
+var document = await generator.GenerateAsync(new GraphGenerationOptions(
+    workspace,
+    output,
+    solutions.Count > 0 ? solutions : null));
 
-if (!string.IsNullOrWhiteSpace(flowFilter))
+if (flowPatterns.Count > 0)
 {
-    var flow = FlowBuilder.BuildFlows(document, controller =>
-        controller.Name.Contains(flowFilter, StringComparison.OrdinalIgnoreCase) ||
-        controller.Fqdn.Contains(flowFilter, StringComparison.OrdinalIgnoreCase) ||
-        (controller.Props is { } props && props.Values.Any(value => value?.ToString()?.Contains(flowFilter, StringComparison.OrdinalIgnoreCase) == true)));
+    var predicate = FlowFilter.BuildPredicate(flowPatterns);
+    var flow = FlowBuilder.BuildFlows(document, predicate);
 
     if (string.IsNullOrWhiteSpace(flow))
     {
-        Console.WriteLine($"No matching flows found for '{flowFilter}'.");
+        Console.WriteLine($"No matching flows found for patterns: {string.Join(", ", flowPatterns)}.");
     }
     else
     {

@@ -28,12 +28,27 @@
       "project": "src/Sample.Web",
       "file_path": "src/Sample.Web/Program.cs",
       "span": {
-        "start_line": 31,
-        "end_line": 31
+        "start_line": 34,
+        "end_line": 34
       },
       "symbol_id": "T:IReportRepository",
       "tags": [
         "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::0596ecfc57b85e33dd743485a6753e3e67f600cc7b61d64de4fb8fa28eda82a8",
+      "type": "cache.memory",
+      "name": "IMemoryCache",
+      "fqdn": "IMemoryCache",
+      "assembly": "external",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "IMemoryCache",
+      "tags": [
+        "cache"
       ],
       "props": null
     },
@@ -46,8 +61,8 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Mapping/ReportProfile.cs",
       "span": {
-        "start_line": 14,
-        "end_line": 14
+        "start_line": 15,
+        "end_line": 15
       },
       "symbol_id": "M:Sample.App.Mapping.ReportProfile.CreateMap\u003CCreateDetailedReportCommand,Report\u003E",
       "tags": [
@@ -67,8 +82,8 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Mapping/ReportProfile.cs",
       "span": {
-        "start_line": 12,
-        "end_line": 12
+        "start_line": 13,
+        "end_line": 13
       },
       "symbol_id": "M:Sample.App.Mapping.ReportProfile.CreateMap\u003CCreateDetailedReportDto,CreateDetailedReportCommand\u003E",
       "tags": [
@@ -88,8 +103,8 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Repositories/ReportRepository.cs",
       "span": {
-        "start_line": 9,
-        "end_line": 35
+        "start_line": 16,
+        "end_line": 70
       },
       "symbol_id": "T:Sample.App.Repositories.ReportRepository",
       "tags": [
@@ -146,8 +161,8 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Mapping/ReportProfile.cs",
       "span": {
-        "start_line": 23,
-        "end_line": 23
+        "start_line": 24,
+        "end_line": 24
       },
       "symbol_id": "M:Sample.App.Mapping.ReportProfile.CreateMap\u003CReport,ReportSummaryDto\u003E",
       "tags": [
@@ -195,6 +210,27 @@
       "props": null
     },
     {
+      "id": "node::33218cde26159b4df6b568897ce8de8f0c981fdde0b3380f033ab48c458954be",
+      "type": "cqrs.notification",
+      "name": "ReportGeneratedHandler",
+      "fqdn": "Sample.App.Notifications.ReportGeneratedHandler",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+      "span": {
+        "start_line": 7,
+        "end_line": 23
+      },
+      "symbol_id": "T:Sample.App.Notifications.ReportGeneratedHandler",
+      "tags": [
+        "app",
+        "event"
+      ],
+      "props": {
+        "contract_type": "Sample.App.Notifications.ReportGeneratedHandler"
+      }
+    },
+    {
       "id": "node::36d109a1ad6c0dcd9e571cf153ac1f68d6d4161001063dcb3dcc93e5fd912fd3",
       "type": "cqrs.handler",
       "name": "CreateDetailedReportHandler",
@@ -203,10 +239,28 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
       "span": {
-        "start_line": 11,
-        "end_line": 30
+        "start_line": 12,
+        "end_line": 34
       },
       "symbol_id": "T:Sample.App.Handlers.CreateDetailedReportHandler",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::3d911431fcdb1f6632c5aa773a849ac0f734ce3e5bf3be76916b2706a55da6f3",
+      "type": "app.service_contract",
+      "name": "IReportAuditRepository",
+      "fqdn": "IReportAuditRepository",
+      "assembly": "Sample.Web",
+      "project": "src/Sample.Web",
+      "file_path": "src/Sample.Web/Program.cs",
+      "span": {
+        "start_line": 35,
+        "end_line": 35
+      },
+      "symbol_id": "T:IReportAuditRepository",
       "tags": [
         "app"
       ],
@@ -275,14 +329,73 @@
       "project": "src/Sample.Web",
       "file_path": "src/Sample.Web/Program.cs",
       "span": {
-        "start_line": 30,
-        "end_line": 30
+        "start_line": 33,
+        "end_line": 33
       },
       "symbol_id": "T:IReportPublisher",
       "tags": [
         "app"
       ],
       "props": null
+    },
+    {
+      "id": "node::4fa64b8b8b1a192f73d652c63a9de5147637f9b4b2c33f075462e684fbffeedc",
+      "type": "cqrs.notification_handler",
+      "name": "ReportGeneratedHandler",
+      "fqdn": "Sample.App.Notifications.ReportGeneratedHandler",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+      "span": {
+        "start_line": 7,
+        "end_line": 23
+      },
+      "symbol_id": "T:Sample.App.Notifications.ReportGeneratedHandler",
+      "tags": [
+        "app",
+        "event"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::5ef00b93d387c571c2313c31d71b525ae5f425179e3a739f9d6dde83f961aa4d",
+      "type": "app.repository",
+      "name": "ReportAuditRepository",
+      "fqdn": "Sample.App.Repositories.ReportAuditRepository",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Repositories/ReportAuditRepository.cs",
+      "span": {
+        "start_line": 11,
+        "end_line": 30
+      },
+      "symbol_id": "T:Sample.App.Repositories.ReportAuditRepository",
+      "tags": [
+        "app",
+        "data"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::605a8bf0bbd7856238a1693f3f36560184a3bff8caf3996090cd749edf23ad70",
+      "type": "mapping.automapper.map",
+      "name": "ReportGeneratedNotification-\u003EReportAudit",
+      "fqdn": "Sample.App.Mapping.ReportProfile.CreateMap\u003CReportGeneratedNotification,ReportAudit\u003E",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Mapping/ReportProfile.cs",
+      "span": {
+        "start_line": 26,
+        "end_line": 26
+      },
+      "symbol_id": "M:Sample.App.Mapping.ReportProfile.CreateMap\u003CReportGeneratedNotification,ReportAudit\u003E",
+      "tags": [
+        "mapping"
+      ],
+      "props": {
+        "source_type": "ReportGeneratedNotification",
+        "destination_type": "ReportAudit"
+      }
     },
     {
       "id": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
@@ -331,8 +444,8 @@
       "project": "src/Sample.Web",
       "file_path": "src/Sample.Web/Program.cs",
       "span": {
-        "start_line": 60,
-        "end_line": 60
+        "start_line": 65,
+        "end_line": 65
       },
       "symbol_id": "M:Program.MapGet",
       "tags": [
@@ -365,6 +478,26 @@
       }
     },
     {
+      "id": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "type": "ef.entity",
+      "name": "ReportAudit",
+      "fqdn": "Sample.Data.Entities.ReportAudit",
+      "assembly": "Sample.Data",
+      "project": "src/Sample.Data",
+      "file_path": "src/Sample.Data/Entities/ReportAudit.cs",
+      "span": {
+        "start_line": 6,
+        "end_line": 23
+      },
+      "symbol_id": "T:Sample.Data.Entities.ReportAudit",
+      "tags": [
+        "data"
+      ],
+      "props": {
+        "table": "ReportAudits"
+      }
+    },
+    {
       "id": "node::a75d4ec1b132cf5de6edfcb9ed5127d044aa02f5f7c7336d75e852a7e2a02748",
       "type": "endpoint.controller",
       "name": "GetReportSummary",
@@ -383,6 +516,32 @@
       "props": {
         "route": "/api/reports/{id:guid}/summary",
         "http_method": "GET"
+      }
+    },
+    {
+      "id": "node::ada3ab91f8e0ef09655b0f7ccd5daf3b5fc5d8eff69715b81a2cd198f01b37a2",
+      "type": "config.options",
+      "name": "ReportRetentionOptions",
+      "fqdn": "Sample.App.Options.ReportRetentionOptions",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Options/ReportRetentionOptions.cs",
+      "span": {
+        "start_line": 3,
+        "end_line": 14
+      },
+      "symbol_id": "T:Sample.App.Options.ReportRetentionOptions",
+      "tags": [
+        "configuration"
+      ],
+      "props": {
+        "section": "Retention",
+        "values": {
+          "CacheExpirationMinutes": "5",
+          "CachePrefix": "report",
+          "PollingIntervalMinutes": "30",
+          "RetentionDays": "30"
+        }
       }
     },
     {
@@ -425,6 +584,24 @@
       "props": null
     },
     {
+      "id": "node::bbab0a0c82285f4e44197909341dfc8a4102676bc7dbc585c9e6853081fe4163",
+      "type": "db.table",
+      "name": "ReportAudits",
+      "fqdn": "ReportAudits",
+      "assembly": "Sample.Data",
+      "project": "src/Sample.Data",
+      "file_path": "src/Sample.Data/Entities/ReportAudit.cs",
+      "span": {
+        "start_line": 6,
+        "end_line": 23
+      },
+      "symbol_id": "T:Sample.Data.Entities.ReportAudit",
+      "tags": [
+        "db"
+      ],
+      "props": null
+    },
+    {
       "id": "node::cf3011d824e28cf8f0fe80932241a75aef19e4ca1382c0655621252dc542b8ad",
       "type": "mapping.automapper.profile",
       "name": "ReportProfile",
@@ -433,8 +610,8 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Mapping/ReportProfile.cs",
       "span": {
-        "start_line": 8,
-        "end_line": 25
+        "start_line": 9,
+        "end_line": 33
       },
       "symbol_id": "T:Sample.App.Mapping.ReportProfile",
       "tags": [
@@ -469,8 +646,8 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Handlers/GetReportHandler.cs",
       "span": {
-        "start_line": 14,
-        "end_line": 52
+        "start_line": 18,
+        "end_line": 82
       },
       "symbol_id": "T:Sample.App.Handlers.GetReportHandler",
       "tags": [
@@ -495,6 +672,27 @@
         "app"
       ],
       "props": null
+    },
+    {
+      "id": "node::dcb627995b80913ef0502b1180ae83beaa03e294bc691e8cc9b5a9eb44a288fc",
+      "type": "cqrs.notification",
+      "name": "ReportGeneratedNotification",
+      "fqdn": "Sample.App.Notifications.ReportGeneratedNotification",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Notifications/ReportGeneratedNotification.cs",
+      "span": {
+        "start_line": 5,
+        "end_line": 5
+      },
+      "symbol_id": "T:Sample.App.Notifications.ReportGeneratedNotification",
+      "tags": [
+        "app",
+        "event"
+      ],
+      "props": {
+        "contract_type": "Sample.App.Notifications.ReportGeneratedNotification"
+      }
     },
     {
       "id": "node::e2db8f0615fda0f5b823e62403a6d6adf176d50ceac75dcba5941c22a11430eb",
@@ -547,8 +745,8 @@
       "project": "src/Sample.App",
       "file_path": "src/Sample.App/Mapping/ReportProfile.cs",
       "span": {
-        "start_line": 20,
-        "end_line": 20
+        "start_line": 21,
+        "end_line": 21
       },
       "symbol_id": "M:Sample.App.Mapping.ReportProfile.CreateMap\u003CReport,ReportDto\u003E",
       "tags": [
@@ -597,7 +795,8 @@
         "messaging"
       ],
       "props": {
-        "queue": "reports.events"
+        "queue": "reports.events",
+        "subject": "reports.published"
       }
     },
     {
@@ -617,6 +816,24 @@
         "app"
       ],
       "props": null
+    },
+    {
+      "id": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "type": "app.background_service",
+      "name": "ReportRetentionWorker",
+      "fqdn": "Sample.App.Services.ReportRetentionWorker",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Services/ReportRetentionWorker.cs",
+      "span": {
+        "start_line": 10,
+        "end_line": 46
+      },
+      "symbol_id": "T:Sample.App.Services.ReportRetentionWorker",
+      "tags": [
+        "app"
+      ],
+      "props": null
     }
   ],
   "edges": [
@@ -631,7 +848,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.Web/Program.cs",
-          "line": 31
+          "line": 34
         },
         "method_span": null,
         "il_range": null
@@ -644,8 +861,8 @@
         "files": [
           {
             "path": "src/Sample.Web/Program.cs",
-            "start_line": 31,
-            "end_line": 31
+            "start_line": 34,
+            "end_line": 34
           }
         ],
         "trace_ids": []
@@ -662,7 +879,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 14
+          "line": 15
         },
         "method_span": null,
         "il_range": null
@@ -675,8 +892,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 14,
-            "end_line": 14
+            "start_line": 15,
+            "end_line": 15
           }
         ],
         "trace_ids": []
@@ -693,7 +910,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 14
+          "line": 15
         },
         "method_span": null,
         "il_range": null
@@ -706,8 +923,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 14,
-            "end_line": 14
+            "start_line": 15,
+            "end_line": 15
           }
         ],
         "trace_ids": []
@@ -724,7 +941,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 12
+          "line": 13
         },
         "method_span": null,
         "il_range": null
@@ -737,8 +954,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 12,
-            "end_line": 12
+            "start_line": 13,
+            "end_line": 13
           }
         ],
         "trace_ids": []
@@ -755,7 +972,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 12
+          "line": 13
         },
         "method_span": null,
         "il_range": null
@@ -768,8 +985,70 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 12,
-            "end_line": 12
+            "start_line": 13,
+            "end_line": 13
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
+      "to": "node::0596ecfc57b85e33dd743485a6753e3e67f600cc7b61d64de4fb8fa28eda82a8",
+      "kind": "uses_cache",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "cache.operation",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportRepository.cs",
+          "line": 61
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "method": "Remove",
+        "operation": "write"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportRepository.cs",
+            "start_line": 61,
+            "end_line": 61
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
+      "to": "node::0596ecfc57b85e33dd743485a6753e3e67f600cc7b61d64de4fb8fa28eda82a8",
+      "kind": "uses_cache",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "cache.operation",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportRepository.cs",
+          "line": 44
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "method": "Remove",
+        "operation": "write"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportRepository.cs",
+            "start_line": 44,
+            "end_line": 44
           }
         ],
         "trace_ids": []
@@ -786,7 +1065,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 22
+          "line": 33
         },
         "method_span": null,
         "il_range": null
@@ -799,8 +1078,64 @@
         "files": [
           {
             "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 22,
-            "end_line": 22
+            "start_line": 33,
+            "end_line": 33
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
+      "to": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "kind": "queries",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.query",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportRepository.cs",
+          "line": 64
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportRepository.cs",
+            "start_line": 64,
+            "end_line": 64
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
+      "to": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "kind": "queries",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.query",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportRepository.cs",
+          "line": 50
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportRepository.cs",
+            "start_line": 50,
+            "end_line": 50
           }
         ],
         "trace_ids": []
@@ -817,7 +1152,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 31
+          "line": 42
         },
         "method_span": null,
         "il_range": null
@@ -827,8 +1162,8 @@
         "files": [
           {
             "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 31,
-            "end_line": 31
+            "start_line": 42,
+            "end_line": 42
           }
         ],
         "trace_ids": []
@@ -845,7 +1180,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 12
+          "line": 13
         },
         "method_span": null,
         "il_range": null
@@ -858,8 +1193,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 12,
-            "end_line": 12
+            "start_line": 13,
+            "end_line": 13
           }
         ],
         "trace_ids": []
@@ -1028,7 +1363,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 23
+          "line": 24
         },
         "method_span": null,
         "il_range": null
@@ -1041,8 +1376,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 23,
-            "end_line": 23
+            "start_line": 24,
+            "end_line": 24
           }
         ],
         "trace_ids": []
@@ -1059,7 +1394,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 23
+          "line": 24
         },
         "method_span": null,
         "il_range": null
@@ -1072,8 +1407,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 23,
-            "end_line": 23
+            "start_line": 24,
+            "end_line": 24
           }
         ],
         "trace_ids": []
@@ -1195,7 +1530,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-          "line": 13
+          "line": 15
         },
         "method_span": null,
         "il_range": null
@@ -1208,8 +1543,8 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-            "start_line": 13,
-            "end_line": 13
+            "start_line": 15,
+            "end_line": 15
           }
         ],
         "trace_ids": []
@@ -1226,7 +1561,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-          "line": 26
+          "line": 29
         },
         "method_span": null,
         "il_range": null
@@ -1238,8 +1573,8 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-            "start_line": 26,
-            "end_line": 26
+            "start_line": 29,
+            "end_line": 29
           }
         ],
         "trace_ids": []
@@ -1256,7 +1591,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-          "line": 15
+          "line": 17
         },
         "method_span": null,
         "il_range": null
@@ -1269,8 +1604,8 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-            "start_line": 15,
-            "end_line": 15
+            "start_line": 17,
+            "end_line": 17
           }
         ],
         "trace_ids": []
@@ -1287,7 +1622,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-          "line": 28
+          "line": 32
         },
         "method_span": null,
         "il_range": null
@@ -1299,8 +1634,36 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-            "start_line": 28,
-            "end_line": 28
+            "start_line": 32,
+            "end_line": 32
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::36d109a1ad6c0dcd9e571cf153ac1f68d6d4161001063dcb3dcc93e5fd912fd3",
+      "to": "node::dcb627995b80913ef0502b1180ae83beaa03e294bc691e8cc9b5a9eb44a288fc",
+      "kind": "publishes_notification",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "mediatr.publish",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+          "line": 31
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+            "start_line": 31,
+            "end_line": 31
           }
         ],
         "trace_ids": []
@@ -1317,6 +1680,159 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+          "line": 30
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "message_type": "ReportPublished"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+            "start_line": 30,
+            "end_line": 30
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::3d911431fcdb1f6632c5aa773a849ac0f734ce3e5bf3be76916b2706a55da6f3",
+      "to": "node::5ef00b93d387c571c2313c31d71b525ae5f425179e3a739f9d6dde83f961aa4d",
+      "kind": "implemented_by",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.registration",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Program.cs",
+          "line": 35
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "lifetime": "AddScoped",
+        "implementation_type": "ReportAuditRepository"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Program.cs",
+            "start_line": 35,
+            "end_line": 35
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::4fa64b8b8b1a192f73d652c63a9de5147637f9b4b2c33f075462e684fbffeedc",
+      "to": "node::3d911431fcdb1f6632c5aa773a849ac0f734ce3e5bf3be76916b2706a55da6f3",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+          "line": 9
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IReportAuditRepository",
+        "lifetime": "AddScoped"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+            "start_line": 9,
+            "end_line": 9
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::4fa64b8b8b1a192f73d652c63a9de5147637f9b4b2c33f075462e684fbffeedc",
+      "to": "node::5ef00b93d387c571c2313c31d71b525ae5f425179e3a739f9d6dde83f961aa4d",
+      "kind": "calls",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "notification.handler",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+          "line": 20
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "method": "RecordAsync"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+            "start_line": 20,
+            "end_line": 20
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::5ef00b93d387c571c2313c31d71b525ae5f425179e3a739f9d6dde83f961aa4d",
+      "to": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "kind": "maps_to",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "automapper.map",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportAuditRepository.cs",
+          "line": 24
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "destination_type": "ReportAudit",
+        "source_type": "ReportGeneratedNotification"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportAuditRepository.cs",
+            "start_line": 24,
+            "end_line": 24
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::5ef00b93d387c571c2313c31d71b525ae5f425179e3a739f9d6dde83f961aa4d",
+      "to": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "kind": "writes_to",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.write",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportAuditRepository.cs",
           "line": 27
         },
         "method_span": null,
@@ -1326,9 +1842,71 @@
       "evidence": {
         "files": [
           {
-            "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+            "path": "src/Sample.App/Repositories/ReportAuditRepository.cs",
             "start_line": 27,
             "end_line": 27
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::605a8bf0bbd7856238a1693f3f36560184a3bff8caf3996090cd749edf23ad70",
+      "to": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "kind": "maps_to",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "automapper.create_map",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Mapping/ReportProfile.cs",
+          "line": 26
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "source_type": "ReportGeneratedNotification",
+        "destination_type": "ReportAudit"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Mapping/ReportProfile.cs",
+            "start_line": 26,
+            "end_line": 26
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::605a8bf0bbd7856238a1693f3f36560184a3bff8caf3996090cd749edf23ad70",
+      "to": "node::cf3011d824e28cf8f0fe80932241a75aef19e4ca1382c0655621252dc542b8ad",
+      "kind": "generated_from",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "automapper.create_map",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Mapping/ReportProfile.cs",
+          "line": 26
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "source_type": "ReportGeneratedNotification",
+        "destination_type": "ReportAudit"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Mapping/ReportProfile.cs",
+            "start_line": 26,
+            "end_line": 26
           }
         ],
         "trace_ids": []
@@ -1345,7 +1923,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 23
+          "line": 24
         },
         "method_span": null,
         "il_range": null
@@ -1358,8 +1936,64 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 23,
-            "end_line": 23
+            "start_line": 24,
+            "end_line": 24
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "to": "node::460fae34e81b395b83c2811614f550b8ca0b3e09cf938e8c1f91f0e44afcae58",
+      "kind": "queries",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.query",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportRepository.cs",
+          "line": 64
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportRepository.cs",
+            "start_line": 64,
+            "end_line": 64
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "to": "node::460fae34e81b395b83c2811614f550b8ca0b3e09cf938e8c1f91f0e44afcae58",
+      "kind": "queries",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.query",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportRepository.cs",
+          "line": 50
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportRepository.cs",
+            "start_line": 50,
+            "end_line": 50
           }
         ],
         "trace_ids": []
@@ -1404,7 +2038,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 31
+          "line": 42
         },
         "method_span": null,
         "il_range": null
@@ -1414,8 +2048,8 @@
         "files": [
           {
             "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 31,
-            "end_line": 31
+            "start_line": 42,
+            "end_line": 42
           }
         ],
         "trace_ids": []
@@ -1432,7 +2066,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 20
+          "line": 21
         },
         "method_span": null,
         "il_range": null
@@ -1445,8 +2079,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 20,
-            "end_line": 20
+            "start_line": 21,
+            "end_line": 21
           }
         ],
         "trace_ids": []
@@ -1463,8 +2097,8 @@
         "method": null,
         "location": null,
         "method_span": {
-          "start_line": 11,
-          "end_line": 30
+          "start_line": 12,
+          "end_line": 34
         },
         "il_range": null
       },
@@ -1473,8 +2107,8 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-            "start_line": 11,
-            "end_line": 30
+            "start_line": 12,
+            "end_line": 34
           }
         ],
         "trace_ids": []
@@ -1491,7 +2125,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 14
+          "line": 15
         },
         "method_span": null,
         "il_range": null
@@ -1504,8 +2138,64 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 14,
-            "end_line": 14
+            "start_line": 15,
+            "end_line": 15
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "to": "node::bbab0a0c82285f4e44197909341dfc8a4102676bc7dbc585c9e6853081fe4163",
+      "kind": "reads_from",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.query",
+        "method": null,
+        "location": null,
+        "method_span": {
+          "start_line": 6,
+          "end_line": 23
+        },
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Data/Entities/ReportAudit.cs",
+            "start_line": 6,
+            "end_line": 23
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "to": "node::bbab0a0c82285f4e44197909341dfc8a4102676bc7dbc585c9e6853081fe4163",
+      "kind": "writes_to",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.write",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Repositories/ReportAuditRepository.cs",
+          "line": 27
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Repositories/ReportAuditRepository.cs",
+            "start_line": 27,
+            "end_line": 27
           }
         ],
         "trace_ids": []
@@ -1553,8 +2243,8 @@
         "method": null,
         "location": null,
         "method_span": {
-          "start_line": 14,
-          "end_line": 52
+          "start_line": 18,
+          "end_line": 82
         },
         "il_range": null
       },
@@ -1563,8 +2253,8 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/GetReportHandler.cs",
-            "start_line": 14,
-            "end_line": 52
+            "start_line": 18,
+            "end_line": 82
           }
         ],
         "trace_ids": []
@@ -1600,6 +2290,37 @@
     },
     {
       "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::0596ecfc57b85e33dd743485a6753e3e67f600cc7b61d64de4fb8fa28eda82a8",
+      "kind": "uses_cache",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "cache.operation",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 50
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "method": "GetOrCreateAsync",
+        "operation": "read"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 50,
+            "end_line": 50
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
       "to": "node::4af341c583a8c7e74b4abd2eaa62d2c3fed72eaf6e084462bb9ff879d15e57bf",
       "kind": "uses_service",
       "source": "static",
@@ -1609,7 +2330,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/GetReportHandler.cs",
-          "line": 18
+          "line": 22
         },
         "method_span": null,
         "il_range": null
@@ -1622,8 +2343,8 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/GetReportHandler.cs",
-            "start_line": 18,
-            "end_line": 18
+            "start_line": 22,
+            "end_line": 22
           }
         ],
         "trace_ids": []
@@ -1640,7 +2361,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/GetReportHandler.cs",
-          "line": 35
+          "line": 55
         },
         "method_span": null,
         "il_range": null
@@ -1650,8 +2371,68 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/GetReportHandler.cs",
-            "start_line": 35,
-            "end_line": 35
+            "start_line": 55,
+            "end_line": 55
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::ada3ab91f8e0ef09655b0f7ccd5daf3b5fc5d8eff69715b81a2cd198f01b37a2",
+      "kind": "uses_options",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "options.access",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 47
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "options_type": "ReportRetentionOptions"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 47,
+            "end_line": 47
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::ada3ab91f8e0ef09655b0f7ccd5daf3b5fc5d8eff69715b81a2cd198f01b37a2",
+      "kind": "uses_options",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "options.access",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 45
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "options_type": "ReportRetentionOptions"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 45,
+            "end_line": 45
           }
         ],
         "trace_ids": []
@@ -1668,7 +2449,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/GetReportHandler.cs",
-          "line": 39
+          "line": 59
         },
         "method_span": null,
         "il_range": null
@@ -1680,8 +2461,8 @@
         "files": [
           {
             "path": "src/Sample.App/Handlers/GetReportHandler.cs",
-            "start_line": 39,
-            "end_line": 39
+            "start_line": 59,
+            "end_line": 59
           }
         ],
         "trace_ids": []
@@ -1698,18 +2479,79 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/GetReportHandler.cs",
-          "line": 41
+          "line": 65
         },
         "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "message_type": "ReportPublished"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 65,
+            "end_line": 65
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::dcb627995b80913ef0502b1180ae83beaa03e294bc691e8cc9b5a9eb44a288fc",
+      "to": "node::4fa64b8b8b1a192f73d652c63a9de5147637f9b4b2c33f075462e684fbffeedc",
+      "kind": "handled_by",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "mediatr.notification_handler",
+        "method": null,
+        "location": null,
+        "method_span": {
+          "start_line": 7,
+          "end_line": 23
+        },
         "il_range": null
       },
       "props": null,
       "evidence": {
         "files": [
           {
-            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
-            "start_line": 41,
-            "end_line": 41
+            "path": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+            "start_line": 7,
+            "end_line": 23
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::dcb627995b80913ef0502b1180ae83beaa03e294bc691e8cc9b5a9eb44a288fc",
+      "to": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "kind": "converts_to",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "automapper.for_member",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Mapping/ReportProfile.cs",
+          "line": 26
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "profile": "Sample.App.Mapping.ReportProfile",
+        "map": "ReportGeneratedNotification-\u003EReportAudit"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Mapping/ReportProfile.cs",
+            "start_line": 26,
+            "end_line": 26
           }
         ],
         "trace_ids": []
@@ -1815,7 +2657,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 20
+          "line": 21
         },
         "method_span": null,
         "il_range": null
@@ -1828,8 +2670,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 20,
-            "end_line": 20
+            "start_line": 21,
+            "end_line": 21
           }
         ],
         "trace_ids": []
@@ -1846,7 +2688,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Mapping/ReportProfile.cs",
-          "line": 20
+          "line": 21
         },
         "method_span": null,
         "il_range": null
@@ -1859,8 +2701,8 @@
         "files": [
           {
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
-            "start_line": 20,
-            "end_line": 20
+            "start_line": 21,
+            "end_line": 21
           }
         ],
         "trace_ids": []
@@ -1889,6 +2731,155 @@
             "path": "src/Sample.Msg/Publishing/ReportPublisher.cs",
             "start_line": 12,
             "end_line": 39
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::ee788c32e8c586ed5a6889237a2b42aefb3fc8c4e7f78103ba751cf161e9ef14",
+      "to": "node::4205730a35c0a3cfb033744c9c970d453e3baf7d2c87a7eea94213879c46d60a",
+      "kind": "produces_event",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "message.publish",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Msg/Publishing/ReportPublisher.cs",
+          "line": 12
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": null,
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Msg/Publishing/ReportPublisher.cs",
+            "start_line": 12,
+            "end_line": 39
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "to": "node::035f0518398edfc4fbb709e95249291ae8cd0fef20e053fb1086b315ed369a56",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Services/ReportRetentionWorker.cs",
+          "line": 10
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IReportRepository",
+        "lifetime": "AddScoped"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Services/ReportRetentionWorker.cs",
+            "start_line": 10,
+            "end_line": 46
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "to": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
+      "kind": "calls",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "background_service",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Services/ReportRetentionWorker.cs",
+          "line": 29
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "method": "PruneOldAsync"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Services/ReportRetentionWorker.cs",
+            "start_line": 29,
+            "end_line": 29
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "to": "node::ada3ab91f8e0ef09655b0f7ccd5daf3b5fc5d8eff69715b81a2cd198f01b37a2",
+      "kind": "uses_options",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "options.access",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Services/ReportRetentionWorker.cs",
+          "line": 37
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "options_type": "ReportRetentionOptions"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Services/ReportRetentionWorker.cs",
+            "start_line": 37,
+            "end_line": 37
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "to": "node::ada3ab91f8e0ef09655b0f7ccd5daf3b5fc5d8eff69715b81a2cd198f01b37a2",
+      "kind": "uses_options",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "options.access",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Services/ReportRetentionWorker.cs",
+          "line": 27
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "options_type": "ReportRetentionOptions"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Services/ReportRetentionWorker.cs",
+            "start_line": 27,
+            "end_line": 27
           }
         ],
         "trace_ids": []

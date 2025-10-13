@@ -42,6 +42,27 @@ public sealed partial class ProjectAnalyzer
                         repository.MapperCalls.Add(new RepositoryMapperCall(sourceType, destination, line));
                     }
                 }
+                else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax cacheIdentifier } cacheAccess &&
+                    fieldLookup.TryGetValue(cacheIdentifier.Identifier.Text.TrimStart('_'), out var cacheDescriptor))
+                {
+                    var cacheType = ResolveImplementationType(cacheDescriptor.Type) ?? cacheDescriptor.Type;
+                    if (IsCacheService(cacheType) || IsCacheService(cacheDescriptor.Type))
+                    {
+                        if (TryCaptureCacheInvocation(cacheAccess, invocation, IsCacheService(cacheType) ? cacheType : cacheDescriptor.Type, tree) is { } cacheInvocation)
+                        {
+                            repository.CacheInvocations.Add(cacheInvocation);
+                        }
+
+                        continue;
+                    }
+
+                    if (TryResolveOptionsType(cacheType) is { } optionsType)
+                    {
+                        var line = GetLineNumber(tree, cacheAccess);
+                        repository.OptionsUsages.Add(new OptionsUsage(optionsType, line));
+                        continue;
+                    }
+                }
                 else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax inner, Name.Identifier.Text: var methodName } &&
                     inner.Expression is IdentifierNameSyntax dbIdentifier &&
                     fieldLookup.TryGetValue(dbIdentifier.Identifier.Text.TrimStart('_'), out var dbType) &&
@@ -175,6 +196,67 @@ public sealed partial class ProjectAnalyzer
                         Evidence = CreateEvidence(repository.FilePath, access.Line)
                     });
                 }
+            }
+
+            foreach (var cache in repository.CacheInvocations)
+            {
+                var cacheId = EnsureCacheNode(cache.CacheType);
+                var props = new Dictionary<string, object>
+                {
+                    ["method"] = cache.Method,
+                    ["operation"] = cache.Operation
+                };
+
+                if (!string.IsNullOrWhiteSpace(cache.Key))
+                {
+                    props["key"] = cache.Key!;
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = cacheId,
+                    Kind = "uses_cache",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "cache.operation",
+                        Location = new GraphLocation { File = repository.FilePath, Line = cache.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(repository.FilePath, cache.Line)
+                });
+            }
+
+            foreach (var optionsUsage in repository.OptionsUsages)
+            {
+                var optionsId = EnsureOptionsNode(optionsUsage.OptionsType);
+                if (optionsId is null)
+                {
+                    continue;
+                }
+
+                var props = new Dictionary<string, object>
+                {
+                    ["options_type"] = optionsUsage.OptionsType
+                };
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = optionsId,
+                    Kind = "uses_options",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "options.access",
+                        Location = new GraphLocation { File = repository.FilePath, Line = optionsUsage.Line }
+                    },
+                    Props = props,
+                    Evidence = CreateEvidence(repository.FilePath, optionsUsage.Line)
+                });
             }
         }
     }

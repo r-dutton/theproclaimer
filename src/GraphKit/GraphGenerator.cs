@@ -11,7 +11,7 @@ public sealed class GraphGenerator
 
     public async Task<GraphDocument> GenerateAsync(GraphGenerationOptions options, CancellationToken cancellationToken = default)
     {
-        var loader = new WorkspaceLoader(options.WorkspacePath);
+        var loader = new WorkspaceLoader(options.WorkspacePath, options.Solutions);
         var projects = await loader.LoadAsync(cancellationToken);
 
         var analyzer = new ProjectAnalyzer(options.WorkspacePath);

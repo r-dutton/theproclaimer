@@ -13,7 +13,10 @@ public sealed partial class ProjectAnalyzer
         public List<ControllerMappingInvocation> MappingInvocations { get; } = new();
         public List<ControllerValidatorInvocation> ValidatorInvocations { get; } = new();
         public List<ControllerCastInvocation> CastInvocations { get; } = new();
+        public List<ControllerNotificationInvocation> NotificationInvocations { get; } = new();
         public Dictionary<string, string> LocalVariables { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
@@ -25,6 +28,8 @@ public sealed partial class ProjectAnalyzer
     private sealed record ControllerValidatorInvocation(string ValidatorType, int Line);
 
     private sealed record ControllerCastInvocation(string SourceType, string DestinationType, string? AssignedVariable, int Line, string Kind);
+
+    private sealed record ControllerNotificationInvocation(string NotificationType, int Line);
 
     private sealed record MinimalEndpointInfo(string Route, string HttpMethod, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
     {
@@ -40,15 +45,20 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerRepositoryCall> RepositoryCalls { get; } = new();
         public List<HandlerMapperCall> MapperCalls { get; } = new();
         public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<HandlerNotificationPublication> PublishedNotifications { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
     }
 
     private sealed record HandlerDbAccess(string DbContextType, string Member, int Line);
 
-    private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line);
+    private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType);
 
     private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line);
 
     private sealed record HandlerMapperCall(string? SourceType, string? DestinationType, int Line);
+
+    private sealed record HandlerNotificationPublication(string NotificationType, int Line);
 
     private sealed record DtoInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name);
 
@@ -78,7 +88,11 @@ public sealed partial class ProjectAnalyzer
         public string? EndpointRoute => Call.CanonicalRoute;
     }
 
-    private sealed record PublisherInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, IReadOnlyDictionary<string, FieldDescriptor> FieldTypes);
+    private sealed record PublisherInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, IReadOnlyDictionary<string, FieldDescriptor> FieldTypes)
+    {
+        public string? QueueOrTopic { get; init; }
+        public string? Subject { get; init; }
+    }
 
     private sealed record MessageContractInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name);
 
@@ -88,6 +102,8 @@ public sealed partial class ProjectAnalyzer
     {
         public List<RepositoryDbAccess> DbAccesses { get; } = new();
         public List<RepositoryMapperCall> MapperCalls { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
     }
 
     private sealed record RepositoryDbAccess(string Member, string Method, int Line);
@@ -107,4 +123,42 @@ public sealed partial class ProjectAnalyzer
     private sealed record ConfigurationValue(string Key, string Value, string FilePath, GraphSpan Span);
 
     private sealed record HttpClientBaseAddress(string ClientType, string BaseUrl, string SourceFile, int Line, string? ConfigurationKey, ConfigurationValue? Configuration);
+
+    private sealed record NotificationInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string? ContractType);
+
+    private sealed record NotificationHandlerInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string NotificationType)
+    {
+        public List<NotificationHandlerRepositoryCall> RepositoryCalls { get; } = new();
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<NotificationHandlerRequestInvocation> RequestInvocations { get; } = new();
+        public List<HandlerMapperCall> MapperCalls { get; } = new();
+        public List<HandlerNotificationPublication> PublishedNotifications { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+    }
+
+    private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line);
+
+    private sealed record NotificationHandlerRequestInvocation(string RequestType, int Line);
+
+    private sealed record BackgroundServiceInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
+    {
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<BackgroundServiceRepositoryCall> RepositoryCalls { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+    }
+
+    private sealed record BackgroundServiceRepositoryCall(string RepositoryType, string Method, int Line);
+
+    private sealed record CacheInvocation(string CacheType, string Method, string? Key, int Line, string Operation);
+
+    private sealed record CacheInfo(string TypeName, string Kind);
+
+    private sealed record OptionsInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string? SectionName)
+    {
+        public Dictionary<string, string> Values { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed record OptionsUsage(string OptionsType, int Line);
 }
