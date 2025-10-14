@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using GraphKit.Graph;
 using GraphKit.Workspace;
@@ -99,6 +100,21 @@ public sealed partial class ProjectAnalyzer
                     var baseTypeName = GetTypeNameWithoutGenerics(typeName);
                     var resolvedBaseType = GetTypeNameWithoutGenerics(resolvedType);
 
+                    if (IsLoggerType(resolvedBaseType) || IsLoggerType(baseTypeName))
+                    {
+                        if (TryExtractLogLevel(methodName) is { } level)
+                        {
+                            handlerInfo.LogInvocations.Add(new HandlerLogInvocation(level, line));
+                            recordedUsage = true;
+                        }
+                    }
+
+                    if (invocation is not null && IsGuardInvocation(memberAccess))
+                    {
+                        handlerInfo.ValidationCalls.Add(new HandlerValidationCall(memberAccess.Expression.ToString(), methodName ?? string.Empty, line));
+                        recordedUsage = true;
+                    }
+
                     if (IsClientType(baseTypeName) || IsClientType(resolvedBaseType))
                     {
                         var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
@@ -145,7 +161,8 @@ public sealed partial class ProjectAnalyzer
                         }
                         else if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
                         {
-                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line));
+                            var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
+                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
                             continue;
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
@@ -253,6 +270,31 @@ public sealed partial class ProjectAnalyzer
         _handlers[fqdn] = handlerInfo;
     }
 
+    private string EnsureGuardNode(string guardType)
+    {
+        var assembly = GuessAssemblyName(guardType);
+        var symbolId = $"T:{guardType}";
+        var id = StableId.For("app.guard", guardType, assembly, symbolId);
+        if (!_nodes.ContainsKey(id))
+        {
+            _nodes[id] = new GraphNode
+            {
+                Id = id,
+                Type = "app.guard",
+                Name = guardType.Split('.').Last(),
+                Fqdn = guardType,
+                Assembly = assembly,
+                Project = string.Empty,
+                FilePath = string.Empty,
+                Span = null,
+                SymbolId = symbolId,
+                Tags = new[] { "framework" }
+            };
+        }
+
+        return id;
+    }
+
     private static string? GetMemberName(SimpleNameSyntax nameSyntax)
     {
         return nameSyntax switch
@@ -306,6 +348,19 @@ public sealed partial class ProjectAnalyzer
         foreach (var handler in _handlers.Values)
         {
             var id = StableId.For("cqrs.handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
+            Dictionary<string, object>? handlerProps = null;
+            if (handler.LogInvocations.Count > 0)
+            {
+                handlerProps = new Dictionary<string, object>
+                {
+                    ["log_levels"] = handler.LogInvocations
+                        .Select(l => l.Level)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(level => level, StringComparer.OrdinalIgnoreCase)
+                        .ToArray()
+                };
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -317,7 +372,8 @@ public sealed partial class ProjectAnalyzer
                 FilePath = handler.FilePath,
                 Span = handler.Span,
                 SymbolId = handler.SymbolId,
-                Tags = new[] { "app" }
+                Tags = new[] { "app" },
+                Props = handlerProps
             };
 
             if (FindRequestByType(handler.RequestType) is { } request)
@@ -361,7 +417,8 @@ public sealed partial class ProjectAnalyzer
                         },
                         Props = new Dictionary<string, object>
                         {
-                            ["method"] = repositoryCall.Method
+                            ["method"] = repositoryCall.Method,
+                            ["operation"] = repositoryCall.Operation
                         },
                         Evidence = CreateEvidence(handler.FilePath, repositoryCall.Line)
                     });
@@ -468,6 +525,62 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
+                if (IsLoggerType(usage.ServiceType) && handler.LogInvocations.Count > 0)
+                {
+                    foreach (var log in handler.LogInvocations
+                        .GroupBy(l => l.Level, StringComparer.OrdinalIgnoreCase)
+                        .Select(group => group.OrderBy(l => l.Line).First()))
+                    {
+                        _edges.Add(new GraphEdge
+                        {
+                            From = id,
+                            To = serviceId!,
+                            Kind = "logs",
+                            Source = "static",
+                            Confidence = 1.0,
+                            Transform = new GraphTransform
+                            {
+                                Type = "logging",
+                                Location = new GraphLocation { File = handler.FilePath, Line = log.Line }
+                            },
+                            Props = new Dictionary<string, object>
+                            {
+                                ["level"] = log.Level
+                            },
+                            Evidence = CreateEvidence(handler.FilePath, log.Line)
+                        });
+                    }
+                }
+
+                if (IsStorageService(usage.ServiceType))
+                {
+                    var storageProps = new Dictionary<string, object>
+                    {
+                        ["service_type"] = usage.ServiceType
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(usage.Method))
+                    {
+                        storageProps["method"] = usage.Method!;
+                    }
+
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = serviceId!,
+                        Kind = "uses_storage",
+                        Source = "static",
+                        Confidence = 1.0,
+                        Transform = new GraphTransform
+                        {
+                            Type = "storage.access",
+                            Location = new GraphLocation { File = handler.FilePath, Line = usage.Line }
+                        },
+                        Props = storageProps,
+                        Evidence = CreateEvidence(handler.FilePath, usage.Line)
+                    });
+                }
+
                 var props = new Dictionary<string, object>
                 {
                     ["service_type"] = usage.ServiceType
@@ -531,6 +644,29 @@ public sealed partial class ProjectAnalyzer
                 });
             }
 
+            foreach (var validation in handler.ValidationCalls)
+            {
+                var guardId = EnsureGuardNode(validation.GuardType);
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = guardId,
+                    Kind = "validation",
+                    Source = "static",
+                    Confidence = 0.9,
+                    Transform = new GraphTransform
+                    {
+                        Type = "validation.guard",
+                        Location = new GraphLocation { File = handler.FilePath, Line = validation.Line }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["method"] = validation.Method
+                    },
+                    Evidence = CreateEvidence(handler.FilePath, validation.Line)
+                });
+            }
+
             foreach (var optionsUsage in handler.OptionsUsages)
             {
                 var optionsId = EnsureOptionsNode(optionsUsage.OptionsType);
@@ -589,16 +725,18 @@ public sealed partial class ProjectAnalyzer
             }
         }
     }
-    private bool TryResolveHttpClient(string clientType, out HttpClientInfo client)
+    private bool TryResolveHttpClient(string clientType, [NotNullWhen(true)] out HttpClientInfo? client)
     {
-        if (_httpClients.TryGetValue(clientType, out client))
+        if (_httpClients.TryGetValue(clientType, out var resolved))
         {
+            client = resolved;
             return true;
         }
 
         var simple = clientType.Split('.').Last();
-        if (_httpClients.TryGetValue(simple, out client))
+        if (_httpClients.TryGetValue(simple, out resolved))
         {
+            client = resolved;
             return true;
         }
 
@@ -612,7 +750,7 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        client = null!;
+        client = null;
         return false;
     }
 }

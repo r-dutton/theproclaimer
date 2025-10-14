@@ -120,7 +120,8 @@ public sealed partial class ProjectAnalyzer
 
                 if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
                 {
-                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line));
+                    var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
+                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
                     continue;
                 }
 
@@ -328,7 +329,8 @@ public sealed partial class ProjectAnalyzer
                     },
                     Props = new Dictionary<string, object>
                     {
-                        ["method"] = repositoryCall.Method
+                        ["method"] = repositoryCall.Method,
+                        ["operation"] = repositoryCall.Operation
                     },
                     Evidence = CreateEvidence(handler.FilePath, repositoryCall.Line)
                 });

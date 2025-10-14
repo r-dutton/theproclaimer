@@ -224,7 +224,7 @@ public static class FlowBuilder
                 }
             }
 
-            foreach (var dataEdge in edges.Where(e => e.Kind is "queries" or "writes_to"))
+            foreach (var dataEdge in edges.Where(e => e.Kind is "queries" or "writes_to" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
             {
                 if (!state.NodesById.TryGetValue(dataEdge.To, out var entityNode))
                 {
@@ -232,7 +232,7 @@ public static class FlowBuilder
                 }
 
                 var lineText = dataEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var label = dataEdge.Kind == "writes_to" ? "writes_to" : "queries";
+                var label = ExtractOperationLabel(dataEdge);
                 AppendIndented(builder, childIndent, $"{label} {entityNode.Name}{lineText}");
 
                 if (entityNode.Type == "ef.entity")
@@ -263,6 +263,51 @@ public static class FlowBuilder
                 {
                     AppendIndented(builder, childIndent + 1, $"method {serviceMethodName}{lineText}");
                 }
+            }
+
+            foreach (var storageEdge in edges.Where(e => e.Kind == "uses_storage"))
+            {
+                if (!state.NodesById.TryGetValue(storageEdge.To, out var storageNode))
+                {
+                    continue;
+                }
+
+                var lineText = storageEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var methodName = storageEdge.Props is { } props && props.TryGetValue("method", out var value)
+                    ? value?.ToString()
+                    : null;
+                var methodSuffix = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{methodName}";
+                AppendIndented(builder, childIndent, $"uses_storage {storageNode.Name}{methodSuffix}{lineText}");
+            }
+
+            foreach (var logEdge in edges.Where(e => e.Kind == "logs"))
+            {
+                if (!state.NodesById.TryGetValue(logEdge.To, out var loggerNode))
+                {
+                    continue;
+                }
+
+                var lineText = logEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var level = logEdge.Props is { } props && props.TryGetValue("level", out var levelValue)
+                    ? levelValue?.ToString()
+                    : null;
+                var levelText = string.IsNullOrWhiteSpace(level) ? string.Empty : $" [{level}]";
+                AppendIndented(builder, childIndent, $"logs {loggerNode.Name}{levelText}{lineText}");
+            }
+
+            foreach (var validationEdge in edges.Where(e => e.Kind == "validation"))
+            {
+                if (!state.NodesById.TryGetValue(validationEdge.To, out var guardNode))
+                {
+                    continue;
+                }
+
+                var lineText = validationEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var validationMethod = validationEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+                    ? methodValue?.ToString()
+                    : null;
+                var methodText = string.IsNullOrWhiteSpace(validationMethod) ? string.Empty : $".{validationMethod}";
+                AppendIndented(builder, childIndent, $"validation {guardNode.Name}{methodText}{lineText}");
             }
 
             foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
@@ -515,6 +560,51 @@ public static class FlowBuilder
                 }
             }
 
+            foreach (var storageEdge in edges.Where(e => e.Kind == "uses_storage"))
+            {
+                if (!state.NodesById.TryGetValue(storageEdge.To, out var storageNode))
+                {
+                    continue;
+                }
+
+                var lineText = storageEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var methodName = storageEdge.Props is { } props && props.TryGetValue("method", out var value)
+                    ? value?.ToString()
+                    : null;
+                var methodSuffix = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{methodName}";
+                AppendIndented(builder, indent, $"uses_storage {storageNode.Name}{methodSuffix}{lineText}");
+            }
+
+            foreach (var logEdge in edges.Where(e => e.Kind == "logs"))
+            {
+                if (!state.NodesById.TryGetValue(logEdge.To, out var loggerNode))
+                {
+                    continue;
+                }
+
+                var lineText = logEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var level = logEdge.Props is { } props && props.TryGetValue("level", out var levelValue)
+                    ? levelValue?.ToString()
+                    : null;
+                var levelText = string.IsNullOrWhiteSpace(level) ? string.Empty : $" [{level}]";
+                AppendIndented(builder, indent, $"logs {loggerNode.Name}{levelText}{lineText}");
+            }
+
+            foreach (var validationEdge in edges.Where(e => e.Kind == "validation"))
+            {
+                if (!state.NodesById.TryGetValue(validationEdge.To, out var guardNode))
+                {
+                    continue;
+                }
+
+                var lineText = validationEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var validationMethod = validationEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+                    ? methodValue?.ToString()
+                    : null;
+                var methodText = string.IsNullOrWhiteSpace(validationMethod) ? string.Empty : $".{validationMethod}";
+                AppendIndented(builder, indent, $"validation {guardNode.Name}{methodText}{lineText}");
+            }
+
             foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
             {
                 if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
@@ -603,7 +693,7 @@ public static class FlowBuilder
             AppendMappingEdge(builder, state, mapping, indent);
         }
 
-        foreach (var write in edges.Where(e => e.Kind is "writes_to" or "queries"))
+        foreach (var write in edges.Where(e => e.Kind is "writes_to" or "queries" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
         {
             if (!state.NodesById.TryGetValue(write.To, out var entityNode))
             {
@@ -611,7 +701,7 @@ public static class FlowBuilder
             }
 
             var lineText = write.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var operation = write.Kind == "queries" ? "queries" : "writes_to";
+            var operation = ExtractOperationLabel(write);
             AppendIndented(builder, indent, $"{operation} {entityNode.Name}{lineText}");
             AppendEntityFlow(builder, state, entityNode, indent + 1);
         }
@@ -669,19 +759,16 @@ public static class FlowBuilder
             return;
         }
 
-        foreach (var tableEdge in edges.Where(e => e.Kind is "writes_to" or "reads_from" or "queries"))
+        foreach (var tableEdge in edges.Where(e => e.Kind is "writes_to" or "reads_from" or "queries" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
         {
             if (!state.NodesById.TryGetValue(tableEdge.To, out var tableNode))
             {
                 continue;
             }
 
-            var transform = tableEdge.Kind switch
-            {
-                "writes_to" => "writes_to",
-                "queries" => "queries",
-                _ => "reads_from"
-            };
+            var transform = tableEdge.Kind == "reads_from"
+                ? "reads_from"
+                : ExtractOperationLabel(tableEdge);
             var lineText = tableEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             AppendIndented(builder, indent, $"{transform} {tableNode.Name}{lineText}");
         }
@@ -1330,6 +1417,30 @@ public static class FlowBuilder
         return details.Count > 0
             ? $" ({string.Join(", ", details)})"
             : string.Empty;
+    }
+
+    private static string ExtractOperationLabel(GraphEdge edge)
+    {
+        if (edge.Props is { } props && props.TryGetValue("operation", out var value) && value is not null)
+        {
+            var text = value.ToString();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text!;
+            }
+        }
+
+        return edge.Kind switch
+        {
+            "inserts_into" => "insert",
+            "updates" => "update",
+            "deletes_from" => "delete",
+            "upserts" => "upsert",
+            "writes_to" => "writes_to",
+            "queries" => "queries",
+            "reads_from" => "reads_from",
+            _ => edge.Kind
+        };
     }
 }
 

@@ -124,14 +124,16 @@ public sealed partial class ProjectAnalyzer
                 {
                     var dbSet = inner.Name.Identifier.Text;
                     var line = GetLineNumber(tree, invocation);
-                    repository.DbAccesses.Add(new RepositoryDbAccess(dbSet, methodName, line));
+                    var operation = DetermineRepositoryOperation(methodName);
+                    repository.DbAccesses.Add(new RepositoryDbAccess(dbSet, methodName, line, operation));
                 }
                 else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax contextIdentifier, Name.Identifier.Text: var contextMethod } &&
                     fieldLookup.TryGetValue(contextIdentifier.Identifier.Text.TrimStart('_'), out var dbContextType) &&
                     dbContextType.Type.Contains("DbContext", StringComparison.Ordinal))
                 {
                     var line = GetLineNumber(tree, invocation);
-                    repository.DbAccesses.Add(new RepositoryDbAccess(contextIdentifier.Identifier.Text, contextMethod, line));
+                    var operation = DetermineRepositoryOperation(contextMethod);
+                    repository.DbAccesses.Add(new RepositoryDbAccess(contextIdentifier.Identifier.Text, contextMethod, line, operation));
                 }
             }
 
@@ -238,9 +240,24 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var entityId = StableId.For("ef.entity", entity.Fqdn, entity.Assembly, entity.SymbolId);
-                var isWrite = IsWriteOperation(access.Method);
-                var edgeKind = isWrite ? "writes_to" : "queries";
-                var transformType = isWrite ? "ef.write" : "ef.query";
+                var edgeKind = access.Operation switch
+                {
+                    "insert" => "inserts_into",
+                    "update" => "updates",
+                    "delete" => "deletes_from",
+                    "upsert" => "upserts",
+                    "write" => "writes_to",
+                    _ => "queries"
+                };
+                var transformType = edgeKind switch
+                {
+                    "inserts_into" => "ef.insert",
+                    "updates" => "ef.update",
+                    "deletes_from" => "ef.delete",
+                    "upserts" => "ef.upsert",
+                    "writes_to" => "ef.write",
+                    _ => "ef.query"
+                };
 
                 _edges.Add(new GraphEdge
                 {
@@ -253,6 +270,10 @@ public sealed partial class ProjectAnalyzer
                     {
                         Type = transformType,
                         Location = new GraphLocation { File = repository.FilePath, Line = access.Line }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["operation"] = access.Operation
                     },
                     Evidence = CreateEvidence(repository.FilePath, access.Line)
                 });
@@ -271,6 +292,10 @@ public sealed partial class ProjectAnalyzer
                         {
                             Type = transformType,
                             Location = new GraphLocation { File = repository.FilePath, Line = access.Line }
+                        },
+                        Props = new Dictionary<string, object>
+                        {
+                            ["operation"] = access.Operation
                         },
                         Evidence = CreateEvidence(repository.FilePath, access.Line)
                     });
@@ -342,10 +367,4 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
-    private static bool IsWriteOperation(string method)
-        => method.StartsWith("Add", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Create", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Update", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Save", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Insert", StringComparison.OrdinalIgnoreCase);
 }

@@ -225,11 +225,91 @@ public sealed partial class ProjectAnalyzer
                 project.RelativeDirectory);
 
             AddServiceRegistration(serviceType!, registration);
+            CaptureMediatorRegistration(serviceType!, implementationType!);
 
             var simple = serviceType!.Split('.').Last();
             if (!string.Equals(simple, serviceType, StringComparison.Ordinal))
             {
                 AddServiceRegistration(simple, registration);
+            }
+        }
+    }
+
+    private void CaptureMediatorRegistration(string serviceType, string implementationType)
+    {
+        var serviceBase = GetTypeNameWithoutGenerics(serviceType);
+        if (serviceBase.EndsWith("IPipelineBehavior", StringComparison.Ordinal))
+        {
+            var arguments = SplitGenericArguments(serviceType);
+            if (arguments.Count == 0)
+            {
+                return;
+            }
+
+            var requestType = QualifyTypeName(arguments[0]);
+            RegisterPipelineRequest(requestType, implementationType);
+            return;
+        }
+
+        if (serviceBase.EndsWith("IRequestPreProcessor", StringComparison.Ordinal) ||
+            serviceBase.EndsWith("IRequestPostProcessor", StringComparison.Ordinal) ||
+            serviceBase.EndsWith("IRequestProcessor", StringComparison.Ordinal))
+        {
+            var arguments = SplitGenericArguments(serviceType);
+            if (arguments.Count == 0)
+            {
+                return;
+            }
+
+            var requestType = QualifyTypeName(arguments[0]);
+            RegisterProcessorRequest(requestType, implementationType);
+        }
+    }
+
+    private void RegisterPipelineRequest(string requestType, string behaviorType)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return;
+        }
+
+        var bag = _requestPipelineRegistrations.GetOrAdd(requestType, _ => new ConcurrentBag<string>());
+        bag.Add(behaviorType);
+
+        if (FindPipelineBehavior(behaviorType) is { } behavior)
+        {
+            behavior.RegisteredRequestTypes.Add(requestType);
+        }
+        else
+        {
+            var baseType = GetTypeNameWithoutGenerics(behaviorType);
+            if (FindPipelineBehavior(baseType) is { } baseBehavior)
+            {
+                baseBehavior.RegisteredRequestTypes.Add(requestType);
+            }
+        }
+    }
+
+    private void RegisterProcessorRequest(string requestType, string processorType)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return;
+        }
+
+        var bag = _requestProcessorRegistrations.GetOrAdd(requestType, _ => new ConcurrentBag<string>());
+        bag.Add(processorType);
+
+        if (FindRequestProcessor(processorType) is { } processor)
+        {
+            processor.RegisteredRequestTypes.Add(requestType);
+        }
+        else
+        {
+            var baseType = GetTypeNameWithoutGenerics(processorType);
+            if (FindRequestProcessor(baseType) is { } baseProcessor)
+            {
+                baseProcessor.RegisteredRequestTypes.Add(requestType);
             }
         }
     }

@@ -666,7 +666,8 @@ public sealed partial class ProjectAnalyzer
                 {
                     var props = new Dictionary<string, object>
                     {
-                        ["method"] = repository.Method
+                        ["method"] = repository.Method,
+                        ["operation"] = repository.Operation
                     };
 
                     _edges.Add(new GraphEdge
@@ -689,7 +690,24 @@ public sealed partial class ProjectAnalyzer
                 if (!string.IsNullOrWhiteSpace(repository.EntityType) &&
                     TryResolveNodeReference(repository.EntityType, out var entityReference))
                 {
-                    var kind = repository.Operation.Equals("write", StringComparison.OrdinalIgnoreCase) ? "writes_to" : "queries";
+                    var kind = repository.Operation switch
+                    {
+                        "insert" => "inserts_into",
+                        "update" => "updates",
+                        "delete" => "deletes_from",
+                        "upsert" => "upserts",
+                        "write" => "writes_to",
+                        _ => "queries"
+                    };
+                    var transformType = kind switch
+                    {
+                        "inserts_into" => "repository.insert",
+                        "updates" => "repository.update",
+                        "deletes_from" => "repository.delete",
+                        "upserts" => "repository.upsert",
+                        "writes_to" => "repository.write",
+                        _ => "repository.query"
+                    };
                     _edges.Add(new GraphEdge
                     {
                         From = id,
@@ -699,8 +717,12 @@ public sealed partial class ProjectAnalyzer
                         Confidence = 1.0,
                         Transform = new GraphTransform
                         {
-                            Type = kind == "writes_to" ? "repository.write" : "repository.query",
+                            Type = transformType,
                             Location = new GraphLocation { File = action.FilePath, Line = repository.Line }
+                        },
+                        Props = new Dictionary<string, object>
+                        {
+                            ["operation"] = repository.Operation
                         },
                         Evidence = CreateEvidence(action.FilePath, repository.Line)
                     });
@@ -714,6 +736,35 @@ public sealed partial class ProjectAnalyzer
                 if (!TryEnsureServiceNode(serviceUsage.ServiceType, out var serviceId, out var registration))
                 {
                     continue;
+                }
+
+                if (IsStorageService(serviceUsage.ServiceType))
+                {
+                    var storageProps = new Dictionary<string, object>
+                    {
+                        ["service_type"] = serviceUsage.ServiceType
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(serviceUsage.Method))
+                    {
+                        storageProps["method"] = serviceUsage.Method!;
+                    }
+
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = serviceId!,
+                        Kind = "uses_storage",
+                        Source = "static",
+                        Confidence = 1.0,
+                        Transform = new GraphTransform
+                        {
+                            Type = "storage.access",
+                            Location = new GraphLocation { File = action.FilePath, Line = serviceUsage.Line }
+                        },
+                        Props = storageProps,
+                        Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
+                    });
                 }
 
                 var props = new Dictionary<string, object>
@@ -1074,16 +1125,33 @@ public sealed partial class ProjectAnalyzer
             return "query";
         }
 
-        if (methodName.StartsWith("Write", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Add", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Update", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Create", StringComparison.OrdinalIgnoreCase) ||
+        if (methodName.StartsWith("Add", StringComparison.OrdinalIgnoreCase) ||
             methodName.StartsWith("Insert", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Create", StringComparison.OrdinalIgnoreCase))
+        {
+            return "insert";
+        }
+
+        if (methodName.StartsWith("Update", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Set", StringComparison.OrdinalIgnoreCase) ||
             methodName.StartsWith("Save", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Commit", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Upsert", StringComparison.OrdinalIgnoreCase))
+            methodName.StartsWith("Commit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "update";
+        }
+
+        if (methodName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase))
+        {
+            return "delete";
+        }
+
+        if (methodName.StartsWith("Upsert", StringComparison.OrdinalIgnoreCase))
+        {
+            return "upsert";
+        }
+
+        if (methodName.StartsWith("Write", StringComparison.OrdinalIgnoreCase))
         {
             return "write";
         }
