@@ -9,7 +9,7 @@ namespace GraphKit.Outputs;
 
 public static class FlowBuilder
 {
-    public static string BuildFlows(GraphDocument document, Func<GraphNode, bool> controllerPredicate, FlowWorkspaceIndex? workspace = null)
+    public static string BuildFlows(GraphDocument document, Func<GraphNode, bool> controllerPredicate, FlowWorkspaceIndex? workspace = null, int? maxDepth = null)
     {
         var nodesById = document.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
         var edgesByFrom = document.Edges
@@ -33,7 +33,7 @@ public static class FlowBuilder
         var builder = new StringBuilder();
         foreach (var controller in controllers)
         {
-            var state = new FlowRenderState(document, nodesById, edgesByFrom, mapLookup, workspace);
+            var state = new FlowRenderState(document, nodesById, edgesByFrom, mapLookup, workspace, maxDepth);
             AppendControllerFlow(builder, state, controller);
             builder.AppendLine();
         }
@@ -58,7 +58,26 @@ public static class FlowBuilder
             var method = GetNodeProp(endpoint, "http_method") ?? "GET";
             var route = GetNodeProp(endpoint, "route") ?? "/";
             var span = endpoint.Span;
-            var header = $"[web] {method} {route}  ({endpoint.Fqdn})  [L{span?.StartLine}–L{span?.EndLine}]";
+            // Authorization / anonymous annotations (if any)
+            var authAnnotation = BuildAuthorizationAnnotation(endpoint);
+            string? statusCodes = null;
+            if (endpoint.Props is { } ep && ep.TryGetValue("status_codes", out var scObj) && scObj is not null)
+            {
+                IEnumerable<string>? codes = scObj switch
+                {
+                    int[] ints => ints.Select(i => i.ToString()),
+                    IEnumerable<int> intEnum => intEnum.Select(i => i.ToString()),
+                    object[] objects => objects.Select(o => o?.ToString() ?? string.Empty),
+                    IEnumerable<object> objEnum => objEnum.Select(o => o?.ToString() ?? string.Empty),
+                    _ => null
+                };
+                if (codes is not null)
+                {
+                    statusCodes = string.Join(',', codes.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct());
+                }
+            }
+            var statusText = string.IsNullOrWhiteSpace(statusCodes) ? string.Empty : $" status={statusCodes}";
+            var header = $"[web] {method} {route}  ({endpoint.Fqdn})  [L{span?.StartLine}–L{span?.EndLine}]{statusText}{authAnnotation}";
 
             if (indent <= 0)
             {
@@ -69,12 +88,45 @@ public static class FlowBuilder
                 AppendIndented(builder, indent, header);
             }
 
+            if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+            {
+                // We've printed the endpoint header but will not expand further.
+                AppendIndented(builder, indent + 1, "... (max depth reached)");
+                return; // depth limit reached
+            }
+
             if (!state.EdgesByFrom.TryGetValue(endpoint.Id, out var edges))
             {
                 return;
             }
 
             var childIndent = indent <= 0 ? 1 : indent + 1;
+
+            // Configuration usages (uses_configuration edges)
+            foreach (var configEdge in edges.Where(e => e.Kind == "uses_configuration"))
+            {
+                if (!state.NodesById.TryGetValue(configEdge.To, out var configNode))
+                {
+                    continue;
+                }
+
+                var key = configEdge.Props is { } cprops && cprops.TryGetValue("key", out var keyVal)
+                    ? keyVal?.ToString()
+                    : null;
+                var accessor = configEdge.Props is { } cprops2 && cprops2.TryGetValue("accessor", out var accVal)
+                    ? accVal?.ToString()
+                    : null;
+                var value = configEdge.Props is { } cprops3 && cprops3.TryGetValue("value", out var valVal)
+                    ? valVal?.ToString()
+                    : null;
+                var lineText = configEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var detailParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(accessor)) detailParts.Add(accessor!);
+                if (!string.IsNullOrWhiteSpace(key)) detailParts.Add(key!);
+                var details = detailParts.Count > 0 ? string.Join(":", detailParts) : configNode.Name;
+                var valueText = string.IsNullOrWhiteSpace(value) ? string.Empty : $" value={value}";
+                AppendIndented(builder, childIndent, $"uses_configuration {details}{valueText}{lineText}");
+            }
 
             foreach (var mapEdge in edges.Where(e => e.Kind == "maps_to"))
             {
@@ -133,15 +185,10 @@ public static class FlowBuilder
                     ? keyValue?.ToString()
                     : null;
                 var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
-                var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-                var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-                AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{cacheLineText}");
-
-                if (!string.IsNullOrWhiteSpace(cacheMethod))
-                {
-                    AppendIndented(builder, childIndent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
-                }
+                    var methodPart = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+                    var opPart = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
+                    var keyPart = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
+                    AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
             }
 
             foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -312,6 +359,45 @@ public static class FlowBuilder
             return;
         }
 
+        // Pipeline behaviors / request processors (processed_by edges)
+        foreach (var pipelineEdge in edges.Where(e => e.Kind == "processed_by"))
+        {
+            if (!state.NodesById.TryGetValue(pipelineEdge.To, out var behaviorNode))
+            {
+                continue;
+            }
+
+            var stage = behaviorNode.Props is { } bProps && bProps.TryGetValue("stage", out var stageVal)
+                ? stageVal?.ToString()
+                : null;
+            var responseType = pipelineEdge.Props is { } peProps && peProps.TryGetValue("response_type", out var respVal)
+                ? respVal?.ToString()
+                : null;
+            var stageText = string.IsNullOrWhiteSpace(stage) ? string.Empty : $" [{stage}]";
+            var responseText = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" (response={responseType})";
+            AppendIndented(builder, indent, $"processed_by {behaviorNode.Name}{stageText}{responseText}");
+        }
+
+        // If no concrete pipeline edges, attempt to list generic pipeline behaviors (nodes tagged generic_request)
+        if (!edges.Any(e => e.Kind == "processed_by"))
+        {
+            var genericBehaviors = state.Document.Nodes
+                .Where(n => n.Type == "cqrs.pipeline_behavior" && n.Props is { } p && p.TryGetValue("generic_request", out var gr) && gr is bool b && b)
+                .ToList();
+            if (genericBehaviors.Count > 0)
+            {
+                AppendIndented(builder, indent, $"generic_pipeline_behaviors {genericBehaviors.Count}");
+                foreach (var gb in genericBehaviors.OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase).Take(5))
+                {
+                    AppendIndented(builder, indent + 1, $"{gb.Name}");
+                }
+                if (genericBehaviors.Count > 5)
+                {
+                    AppendIndented(builder, indent + 1, $"+{genericBehaviors.Count - 5} more");
+                }
+            }
+        }
+
         foreach (var handlerEdge in edges.Where(e => e.Kind == "handled_by"))
         {
             if (!state.NodesById.TryGetValue(handlerEdge.To, out var handlerNode))
@@ -338,9 +424,40 @@ public static class FlowBuilder
 
         try
         {
+            if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+            {
+                AppendIndented(builder, indent, "... (max depth reached)");
+                return;
+            }
             if (!state.EdgesByFrom.TryGetValue(handler.Id, out var edges))
             {
                 return;
+            }
+
+            // Configuration for handler
+            foreach (var configEdge in edges.Where(e => e.Kind == "uses_configuration"))
+            {
+                if (!state.NodesById.TryGetValue(configEdge.To, out var configNode))
+                {
+                    continue;
+                }
+
+                var key = configEdge.Props is { } cprops && cprops.TryGetValue("key", out var keyVal)
+                    ? keyVal?.ToString()
+                    : null;
+                var accessor = configEdge.Props is { } cprops2 && cprops2.TryGetValue("accessor", out var accVal)
+                    ? accVal?.ToString()
+                    : null;
+                var value = configEdge.Props is { } cprops3 && cprops3.TryGetValue("value", out var valVal)
+                    ? valVal?.ToString()
+                    : null;
+                var lineText = configEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var detailParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(accessor)) detailParts.Add(accessor!);
+                if (!string.IsNullOrWhiteSpace(key)) detailParts.Add(key!);
+                var details = detailParts.Count > 0 ? string.Join(":", detailParts) : configNode.Name;
+                var valueText = string.IsNullOrWhiteSpace(value) ? string.Empty : $" value={value}";
+                AppendIndented(builder, indent, $"uses_configuration {details}{valueText}{lineText}");
             }
 
             foreach (var call in edges.Where(e => e.Kind == "calls"))
@@ -415,15 +532,10 @@ public static class FlowBuilder
                     ? keyValue?.ToString()
                     : null;
                 var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
-                var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-                var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-                AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{cacheLineText}");
-
-                if (!string.IsNullOrWhiteSpace(cacheMethod))
-                {
-                    AppendIndented(builder, indent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
-                }
+                    var methodPart = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+                    var opPart = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
+                    var keyPart = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
+                    AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
             }
 
             foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -476,6 +588,11 @@ public static class FlowBuilder
         GraphNode repository,
         int indent)
     {
+        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+        {
+            AppendIndented(builder, indent, "... (max depth reached)");
+            return;
+        }
         if (!state.EdgesByFrom.TryGetValue(repository.Id, out var edges))
         {
             return;
@@ -516,15 +633,10 @@ public static class FlowBuilder
                 ? keyValue?.ToString()
                 : null;
             var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
-            var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-            var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-            AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{cacheLineText}");
-
-            if (!string.IsNullOrWhiteSpace(cacheMethod))
-            {
-                AppendIndented(builder, indent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
-            }
+                var methodPart = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
+                var opPart = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
+                var keyPart = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
+                AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
         }
 
         foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -547,6 +659,11 @@ public static class FlowBuilder
         GraphNode entity,
         int indent)
     {
+        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+        {
+            AppendIndented(builder, indent, "... (max depth reached)");
+            return;
+        }
         if (!state.EdgesByFrom.TryGetValue(entity.Id, out var edges))
         {
             return;
@@ -765,7 +882,28 @@ public static class FlowBuilder
 
         if (!state.Workspace.TryGetAssemblies(serviceName, out var assemblies) || assemblies.Count == 0)
         {
+            // No explicit assemblies mapped. Still attempt a global endpoint match so we can
+            // provide value even before workspace config is completed.
             AppendIndented(builder, indent, $"target_service {serviceName}");
+
+            var routeFallback = props.TryGetValue("route", out var rfRouteVal) ? rfRouteVal?.ToString() : null;
+            var verbFallback = props.TryGetValue("verb", out var rfVerbVal) ? rfVerbVal?.ToString() : null;
+            var globalCandidates = state.Document.Nodes
+                .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api"))
+                .ToList();
+            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, routeFallback, verbFallback);
+            if (globalMatched.Count > 0)
+            {
+                AppendIndented(builder, indent + 1, "fallback_global_endpoint_match (no assemblies mapped)");
+                foreach (var endpoint in globalMatched)
+                {
+                    AppendEndpointFlow(builder, state, endpoint, indent + 2);
+                }
+            }
+            else
+            {
+                AppendIndented(builder, indent + 1, "unresolved_target_service (no assemblies mapped)");
+            }
             return;
         }
 
@@ -779,7 +917,8 @@ public static class FlowBuilder
         var key = $"{callEdge.From}->{serviceName}:{route}:{verb}";
         if (!state.TargetServiceVisited.Add(key))
         {
-            AppendIndented(builder, indent, $"target_service {serviceName} (already expanded)");
+            // Summarize rather than fully re-expand
+            AppendIndented(builder, indent, $"target_service {serviceName} (see previous expansion)");
             return;
         }
 
@@ -790,12 +929,40 @@ public static class FlowBuilder
 
         AppendIndented(builder, indent, $"target_service {serviceName}");
 
+        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+        {
+            AppendIndented(builder, indent + 1, "... (max depth reached)");
+            return;
+        }
+
         if (candidates.Count == 0)
         {
+            AppendIndented(builder, indent + 1, "unresolved_target_service (no endpoints in mapped assemblies)");
             return;
         }
 
         var matched = FilterEndpointsByRouteAndVerb(candidates, route, verb);
+        if (matched.Count == 0)
+        {
+            // Fallback: global search across all endpoints if specific assembly match failed
+            var globalCandidates = state.Document.Nodes
+                .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api"))
+                .ToList();
+            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
+            if (globalMatched.Count > 0)
+            {
+                AppendIndented(builder, indent + 1, "fallback_global_endpoint_match");
+                foreach (var endpoint in globalMatched)
+                {
+                    AppendEndpointFlow(builder, state, endpoint, indent + 2);
+                }
+                return;
+            }
+
+            AppendIndented(builder, indent + 1, $"unmatched_endpoint route={route} verb={verb}");
+            return;
+        }
+
         foreach (var endpoint in matched)
         {
             AppendEndpointFlow(builder, state, endpoint, indent + 1);
@@ -879,13 +1046,15 @@ public static class FlowBuilder
             IReadOnlyDictionary<string, GraphNode> nodesById,
             IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
             IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
-            FlowWorkspaceIndex? workspace)
+            FlowWorkspaceIndex? workspace,
+            int? maxDepth)
         {
             Document = document;
             NodesById = nodesById;
             EdgesByFrom = edgesByFrom;
             MapLookup = mapLookup;
             Workspace = workspace;
+            MaxDepth = maxDepth;
         }
 
         public GraphDocument Document { get; }
@@ -897,6 +1066,43 @@ public static class FlowBuilder
         public HashSet<string> HandlerStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> NotificationStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> TargetServiceVisited { get; } = new(StringComparer.Ordinal);
+        public int? MaxDepth { get; }
+    }
+
+    private static string BuildAuthorizationAnnotation(GraphNode endpoint)
+    {
+        if (endpoint.Props is not { } props)
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>();
+        if (props.TryGetValue("authorization", out var authObj) && authObj is IEnumerable<object> authList)
+        {
+            var policies = new List<string>();
+            foreach (var a in authList)
+            {
+                if (a is IDictionary<string, object> dict && dict.TryGetValue("policy", out var policyVal))
+                {
+                    var policy = policyVal?.ToString();
+                    if (!string.IsNullOrWhiteSpace(policy))
+                    {
+                        policies.Add(policy!);
+                    }
+                }
+            }
+            if (policies.Count > 0)
+            {
+                parts.Add($"auth={string.Join(',', policies)}");
+            }
+        }
+
+        if (props.TryGetValue("allow_anonymous", out var anonObj) && anonObj is bool anon && anon)
+        {
+            parts.Add("AllowAnonymous");
+        }
+
+        return parts.Count > 0 ? " [" + string.Join(' ', parts) + "]" : string.Empty;
     }
 
     private static string? GetNodeProp(GraphNode node, string key)
@@ -944,6 +1150,12 @@ public static class FlowBuilder
 
         try
         {
+            if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+            {
+                AppendIndented(builder, indent, "... (max depth reached)");
+                return;
+            }
+
             if (!state.EdgesByFrom.TryGetValue(notification.Id, out var edges))
             {
                 return;
@@ -980,6 +1192,12 @@ public static class FlowBuilder
 
         try
         {
+            if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+            {
+                AppendIndented(builder, indent, "... (max depth reached)");
+                return;
+            }
+
             if (!state.EdgesByFrom.TryGetValue(handler.Id, out var edges))
             {
                 return;
@@ -1066,6 +1284,11 @@ public static class FlowBuilder
         GraphNode publisher,
         int indent)
     {
+        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+        {
+            AppendIndented(builder, indent, "... (max depth reached)");
+            return;
+        }
         if (!state.EdgesByFrom.TryGetValue(publisher.Id, out var edges))
         {
             return;

@@ -1,0 +1,36 @@
+[web] GET /api/ui/workflow/jobs/{id:guid}  (Dataverse.Api.Controllers.UI.Workflow.JobController.GetJob)  [L72–L81] [auth=Authentication.UserPolicy]
+  └─ maps_to JobDto [L77]
+    └─ automapper.registration DataverseMappingProfile (Job->JobDto) [L306]
+    └─ automapper.registration ExternalApiMappingProfile (Job->JobDto) [L120]
+    └─ converts_to JobExportDto [L311]
+  └─ calls JobRepository.ReadQuery [L77]
+  └─ queries Job [L77]
+    └─ reads_from Jobs
+  └─ uses_service FirmSettingsService
+    └─ method GetCurrentSettingsAsync [L79]
+  └─ uses_service IControlledRepository<Job>
+    └─ method ReadQuery [L77]
+  └─ uses_service UserService
+    └─ method GetUserId [L79]
+  └─ sends_request CanIAccessJobQuery [L75]
+    └─ generic_pipeline_behaviors 2
+      └─ DatagetTokenSyncBehaviour
+      └─ DatagetTokenSyncBehaviour
+    └─ handled_by Dataverse.ApplicationService.Queries.WorkFlow.CanIAccessJobQueryHandler.Handle [L39–L95]
+      └─ uses_service IControlledRepository<Job>
+        └─ method ReadQuery [L78]
+      └─ uses_service RequestInfoService
+        └─ method IsValidServiceAccountRequest [L68]
+      └─ uses_service RequestProcessor
+        └─ method ProcessAsync [L82]
+      └─ uses_service TenantService
+        └─ method GetCurrentTenantAsync [L73]
+      └─ uses_service UserService
+        └─ method GetUserAsync [L71]
+      └─ uses_cache IDistributedCache [L91]
+        └─ method SetRecordAsync [write] [L91]
+      └─ uses_cache IDistributedCache [L75]
+        └─ method DoesRecordExistAsync [access] [L75]
+      └─ uses_cache IDistributedCache [L73]
+        └─ method CreateAccessKey [write] [L73]
+

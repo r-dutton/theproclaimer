@@ -28,8 +28,8 @@
       "project": "src/Sample.Web",
       "file_path": "src/Sample.Web/Program.cs",
       "span": {
-        "start_line": 34,
-        "end_line": 34
+        "start_line": 38,
+        "end_line": 38
       },
       "symbol_id": "T:IReportRepository",
       "tags": [
@@ -71,6 +71,26 @@
       "props": {
         "source_type": "CreateDetailedReportCommand",
         "destination_type": "Report"
+      }
+    },
+    {
+      "id": "node::18bb2ab3b02c069d7f461f767021761f339f95360fec78e7b000e265f1b30333",
+      "type": "config.value",
+      "name": "Downstream:Reports:BaseUrl",
+      "fqdn": "Downstream:Reports:BaseUrl",
+      "assembly": "configuration",
+      "project": "",
+      "file_path": "src/Sample.Web/appsettings.json",
+      "span": {
+        "start_line": 14,
+        "end_line": 14
+      },
+      "symbol_id": "Downstream:Reports:BaseUrl",
+      "tags": [
+        "configuration"
+      ],
+      "props": {
+        "value": "https://localhost:6001"
       }
     },
     {
@@ -132,6 +152,21 @@
       "props": null
     },
     {
+      "id": "node::1f7182648a9de2d62cea3071e1bbe61137f159347373bd08931d8d4cbf884539",
+      "type": "app.service_contract",
+      "name": "IEnumerable\u003CIValidator\u003CTRequest\u003E\u003E",
+      "fqdn": "IEnumerable\u003CIValidator\u003CTRequest\u003E\u003E",
+      "assembly": "IEnumerable\u003CIValidator\u003CTRequest\u003E\u003E",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:IEnumerable\u003CIValidator\u003CTRequest\u003E\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
       "id": "node::2460ee45c25c4aef141f13cfb3ce8762127d367b6448df80a3d9cb1d217cb585",
       "type": "endpoint.controller",
       "name": "CreateDetailedReport",
@@ -149,7 +184,10 @@
       ],
       "props": {
         "route": "/api/reports",
-        "http_method": "POST"
+        "http_method": "POST",
+        "status_codes": [
+          201
+        ]
       }
     },
     {
@@ -231,6 +269,24 @@
       }
     },
     {
+      "id": "node::3532264f93b5c9bcfde5349d30001c7182b6329684997e2f0ee2948e22f6acb9",
+      "type": "app.service_contract",
+      "name": "IRequestPreProcessor\u003C\u003E",
+      "fqdn": "IRequestPreProcessor\u003C\u003E",
+      "assembly": "Sample.Web",
+      "project": "src/Sample.Web",
+      "file_path": "src/Sample.Web/Program.cs",
+      "span": {
+        "start_line": 27,
+        "end_line": 27
+      },
+      "symbol_id": "T:IRequestPreProcessor\u003C\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
       "id": "node::36d109a1ad6c0dcd9e571cf153ac1f68d6d4161001063dcb3dcc93e5fd912fd3",
       "type": "cqrs.handler",
       "name": "CreateDetailedReportHandler",
@@ -249,6 +305,21 @@
       "props": null
     },
     {
+      "id": "node::3a8a2beec579495df7e5bdaac00d5ada4bb91279fefce9ab816b4ac8eb213373",
+      "type": "app.service_contract",
+      "name": "IOptions\u003CReportRetentionOptions\u003E",
+      "fqdn": "IOptions\u003CReportRetentionOptions\u003E",
+      "assembly": "IOptions\u003CReportRetentionOptions\u003E",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:IOptions\u003CReportRetentionOptions\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
       "id": "node::3d911431fcdb1f6632c5aa773a849ac0f734ce3e5bf3be76916b2706a55da6f3",
       "type": "app.service_contract",
       "name": "IReportAuditRepository",
@@ -257,8 +328,8 @@
       "project": "src/Sample.Web",
       "file_path": "src/Sample.Web/Program.cs",
       "span": {
-        "start_line": 35,
-        "end_line": 35
+        "start_line": 39,
+        "end_line": 39
       },
       "symbol_id": "T:IReportAuditRepository",
       "tags": [
@@ -329,8 +400,8 @@
       "project": "src/Sample.Web",
       "file_path": "src/Sample.Web/Program.cs",
       "span": {
-        "start_line": 33,
-        "end_line": 33
+        "start_line": 37,
+        "end_line": 37
       },
       "symbol_id": "T:IReportPublisher",
       "tags": [
@@ -354,6 +425,44 @@
       "tags": [
         "app",
         "event"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::528d6486b4d6ef03a63e07fb77d4ad4793992745b8f58e234a589348aad47b30",
+      "type": "cqrs.pipeline_behavior",
+      "name": "ValidationBehavior",
+      "fqdn": "Sample.App.Pipelines.ValidationBehavior",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Pipelines/ValidationBehavior.cs",
+      "span": {
+        "start_line": 13,
+        "end_line": 50
+      },
+      "symbol_id": "T:Sample.App.Pipelines.ValidationBehavior",
+      "tags": [
+        "app"
+      ],
+      "props": {
+        "generic_request": true
+      }
+    },
+    {
+      "id": "node::538def802920f10da73c4186df9ff415b92d6ca06a58e9d819192984963790de",
+      "type": "cqrs.request",
+      "name": "CreateDetailedReportHandler",
+      "fqdn": "Sample.App.Handlers.CreateDetailedReportHandler",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+      "span": {
+        "start_line": 12,
+        "end_line": 34
+      },
+      "symbol_id": "T:Sample.App.Handlers.CreateDetailedReportHandler",
+      "tags": [
+        "app"
       ],
       "props": null
     },
@@ -444,8 +553,8 @@
       "project": "src/Sample.Web",
       "file_path": "src/Sample.Web/Program.cs",
       "span": {
-        "start_line": 65,
-        "end_line": 65
+        "start_line": 69,
+        "end_line": 69
       },
       "symbol_id": "M:Program.MapGet",
       "tags": [
@@ -455,6 +564,24 @@
         "route": "/internal/reports/{id:guid}",
         "http_method": "GET"
       }
+    },
+    {
+      "id": "node::82e628b92680287bacf435078f44842aa2777034b224889cfa81de43e0b7cfe2",
+      "type": "app.service_contract",
+      "name": "IPipelineBehavior\u003C,\u003E",
+      "fqdn": "IPipelineBehavior\u003C,\u003E",
+      "assembly": "Sample.Web",
+      "project": "src/Sample.Web",
+      "file_path": "src/Sample.Web/Program.cs",
+      "span": {
+        "start_line": 26,
+        "end_line": 26
+      },
+      "symbol_id": "T:IPipelineBehavior\u003C,\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
     },
     {
       "id": "node::874d03add6541043ccd7569b44b6a8d942814d02b8044381f6d626a1a92848c6",
@@ -498,6 +625,66 @@
       }
     },
     {
+      "id": "node::99bcaf2c30f6d79b4224ec1d290a835ab576dad5d49f7b71d04974558e53703d",
+      "type": "app.service_contract",
+      "name": "IMemoryCache",
+      "fqdn": "IMemoryCache",
+      "assembly": "IMemoryCache",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:IMemoryCache",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::9a8a07560caf2f2fde6287b02a58f20d1cb2cd0a81bc5037941f92e87978f5b6",
+      "type": "app.service_contract",
+      "name": "ILogger\u003CAuditLoggingPreProcessor\u003CTRequest\u003E\u003E",
+      "fqdn": "ILogger\u003CAuditLoggingPreProcessor\u003CTRequest\u003E\u003E",
+      "assembly": "ILogger\u003CAuditLoggingPreProcessor\u003CTRequest\u003E\u003E",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:ILogger\u003CAuditLoggingPreProcessor\u003CTRequest\u003E\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::a54483bcbf54390a94f6f145bb5818f1d462694289571cf7e884c79476b013ea",
+      "type": "app.service_contract",
+      "name": "IMediator",
+      "fqdn": "IMediator",
+      "assembly": "IMediator",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:IMediator",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::a67da709f0b8e9a3fc584a449ba6febf41d5810b5113c86468c18fbe61e29fcf",
+      "type": "app.service_contract",
+      "name": "ILogger\u003CReportRetentionWorker\u003E",
+      "fqdn": "ILogger\u003CReportRetentionWorker\u003E",
+      "assembly": "ILogger\u003CReportRetentionWorker\u003E",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:ILogger\u003CReportRetentionWorker\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
       "id": "node::a75d4ec1b132cf5de6edfcb9ed5127d044aa02f5f7c7336d75e852a7e2a02748",
       "type": "endpoint.controller",
       "name": "GetReportSummary",
@@ -515,8 +702,26 @@
       ],
       "props": {
         "route": "/api/reports/{id:guid}/summary",
-        "http_method": "GET"
+        "http_method": "GET",
+        "status_codes": [
+          200
+        ]
       }
+    },
+    {
+      "id": "node::a971b9dc8f7ced160597231f8c3bfe375c5906e148fe73a8b9cb95797943c67d",
+      "type": "app.service_contract",
+      "name": "ILogger\u003CValidationBehavior\u003CTRequest, TResponse\u003E\u003E",
+      "fqdn": "ILogger\u003CValidationBehavior\u003CTRequest, TResponse\u003E\u003E",
+      "assembly": "ILogger\u003CValidationBehavior\u003CTRequest, TResponse\u003E\u003E",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:ILogger\u003CValidationBehavior\u003CTRequest, TResponse\u003E\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
     },
     {
       "id": "node::ada3ab91f8e0ef09655b0f7ccd5daf3b5fc5d8eff69715b81a2cd198f01b37a2",
@@ -602,6 +807,57 @@
       "props": null
     },
     {
+      "id": "node::c0c7833e2509d2b5f973622541e6045ef8da30f96636fddc438a343347aae6b4",
+      "type": "cqrs.request",
+      "name": "GetReportHandler",
+      "fqdn": "Sample.App.Handlers.GetReportHandler",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Handlers/GetReportHandler.cs",
+      "span": {
+        "start_line": 18,
+        "end_line": 82
+      },
+      "symbol_id": "T:Sample.App.Handlers.GetReportHandler",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::c7fd48dee39df0caa2fe587f06b1435c5659118fd0a948bc74b7f3baf4ab04ed",
+      "type": "app.service_contract",
+      "name": "ReportRetentionWorker",
+      "fqdn": "ReportRetentionWorker",
+      "assembly": "Sample.Web",
+      "project": "src/Sample.Web",
+      "file_path": "src/Sample.Web/Program.cs",
+      "span": {
+        "start_line": 40,
+        "end_line": 40
+      },
+      "symbol_id": "T:ReportRetentionWorker",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::cc658375ef97cb0e06bdc2edefbcd1c5cc561fd236080f7afc58a49d271c4de9",
+      "type": "app.service_contract",
+      "name": "ILogger\u003CReportGeneratedHandler\u003E",
+      "fqdn": "ILogger\u003CReportGeneratedHandler\u003E",
+      "assembly": "ILogger\u003CReportGeneratedHandler\u003E",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:ILogger\u003CReportGeneratedHandler\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
       "id": "node::cf3011d824e28cf8f0fe80932241a75aef19e4ca1382c0655621252dc542b8ad",
       "type": "mapping.automapper.profile",
       "name": "ReportProfile",
@@ -656,6 +912,21 @@
       "props": null
     },
     {
+      "id": "node::d6b3942676324d17d43554043582db55a9ecc363ffc8edde1dd4cc63f0161309",
+      "type": "app.service_contract",
+      "name": "IMapper",
+      "fqdn": "IMapper",
+      "assembly": "IMapper",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:IMapper",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
       "id": "node::d72bfd57cd8a66af0443b6018c0b849b2333994c658c4eeb114d683d65d29570",
       "type": "validator",
       "name": "ReportDtoValidator",
@@ -695,6 +966,42 @@
       }
     },
     {
+      "id": "node::defc8550f69eebb5b5aa4714de7178cf6bb66f8d13bd42ec989a1d7b77d3df99",
+      "type": "ef.db_context",
+      "name": "ReportsDbContext",
+      "fqdn": "Sample.Data.Infrastructure.ReportsDbContext",
+      "assembly": "Sample.Data",
+      "project": "src/Sample.Data",
+      "file_path": "src/Sample.Data/Infrastructure/ReportsDbContext.cs",
+      "span": {
+        "start_line": 7,
+        "end_line": 22
+      },
+      "symbol_id": "T:Sample.Data.Infrastructure.ReportsDbContext",
+      "tags": [
+        "data"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::dfb4955736d63b55212ff116e4f52a6de8a3601db58e2845cbe6f8e41c869c57",
+      "type": "app.service_contract",
+      "name": "ReportsDbContext",
+      "fqdn": "ReportsDbContext",
+      "assembly": "Sample.Web",
+      "project": "src/Sample.Web",
+      "file_path": "src/Sample.Web/Program.cs",
+      "span": {
+        "start_line": 34,
+        "end_line": 34
+      },
+      "symbol_id": "T:ReportsDbContext",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
       "id": "node::e2db8f0615fda0f5b823e62403a6d6adf176d50ceac75dcba5941c22a11430eb",
       "type": "endpoint.controller",
       "name": "GetReport",
@@ -712,7 +1019,10 @@
       ],
       "props": {
         "route": "/api/reports/{id:guid}",
-        "http_method": "GET"
+        "http_method": "GET",
+        "status_codes": [
+          200
+        ]
       }
     },
     {
@@ -733,8 +1043,26 @@
       ],
       "props": {
         "route": "/api/reports/tenant/{tenantId}",
-        "http_method": "GET"
+        "http_method": "GET",
+        "status_codes": [
+          200
+        ]
       }
+    },
+    {
+      "id": "node::e6631d562080155bf1e49992253769ee2fdc0871730dc6550adb6def45a98f14",
+      "type": "app.service_contract",
+      "name": "ILogger\u003CGetReportHandler\u003E",
+      "fqdn": "ILogger\u003CGetReportHandler\u003E",
+      "assembly": "ILogger\u003CGetReportHandler\u003E",
+      "project": "",
+      "file_path": "",
+      "span": null,
+      "symbol_id": "T:ILogger\u003CGetReportHandler\u003E",
+      "tags": [
+        "app"
+      ],
+      "props": null
     },
     {
       "id": "node::e6c37cb8b27cc6bb1003d8c6e8b76bdd2b0d67d4c4f152150a767a6c6de3f215",
@@ -775,7 +1103,10 @@
       ],
       "props": {
         "route": "/api/v2/reports/{id:guid}/details",
-        "http_method": "GET"
+        "http_method": "GET",
+        "status_codes": [
+          200
+        ]
       }
     },
     {
@@ -818,6 +1149,26 @@
       "props": null
     },
     {
+      "id": "node::f7e592f48f0699826c89e5645137cb63be50958189b9eb50bdd1b09cd15cb953",
+      "type": "cqrs.request_processor",
+      "name": "AuditLoggingPreProcessor",
+      "fqdn": "Sample.App.Pipelines.AuditLoggingPreProcessor",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+      "span": {
+        "start_line": 12,
+        "end_line": 38
+      },
+      "symbol_id": "T:Sample.App.Pipelines.AuditLoggingPreProcessor",
+      "tags": [
+        "app"
+      ],
+      "props": {
+        "stage": "pre"
+      }
+    },
+    {
       "id": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
       "type": "app.background_service",
       "name": "ReportRetentionWorker",
@@ -830,6 +1181,24 @@
         "end_line": 46
       },
       "symbol_id": "T:Sample.App.Services.ReportRetentionWorker",
+      "tags": [
+        "app"
+      ],
+      "props": null
+    },
+    {
+      "id": "node::ff0bbbadbcb2decfde0aed4844e7c26e32258807f90bf9b66d1eb3718a56e7fe",
+      "type": "cqrs.request",
+      "name": "AuditLoggingPreProcessor",
+      "fqdn": "Sample.App.Pipelines.AuditLoggingPreProcessor",
+      "assembly": "Sample.App",
+      "project": "src/Sample.App",
+      "file_path": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+      "span": {
+        "start_line": 12,
+        "end_line": 38
+      },
+      "symbol_id": "T:Sample.App.Pipelines.AuditLoggingPreProcessor",
       "tags": [
         "app"
       ],
@@ -848,7 +1217,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.Web/Program.cs",
-          "line": 34
+          "line": 38
         },
         "method_span": null,
         "il_range": null
@@ -861,8 +1230,8 @@
         "files": [
           {
             "path": "src/Sample.Web/Program.cs",
-            "start_line": 34,
-            "end_line": 34
+            "start_line": 38,
+            "end_line": 38
           }
         ],
         "trace_ids": []
@@ -1086,90 +1455,6 @@
       }
     },
     {
-      "from": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
-      "to": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
-      "kind": "queries",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.query",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 64
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 64,
-            "end_line": 64
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
-      "to": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
-      "kind": "queries",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.query",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 50
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 50,
-            "end_line": 50
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
-      "to": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
-      "kind": "writes_to",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.write",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 42
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 42,
-            "end_line": 42
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
       "from": "node::1c3bf03a9f1d34f8daed616a3a8585fce1643b4620a0876c67a5cd43bdb34b55",
       "to": "node::78a9b60548024de2ed6e870e167fbd101f5d0ebd70b373feaeb82eb7938760eb",
       "kind": "converts_to",
@@ -1324,6 +1609,97 @@
     },
     {
       "from": "node::2460ee45c25c4aef141f13cfb3ce8762127d367b6448df80a3d9cb1d217cb585",
+      "to": "node::78a9b60548024de2ed6e870e167fbd101f5d0ebd70b373feaeb82eb7938760eb",
+      "kind": "sends_request",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "controller.action",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Controllers/ReportsController.cs",
+          "line": 71
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "request_type": "Sample.App.Commands.CreateDetailedReportCommand"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Controllers/ReportsController.cs",
+            "start_line": 71,
+            "end_line": 71
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::2460ee45c25c4aef141f13cfb3ce8762127d367b6448df80a3d9cb1d217cb585",
+      "to": "node::d02a184d81dbac2404753abadf51746d8f6f285a6bcd17a8d4e7722505028119",
+      "kind": "returns",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "controller.response",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Controllers/ReportsController.cs",
+          "line": 71
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "response_type": "ReportDto"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Controllers/ReportsController.cs",
+            "start_line": 71,
+            "end_line": 71
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::2460ee45c25c4aef141f13cfb3ce8762127d367b6448df80a3d9cb1d217cb585",
+      "to": "node::d6b3942676324d17d43554043582db55a9ecc363ffc8edde1dd4cc63f0161309",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Controllers/ReportsController.cs",
+          "line": 70
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IMapper",
+        "method": "Map"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Controllers/ReportsController.cs",
+            "start_line": 70,
+            "end_line": 70
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::2460ee45c25c4aef141f13cfb3ce8762127d367b6448df80a3d9cb1d217cb585",
       "to": "node::d72bfd57cd8a66af0443b6018c0b849b2333994c658c4eeb114d683d65d29570",
       "kind": "uses_validator",
       "source": "static",
@@ -1409,6 +1785,39 @@
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
             "start_line": 24,
             "end_line": 24
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::2dc6647df026b861b4e6e63c0cd5425ca032df98edc4ca967cc498a4a1070e7b",
+      "to": "node::18bb2ab3b02c069d7f461f767021761f339f95360fec78e7b000e265f1b30333",
+      "kind": "uses_configuration",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "configuration.access",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Program.cs",
+          "line": 42
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "key": "Downstream:Reports:BaseUrl",
+        "accessor": "httpclient.base_address",
+        "value": "https://localhost:6001",
+        "source_file": "src/Sample.Web/appsettings.json"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Program.cs",
+            "start_line": 42,
+            "end_line": 42
           }
         ],
         "trace_ids": []
@@ -1521,37 +1930,6 @@
     },
     {
       "from": "node::36d109a1ad6c0dcd9e571cf153ac1f68d6d4161001063dcb3dcc93e5fd912fd3",
-      "to": "node::035f0518398edfc4fbb709e95249291ae8cd0fef20e053fb1086b315ed369a56",
-      "kind": "uses_service",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ioc.resolve",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-          "line": 15
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": {
-        "service_type": "IReportRepository",
-        "lifetime": "AddScoped"
-      },
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-            "start_line": 15,
-            "end_line": 15
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::36d109a1ad6c0dcd9e571cf153ac1f68d6d4161001063dcb3dcc93e5fd912fd3",
       "to": "node::1bf602d4a7d479c79b11110b9dbdd3231a9359398c5820def7fd9a3ed68bd3e4",
       "kind": "calls",
       "source": "static",
@@ -1591,21 +1969,53 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-          "line": 17
+          "line": 30
         },
         "method_span": null,
         "il_range": null
       },
       "props": {
         "service_type": "IReportPublisher",
-        "lifetime": "AddScoped"
+        "lifetime": "AddScoped",
+        "method": "PublishAsync"
       },
       "evidence": {
         "files": [
           {
             "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
-            "start_line": 17,
-            "end_line": 17
+            "start_line": 30,
+            "end_line": 30
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::36d109a1ad6c0dcd9e571cf153ac1f68d6d4161001063dcb3dcc93e5fd912fd3",
+      "to": "node::a54483bcbf54390a94f6f145bb5818f1d462694289571cf7e884c79476b013ea",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+          "line": 31
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IMediator",
+        "method": "Publish"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+            "start_line": 31,
+            "end_line": 31
           }
         ],
         "trace_ids": []
@@ -1629,6 +2039,37 @@
       },
       "props": {
         "destination_type": "ReportDto"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+            "start_line": 32,
+            "end_line": 32
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::36d109a1ad6c0dcd9e571cf153ac1f68d6d4161001063dcb3dcc93e5fd912fd3",
+      "to": "node::d6b3942676324d17d43554043582db55a9ecc363ffc8edde1dd4cc63f0161309",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/CreateDetailedReportHandler.cs",
+          "line": 32
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IMapper",
+        "method": "Map"
       },
       "evidence": {
         "files": [
@@ -1710,7 +2151,7 @@
         "method": null,
         "location": {
           "file": "src/Sample.Web/Program.cs",
-          "line": 35
+          "line": 39
         },
         "method_span": null,
         "il_range": null
@@ -1723,39 +2164,8 @@
         "files": [
           {
             "path": "src/Sample.Web/Program.cs",
-            "start_line": 35,
-            "end_line": 35
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::4fa64b8b8b1a192f73d652c63a9de5147637f9b4b2c33f075462e684fbffeedc",
-      "to": "node::3d911431fcdb1f6632c5aa773a849ac0f734ce3e5bf3be76916b2706a55da6f3",
-      "kind": "uses_service",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ioc.resolve",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
-          "line": 9
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": {
-        "service_type": "IReportAuditRepository",
-        "lifetime": "AddScoped"
-      },
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
-            "start_line": 9,
-            "end_line": 9
+            "start_line": 39,
+            "end_line": 39
           }
         ],
         "trace_ids": []
@@ -1792,6 +2202,97 @@
       }
     },
     {
+      "from": "node::4fa64b8b8b1a192f73d652c63a9de5147637f9b4b2c33f075462e684fbffeedc",
+      "to": "node::cc658375ef97cb0e06bdc2edefbcd1c5cc561fd236080f7afc58a49d271c4de9",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+          "line": 21
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "ILogger\u003CReportGeneratedHandler\u003E",
+        "method": "LogInformation"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Notifications/ReportGeneratedHandler.cs",
+            "start_line": 21,
+            "end_line": 21
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::528d6486b4d6ef03a63e07fb77d4ad4793992745b8f58e234a589348aad47b30",
+      "to": "node::1f7182648a9de2d62cea3071e1bbe61137f159347373bd08931d8d4cbf884539",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Pipelines/ValidationBehavior.cs",
+          "line": 16
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IEnumerable\u003CIValidator\u003CTRequest\u003E\u003E"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Pipelines/ValidationBehavior.cs",
+            "start_line": 16,
+            "end_line": 16
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::528d6486b4d6ef03a63e07fb77d4ad4793992745b8f58e234a589348aad47b30",
+      "to": "node::a971b9dc8f7ced160597231f8c3bfe375c5906e148fe73a8b9cb95797943c67d",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Pipelines/ValidationBehavior.cs",
+          "line": 17
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "ILogger\u003CValidationBehavior\u003CTRequest, TResponse\u003E\u003E"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Pipelines/ValidationBehavior.cs",
+            "start_line": 17,
+            "end_line": 17
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
       "from": "node::5ef00b93d387c571c2313c31d71b525ae5f425179e3a739f9d6dde83f961aa4d",
       "to": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
       "kind": "maps_to",
@@ -1817,34 +2318,6 @@
             "path": "src/Sample.App/Repositories/ReportAuditRepository.cs",
             "start_line": 24,
             "end_line": 24
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::5ef00b93d387c571c2313c31d71b525ae5f425179e3a739f9d6dde83f961aa4d",
-      "to": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
-      "kind": "writes_to",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.write",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportAuditRepository.cs",
-          "line": 27
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportAuditRepository.cs",
-            "start_line": 27,
-            "end_line": 27
           }
         ],
         "trace_ids": []
@@ -1946,62 +2419,6 @@
     {
       "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
       "to": "node::460fae34e81b395b83c2811614f550b8ca0b3e09cf938e8c1f91f0e44afcae58",
-      "kind": "queries",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.query",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 64
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 64,
-            "end_line": 64
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
-      "to": "node::460fae34e81b395b83c2811614f550b8ca0b3e09cf938e8c1f91f0e44afcae58",
-      "kind": "queries",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.query",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 50
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 50,
-            "end_line": 50
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
-      "to": "node::460fae34e81b395b83c2811614f550b8ca0b3e09cf938e8c1f91f0e44afcae58",
       "kind": "reads_from",
       "source": "static",
       "confidence": 1,
@@ -2022,34 +2439,6 @@
             "path": "src/Sample.Data/Entities/Report.cs",
             "start_line": 7,
             "end_line": 27
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
-      "from": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
-      "to": "node::460fae34e81b395b83c2811614f550b8ca0b3e09cf938e8c1f91f0e44afcae58",
-      "kind": "writes_to",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.write",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportRepository.cs",
-          "line": 42
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportRepository.cs",
-            "start_line": 42,
-            "end_line": 42
           }
         ],
         "trace_ids": []
@@ -2174,34 +2563,6 @@
       }
     },
     {
-      "from": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
-      "to": "node::bbab0a0c82285f4e44197909341dfc8a4102676bc7dbc585c9e6853081fe4163",
-      "kind": "writes_to",
-      "source": "static",
-      "confidence": 1,
-      "transform": {
-        "type": "ef.write",
-        "method": null,
-        "location": {
-          "file": "src/Sample.App/Repositories/ReportAuditRepository.cs",
-          "line": 27
-        },
-        "method_span": null,
-        "il_range": null
-      },
-      "props": null,
-      "evidence": {
-        "files": [
-          {
-            "path": "src/Sample.App/Repositories/ReportAuditRepository.cs",
-            "start_line": 27,
-            "end_line": 27
-          }
-        ],
-        "trace_ids": []
-      }
-    },
-    {
       "from": "node::a75d4ec1b132cf5de6edfcb9ed5127d044aa02f5f7c7336d75e852a7e2a02748",
       "to": "node::2dc6647df026b861b4e6e63c0cd5425ca032df98edc4ca967cc498a4a1070e7b",
       "kind": "uses_client",
@@ -2255,6 +2616,37 @@
             "path": "src/Sample.App/Handlers/GetReportHandler.cs",
             "start_line": 18,
             "end_line": 82
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::c7fd48dee39df0caa2fe587f06b1435c5659118fd0a948bc74b7f3baf4ab04ed",
+      "to": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "kind": "implemented_by",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.registration",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Program.cs",
+          "line": 40
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "lifetime": "Hosted",
+        "implementation_type": "ReportRetentionWorker"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Program.cs",
+            "start_line": 40,
+            "end_line": 40
           }
         ],
         "trace_ids": []
@@ -2321,6 +2713,37 @@
     },
     {
       "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::3a8a2beec579495df7e5bdaac00d5ada4bb91279fefce9ab816b4ac8eb213373",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 45
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IOptions\u003CReportRetentionOptions\u003E",
+        "method": "Value"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 45,
+            "end_line": 45
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
       "to": "node::4af341c583a8c7e74b4abd2eaa62d2c3fed72eaf6e084462bb9ff879d15e57bf",
       "kind": "uses_service",
       "source": "static",
@@ -2330,21 +2753,22 @@
         "method": null,
         "location": {
           "file": "src/Sample.App/Handlers/GetReportHandler.cs",
-          "line": 22
+          "line": 65
         },
         "method_span": null,
         "il_range": null
       },
       "props": {
         "service_type": "IReportPublisher",
-        "lifetime": "AddScoped"
+        "lifetime": "AddScoped",
+        "method": "PublishAsync"
       },
       "evidence": {
         "files": [
           {
             "path": "src/Sample.App/Handlers/GetReportHandler.cs",
-            "start_line": 22,
-            "end_line": 22
+            "start_line": 65,
+            "end_line": 65
           }
         ],
         "trace_ids": []
@@ -2470,6 +2894,68 @@
     },
     {
       "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::d6b3942676324d17d43554043582db55a9ecc363ffc8edde1dd4cc63f0161309",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 59
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IMapper",
+        "method": "Map"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 59,
+            "end_line": 59
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
+      "to": "node::e6631d562080155bf1e49992253769ee2fdc0871730dc6550adb6def45a98f14",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Handlers/GetReportHandler.cs",
+          "line": 73
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "ILogger\u003CGetReportHandler\u003E",
+        "method": "LogInformation"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Handlers/GetReportHandler.cs",
+            "start_line": 73,
+            "end_line": 73
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::d0d282783b9df7f96b6e072d11ec1fe1cbd8d54d4cdc5ce9de927ba119d1357d",
       "to": "node::ee788c32e8c586ed5a6889237a2b42aefb3fc8c4e7f78103ba751cf161e9ef14",
       "kind": "publishes",
       "source": "static",
@@ -2552,6 +3038,157 @@
             "path": "src/Sample.App/Mapping/ReportProfile.cs",
             "start_line": 26,
             "end_line": 26
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::defc8550f69eebb5b5aa4714de7178cf6bb66f8d13bd42ec989a1d7b77d3df99",
+      "to": "node::7186c105b9680b1e40fe3336fd08d77fdc1f177c1c4542c88e06fb2216999a5f",
+      "kind": "manages",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.dbset",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Data/Infrastructure/ReportsDbContext.cs",
+          "line": 14
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "dbset": "Reports"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Data/Infrastructure/ReportsDbContext.cs",
+            "start_line": 14,
+            "end_line": 14
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::defc8550f69eebb5b5aa4714de7178cf6bb66f8d13bd42ec989a1d7b77d3df99",
+      "to": "node::8cb2ef547d1e1b1cd54538fb19fcebe2bb270464caa71b270c79304d6f74e653",
+      "kind": "manages",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ef.dbset",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Data/Infrastructure/ReportsDbContext.cs",
+          "line": 15
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "dbset": "ReportAudits"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Data/Infrastructure/ReportsDbContext.cs",
+            "start_line": 15,
+            "end_line": 15
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::dfb4955736d63b55212ff116e4f52a6de8a3601db58e2845cbe6f8e41c869c57",
+      "to": "node::defc8550f69eebb5b5aa4714de7178cf6bb66f8d13bd42ec989a1d7b77d3df99",
+      "kind": "implemented_by",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.registration",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Program.cs",
+          "line": 34
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "lifetime": "Scoped",
+        "implementation_type": "ReportsDbContext"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Program.cs",
+            "start_line": 34,
+            "end_line": 34
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::e2db8f0615fda0f5b823e62403a6d6adf176d50ceac75dcba5941c22a11430eb",
+      "to": "node::b2b1d6c899837aa3f6b176c797aaeef96df145c030590e2b2c3d65a26089faff",
+      "kind": "sends_request",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "controller.action",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Controllers/ReportsController.cs",
+          "line": 32
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "request_type": "Sample.App.Queries.GetReportQuery"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Controllers/ReportsController.cs",
+            "start_line": 32,
+            "end_line": 32
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::e2db8f0615fda0f5b823e62403a6d6adf176d50ceac75dcba5941c22a11430eb",
+      "to": "node::d02a184d81dbac2404753abadf51746d8f6f285a6bcd17a8d4e7722505028119",
+      "kind": "returns",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "controller.response",
+        "method": null,
+        "location": {
+          "file": "src/Sample.Web/Controllers/ReportsController.cs",
+          "line": 32
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "response_type": "ReportDto"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.Web/Controllers/ReportsController.cs",
+            "start_line": 32,
+            "end_line": 32
           }
         ],
         "trace_ids": []
@@ -2765,6 +3402,157 @@
       }
     },
     {
+      "from": "node::f7e592f48f0699826c89e5645137cb63be50958189b9eb50bdd1b09cd15cb953",
+      "to": "node::0596ecfc57b85e33dd743485a6753e3e67f600cc7b61d64de4fb8fa28eda82a8",
+      "kind": "uses_cache",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "cache.operation",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+          "line": 34
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "method": "Set",
+        "operation": "write"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+            "start_line": 34,
+            "end_line": 34
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::f7e592f48f0699826c89e5645137cb63be50958189b9eb50bdd1b09cd15cb953",
+      "to": "node::3a8a2beec579495df7e5bdaac00d5ada4bb91279fefce9ab816b4ac8eb213373",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+          "line": 16
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IOptions\u003CReportRetentionOptions\u003E"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+            "start_line": 16,
+            "end_line": 16
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::f7e592f48f0699826c89e5645137cb63be50958189b9eb50bdd1b09cd15cb953",
+      "to": "node::99bcaf2c30f6d79b4224ec1d290a835ab576dad5d49f7b71d04974558e53703d",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+          "line": 17
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IMemoryCache"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+            "start_line": 17,
+            "end_line": 17
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::f7e592f48f0699826c89e5645137cb63be50958189b9eb50bdd1b09cd15cb953",
+      "to": "node::9a8a07560caf2f2fde6287b02a58f20d1cb2cd0a81bc5037941f92e87978f5b6",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+          "line": 15
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "ILogger\u003CAuditLoggingPreProcessor\u003CTRequest\u003E\u003E"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+            "start_line": 15,
+            "end_line": 15
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::f7e592f48f0699826c89e5645137cb63be50958189b9eb50bdd1b09cd15cb953",
+      "to": "node::ada3ab91f8e0ef09655b0f7ccd5daf3b5fc5d8eff69715b81a2cd198f01b37a2",
+      "kind": "uses_options",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "options.access",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+          "line": 31
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "options_type": "ReportRetentionOptions"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Pipelines/AuditLoggingPreProcessor.cs",
+            "start_line": 31,
+            "end_line": 31
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
       "from": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
       "to": "node::035f0518398edfc4fbb709e95249291ae8cd0fef20e053fb1086b315ed369a56",
       "kind": "uses_service",
@@ -2820,6 +3608,66 @@
             "path": "src/Sample.App/Services/ReportRetentionWorker.cs",
             "start_line": 29,
             "end_line": 29
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "to": "node::3a8a2beec579495df7e5bdaac00d5ada4bb91279fefce9ab816b4ac8eb213373",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Services/ReportRetentionWorker.cs",
+          "line": 10
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "IOptions\u003CReportRetentionOptions\u003E"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Services/ReportRetentionWorker.cs",
+            "start_line": 10,
+            "end_line": 46
+          }
+        ],
+        "trace_ids": []
+      }
+    },
+    {
+      "from": "node::fc3097cb39aeb984e9f001ee3f72e1310ebf2533f3bb6a32a6389c85f19a8fbb",
+      "to": "node::a67da709f0b8e9a3fc584a449ba6febf41d5810b5113c86468c18fbe61e29fcf",
+      "kind": "uses_service",
+      "source": "static",
+      "confidence": 1,
+      "transform": {
+        "type": "ioc.resolve",
+        "method": null,
+        "location": {
+          "file": "src/Sample.App/Services/ReportRetentionWorker.cs",
+          "line": 10
+        },
+        "method_span": null,
+        "il_range": null
+      },
+      "props": {
+        "service_type": "ILogger\u003CReportRetentionWorker\u003E"
+      },
+      "evidence": {
+        "files": [
+          {
+            "path": "src/Sample.App/Services/ReportRetentionWorker.cs",
+            "start_line": 10,
+            "end_line": 46
           }
         ],
         "trace_ids": []

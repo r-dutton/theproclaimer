@@ -1,0 +1,3 @@
+[web] GET /api/workpaper-record-templates/{id:Guid}/sections  (Workpapers.Next.API.Controllers.Templates.WorkpaperRecordTemplatesController.GetTemplateSections)  [L91–L97]
+  └─ sends_request GetWorkpaperRecordTemplateSectionsQuery [L94]
+

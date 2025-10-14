@@ -1,0 +1,5 @@
+[web] GET /api/offices/{id:Guid}  (Workpapers.Next.API.Controllers.OfficeController.GetOffice)  [L73–L79]
+  └─ maps_to OfficeDto [L76]
+  └─ uses_service UnitOfWork
+    └─ method Table [L76]
+

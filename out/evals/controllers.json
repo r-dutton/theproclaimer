@@ -2,6 +2,6 @@
   "name": "controller-flows",
   "status": "informational",
   "controllers": 5,
-  "nodes": 43,
-  "edges": 68
+  "nodes": 64,
+  "edges": 83
 }

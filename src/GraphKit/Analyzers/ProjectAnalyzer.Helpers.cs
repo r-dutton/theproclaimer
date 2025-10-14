@@ -227,8 +227,36 @@ public sealed partial class ProjectAnalyzer
                 r.Fqdn.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
                 r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
             .ToList();
+        if (matches.Count == 1)
+        {
+            return matches[0];
+        }
 
-        return matches.Count == 1 ? matches[0] : null;
+        // Heuristic fallback: if multiple matches share the same simple name (common when the same
+        // request type exists in different namespaces), attempt to disambiguate by preferring the
+        // one whose namespace shares the longest common prefix with the incoming requestType.
+        if (matches.Count > 1 && !string.IsNullOrWhiteSpace(requestType))
+        {
+            var requestNamespace = requestType.Contains('.') ? requestType[..requestType.LastIndexOf('.')] : string.Empty;
+            if (!string.IsNullOrWhiteSpace(requestNamespace))
+            {
+                var ordered = matches
+                    .Select(r => new { Item = r, Score = LongestCommonPrefixLength(requestNamespace, r.Fqdn) })
+                    .OrderByDescending(x => x.Score)
+                    .ThenBy(x => x.Item.Fqdn, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (ordered.Count > 0 && ordered[0].Score > 0)
+                {
+                    // Additional tie-break: if top two have equal score, abandon to avoid incorrect binding.
+                    if (ordered.Count == 1 || ordered[0].Score > ordered[1].Score)
+                    {
+                        return ordered[0].Item;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private NotificationInfo? FindNotificationByType(string notificationType)
@@ -307,7 +335,7 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private static string? TryResolveExpressionType(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables)
+    private string? TryResolveExpressionType(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables)
     {
         if (expression is IdentifierNameSyntax identifier)
         {
@@ -401,6 +429,22 @@ public sealed partial class ProjectAnalyzer
             field.Declaration.Type.ToString().Equals("string", StringComparison.OrdinalIgnoreCase) &&
             field.Declaration.Variables.Any(variable =>
                 variable.Identifier.Text.Equals("SectionName", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static int LongestCommonPrefixLength(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        {
+            return 0;
+        }
+
+        var max = Math.Min(a.Length, b.Length);
+        var i = 0;
+        for (; i < max; i++)
+        {
+            if (a[i] != b[i]) break;
+        }
+        return i;
     }
 }
 

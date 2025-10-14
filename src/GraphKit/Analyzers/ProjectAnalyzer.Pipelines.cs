@@ -164,7 +164,14 @@ public sealed partial class ProjectAnalyzer
                 FilePath = behavior.FilePath,
                 Span = behavior.Span,
                 SymbolId = behavior.SymbolId,
-                Tags = new[] { "app" }
+                Tags = new[] { "app" },
+                Props = new Dictionary<string, object>
+                {
+                    ["generic_request"] = string.IsNullOrWhiteSpace(behavior.RequestType)
+                        || behavior.RequestType.Length == 1
+                        || behavior.RequestType.All(char.IsUpper)
+                        || !behavior.RequestType.Contains('.') // no namespace => likely generic parameter
+                }
             };
 
             if (FindRequestByType(behavior.RequestType) is { } request)
@@ -190,6 +197,11 @@ public sealed partial class ProjectAnalyzer
                     Props = props,
                     Evidence = CreateEvidence(behavior.FilePath, behavior.Span)
                 });
+            }
+            else
+            {
+                // Generic behavior (e.g., IPipelineBehavior<TRequest,TResponse>) without concrete request:
+                // store on node already via generic_request flag; no edge emitted.
             }
 
             EmitBehaviorServiceEdges(behavior.ServiceUsages, behavior.FilePath, id);

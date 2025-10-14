@@ -23,6 +23,7 @@ public sealed partial class ProjectAnalyzer
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
         public List<EndpointAuthorization> Authorizations { get; } = new();
         public bool AllowsAnonymous { get; set; }
+        public HashSet<int> StatusCodes { get; } = new();
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);

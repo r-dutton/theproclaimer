@@ -81,6 +81,26 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
+            // Attribute-declared response status codes (ProducesResponseType)
+            foreach (var attr in method.AttributeLists.SelectMany(l => l.Attributes))
+            {
+                var attrName = attr.Name.ToString();
+                if (!attrName.Contains("ProducesResponseType", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                var args = attr.ArgumentList?.Arguments;
+                if (args is not { Count: > 0 }) continue;
+                foreach (var a in args)
+                {
+                    var code = TryParseStatusCodeExpression(a.Expression?.ToString());
+                    if (code.HasValue)
+                    {
+                        info.StatusCodes.Add(code.Value);
+                    }
+                }
+            }
+
             foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
             {
                 var declaredType = local.Declaration.Type.ToString();
@@ -101,6 +121,29 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
+                // Detect status code via common MVC helper methods inside return statements
+                if (invocation.Expression is MemberAccessExpressionSyntax statusAccess)
+                {
+                    var helperName = statusAccess.Name.Identifier.Text;
+                    var parentReturn = invocation.Parent as ReturnStatementSyntax ?? (invocation.Parent as AwaitExpressionSyntax)?.Parent as ReturnStatementSyntax;
+                    if (parentReturn is not null)
+                    {
+                        switch (helperName)
+                        {
+                            case "Ok": info.StatusCodes.Add(200); break;
+                            case "Created":
+                            case "CreatedAtAction":
+                            case "CreatedAtRoute": info.StatusCodes.Add(201); break;
+                            case "NoContent": info.StatusCodes.Add(204); break;
+                            case "BadRequest": info.StatusCodes.Add(400); break;
+                            case "Unauthorized": info.StatusCodes.Add(401); break;
+                            case "Forbidden": info.StatusCodes.Add(403); break;
+                            case "NotFound": info.StatusCodes.Add(404); break;
+                            case "Conflict": info.StatusCodes.Add(409); break;
+                            case "Problem": info.StatusCodes.Add(500); break; // generic problem response
+                        }
+                    }
+                }
                 if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
                 {
                     var methodIdentifier = memberAccess.Name.Identifier.Text;
@@ -471,7 +514,41 @@ public sealed partial class ProjectAnalyzer
             var routeKey = $"{info.HttpMethod}:{CanonicalizeRoute(info.Route)}";
             var routeBag = _controllerRoutes.GetOrAdd(routeKey, _ => new ConcurrentBag<ControllerActionInfo>());
             routeBag.Add(info);
+
+            // Fallback inference: if no explicit status codes captured, infer a typical default.
+            if (info.StatusCodes.Count == 0)
+            {
+                if (string.Equals(info.HttpMethod, "POST", StringComparison.Ordinal))
+                {
+                    info.StatusCodes.Add(201); // Created endpoints usually return 201
+                }
+                else
+                {
+                    info.StatusCodes.Add(200); // Default success
+                }
+            }
         }
+    }
+
+    private static int? TryParseStatusCodeExpression(string? expr)
+    {
+        if (string.IsNullOrWhiteSpace(expr)) return null;
+        expr = expr.Trim();
+        if (int.TryParse(expr, out var numeric)) return numeric;
+        // Handle nameof(StatusCodes.Status201Created) style (rare) by ignoring nameof(
+        if (expr.StartsWith("nameof(", StringComparison.Ordinal) && expr.EndsWith(')'))
+        {
+            expr = expr.Substring(7, expr.Length - 8);
+        }
+        var segments = expr.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var candidate = segments.LastOrDefault();
+        if (candidate is not null)
+        {
+            // e.g. Status200OK, Status404NotFound
+            var digits = new string(candidate.Where(char.IsDigit).ToArray());
+            if (int.TryParse(digits, out var parsed)) return parsed;
+        }
+        return null;
     }
 
     private void EmitControllers()
@@ -484,6 +561,11 @@ public sealed partial class ProjectAnalyzer
                 ["route"] = action.Route,
                 ["http_method"] = action.HttpMethod
             };
+
+            if (action.StatusCodes.Count > 0)
+            {
+                nodeProps["status_codes"] = action.StatusCodes.OrderBy(c => c).ToArray();
+            }
 
             if (action.Authorizations.Count > 0)
             {
@@ -1244,6 +1326,20 @@ public sealed partial class ProjectAnalyzer
                 ["route"] = endpoint.Route,
                 ["http_method"] = endpoint.HttpMethod
             };
+
+            // Default inference for minimal endpoints (parity with controllers) so status codes appear in flows
+            // Only emit if not already provided (future explicit capture could populate)
+            if (!props.ContainsKey("status_codes"))
+            {
+                if (string.Equals(endpoint.HttpMethod, "POST", StringComparison.Ordinal))
+                {
+                    props["status_codes"] = new[] { 201 };
+                }
+                else
+                {
+                    props["status_codes"] = new[] { 200 };
+                }
+            }
 
             if (endpoint.Authorizations.Count > 0)
             {

@@ -25,7 +25,8 @@ public class FlowBuilderTests
             Props = new Dictionary<string, object>
             {
                 ["route"] = "/api/reports",
-                ["http_method"] = "POST"
+                ["http_method"] = "POST",
+                ["status_codes"] = new[] { 201 }
             }
         };
         var request = new GraphNode
@@ -68,6 +69,41 @@ public class FlowBuilderTests
 
         Assert.Contains("[web] POST /api/reports", flows);
         Assert.Contains("maps_to CreateReport", flows);
+        Assert.Contains("status=201", flows);
+    }
+
+    [Fact]
+    public void BuildFlows_HeaderIncludesMultipleStatusCodes()
+    {
+        var controller = new GraphNode
+        {
+            Id = "Sample.Web.Controllers.ReportsController.Get",
+            Type = "endpoint.controller",
+            Name = "Get",
+            Fqdn = "Sample.Web.Controllers.ReportsController.Get",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controllers/ReportsController.cs",
+            SymbolId = "Sample.Web.Controllers.ReportsController.Get",
+            Span = new GraphSpan { StartLine = 5, EndLine = 15 },
+            Props = new Dictionary<string, object>
+            {
+                ["route"] = "/api/reports/{id}",
+                ["http_method"] = "GET",
+                ["status_codes"] = new[] { 200, 404 }
+            }
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1",
+            Nodes = new[] { controller },
+            Edges = System.Array.Empty<GraphEdge>()
+        };
+
+        var flows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "Sample.Web.Controllers.*" }));
+
+        Assert.Contains("status=200,404", flows);
     }
 
     [Fact]
@@ -902,8 +938,8 @@ public class FlowBuilderTests
 
         var flows = FlowBuilder.BuildFlows(document, node => true);
 
-        Assert.Contains("uses_cache MemoryCache", flows);
-        Assert.Contains("method GetOrCreateAsync [read_write] (key=report:{id}) [L12]", flows);
+    // Cache usage is now rendered on a single line including method / operation / key
+    Assert.Contains("uses_cache MemoryCache.GetOrCreateAsync [read_write] (key=report:{id}) [L12]", flows);
         Assert.Contains("uses_options ReportRetentionOptions (Retention) [L15]", flows);
     }
 

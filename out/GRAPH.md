@@ -1,21 +1,25 @@
 # Graph Summary
 
 - Analyzer version: 0.1.0
-- Nodes: 43
-- Edges: 68
+- Nodes: 64
+- Edges: 83
 
 ## Node Types
 - app.background_service: 1
 - app.repository: 2
-- app.service_contract: 3
+- app.service_contract: 17
 - cache.memory: 1
 - config.options: 1
+- config.value: 1
 - cqrs.handler: 2
 - cqrs.notification: 2
 - cqrs.notification_handler: 1
-- cqrs.request: 3
+- cqrs.pipeline_behavior: 1
+- cqrs.request: 6
+- cqrs.request_processor: 1
 - db.table: 2
 - dto: 5
+- ef.db_context: 1
 - ef.entity: 2
 - endpoint.controller: 5
 - endpoint.minimal_api: 3
@@ -32,17 +36,20 @@
 - converts_to: 5
 - generated_from: 5
 - handled_by: 5
-- implemented_by: 2
+- implemented_by: 4
+- manages: 2
 - maps_to: 10
 - produces_event: 2
 - publishes: 2
 - publishes_notification: 1
-- queries: 5
+- queries: 1
 - reads_from: 2
-- uses_cache: 3
+- returns: 2
+- sends_request: 2
+- uses_cache: 4
 - uses_client: 3
-- uses_options: 4
-- uses_service: 5
+- uses_configuration: 1
+- uses_options: 5
+- uses_service: 17
 - uses_validator: 2
 - validates: 1
-- writes_to: 4

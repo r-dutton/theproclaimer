@@ -61,6 +61,29 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var client in _httpClients.Values)
         {
+            HttpClientBaseAddress? effectiveAddress = null;
+            if (_httpClientBaseUrls.TryGetValue(client.Fqdn, out var fqdnAddress))
+            {
+                effectiveAddress = fqdnAddress;
+            }
+            else if (_httpClientBaseUrls.TryGetValue(client.Name, out var baseAddress))
+            {
+                var normalized = baseAddress with { ClientType = client.Fqdn };
+                _httpClientBaseUrls[client.Fqdn] = normalized;
+                effectiveAddress = normalized;
+            }
+
+            // Determine if this client appears to target an external service (has a base address but no explicit mapping)
+            var props = new Dictionary<string, object>();
+            if (effectiveAddress is not null)
+            {
+                var hasMapping = _clientTargetServices.ContainsKey(client.Fqdn) || _clientTargetServices.ContainsKey(client.Name);
+                if (!hasMapping)
+                {
+                    props["external"] = true;
+                }
+            }
+
             var id = StableId.For("http.client", client.Fqdn, client.Assembly, client.SymbolId);
             _nodes[id] = new GraphNode
             {
@@ -73,20 +96,9 @@ public sealed partial class ProjectAnalyzer
                 FilePath = client.FilePath,
                 Span = client.Span,
                 SymbolId = client.SymbolId,
-                Tags = new[] { "integration" }
+                Tags = new[] { "integration" },
+                Props = props.Count > 0 ? props : null
             };
-
-            HttpClientBaseAddress? effectiveAddress = null;
-            if (_httpClientBaseUrls.TryGetValue(client.Fqdn, out var fqdnAddress))
-            {
-                effectiveAddress = fqdnAddress;
-            }
-            else if (_httpClientBaseUrls.TryGetValue(client.Name, out var baseAddress))
-            {
-                var normalized = baseAddress with { ClientType = client.Fqdn };
-                _httpClientBaseUrls[client.Fqdn] = normalized;
-                effectiveAddress = normalized;
-            }
 
             if (effectiveAddress is not null)
             {
@@ -121,12 +133,22 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var call in _httpCalls)
         {
-            if (call.EndpointRoute is null)
+            // If we couldn't canonicalize the route skip
+            var endpointRouteForKey = call.EndpointRoute;
+            if (string.IsNullOrWhiteSpace(endpointRouteForKey))
             {
                 continue;
             }
 
-            var key = $"{call.Call.HttpMethod}:{call.EndpointRoute}";
+            // Remove query string portion for lookup key
+            var qmIndex = endpointRouteForKey.IndexOf('?');
+            if (qmIndex >= 0)
+            {
+                endpointRouteForKey = endpointRouteForKey.Substring(0, qmIndex);
+            }
+
+            var key = $"{call.Call.HttpMethod}:{endpointRouteForKey}";
+
             var baseAddress = TryGetHttpClientBaseAddress(call.Client.Fqdn) ?? TryGetHttpClientBaseAddress(call.Client.Name);
             var baseUrl = baseAddress?.BaseUrl;
             var configurationKey = baseAddress?.ConfigurationKey;
@@ -139,18 +161,10 @@ public sealed partial class ProjectAnalyzer
                 targetService = mappedService;
             }
 
-            if (targetService is null && baseUrl is not null)
-            {
-                var normalized = NormalizeBaseUrlKey(baseUrl);
-                if (normalized is not null && _baseUrlServiceAliases.TryGetValue(normalized, out var serviceName))
-                {
-                    targetService = serviceName;
-                }
-            }
+            var clientId = StableId.For("http.client", call.Client.Fqdn, call.Client.Assembly, call.Client.SymbolId);
 
             if (_minimalEndpoints.TryGetValue(key, out var endpoint))
             {
-                var clientId = StableId.For("http.client", call.Client.Fqdn, call.Client.Assembly, call.Client.SymbolId);
                 var endpointId = StableId.For("endpoint.minimal_api", endpoint.Fqdn, endpoint.Assembly, endpoint.SymbolId);
                 var props = CreateHttpCallProps(call, baseUrl, configurationKey, configuration, targetService);
 
@@ -174,7 +188,6 @@ public sealed partial class ProjectAnalyzer
             {
                 foreach (var controller in controllers)
                 {
-                    var clientId = StableId.For("http.client", call.Client.Fqdn, call.Client.Assembly, call.Client.SymbolId);
                     var controllerId = StableId.For("endpoint.controller", controller.Fqdn, controller.Assembly, controller.SymbolId);
                     var props = CreateHttpCallProps(call, baseUrl, configurationKey, configuration, targetService);
 
