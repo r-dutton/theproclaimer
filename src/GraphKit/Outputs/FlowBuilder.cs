@@ -708,6 +708,9 @@ public static class FlowBuilder
             var targetService = callEdge.Props is { } props5 && props5.TryGetValue("target_service", out var serviceValue)
                 ? serviceValue?.ToString()
                 : null;
+            var queryParams = callEdge.Props is { } props6 && props6.TryGetValue("query_params", out var queryValue) && queryValue is IEnumerable<object> qp
+                ? qp.Select(p => p?.ToString()).Where(p => !string.IsNullOrWhiteSpace(p)).ToList()
+                : null;
 
             var details = new List<string>();
             if (!string.IsNullOrWhiteSpace(verb) && !string.IsNullOrWhiteSpace(route))
@@ -728,6 +731,11 @@ public static class FlowBuilder
             if (!string.IsNullOrWhiteSpace(targetService))
             {
                 details.Add($"target={targetService}");
+            }
+
+            if (queryParams is { Count: > 0 })
+            {
+                details.Add($"query={string.Join('&', queryParams)}");
             }
 
             var detailText = details.Count > 0 ? $" ({string.Join(", ", details)})" : string.Empty;
@@ -768,6 +776,13 @@ public static class FlowBuilder
         var route = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
         var verb = props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null;
 
+        var key = $"{callEdge.From}->{serviceName}:{route}:{verb}";
+        if (!state.TargetServiceVisited.Add(key))
+        {
+            AppendIndented(builder, indent, $"target_service {serviceName} (already expanded)");
+            return;
+        }
+
         var candidates = state.Document.Nodes
             .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api")
                         && assemblySet.Contains(n.Assembly))
@@ -792,14 +807,23 @@ public static class FlowBuilder
         string? route,
         string? verb)
     {
-        static bool Matches(string? expected, string? actual)
+        static bool MatchesRoute(string? callRoute, string? endpointRoute)
+        {
+            var callCanonical = CanonicalizeRoute(callRoute);
+            var endpointCanonical = CanonicalizeRoute(endpointRoute);
+            return !string.IsNullOrWhiteSpace(callCanonical) &&
+                   !string.IsNullOrWhiteSpace(endpointCanonical) &&
+                   string.Equals(callCanonical, endpointCanonical, StringComparison.OrdinalIgnoreCase);
+        }
+
+        static bool MatchesVerb(string? expected, string? actual)
             => !string.IsNullOrWhiteSpace(expected) && !string.IsNullOrWhiteSpace(actual)
                && string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
 
         if (!string.IsNullOrWhiteSpace(route) && !string.IsNullOrWhiteSpace(verb))
         {
             var both = candidates
-                .Where(n => Matches(route, GetNodeProp(n, "route")) && Matches(verb, GetNodeProp(n, "http_method")))
+                .Where(n => MatchesRoute(route, GetNodeProp(n, "route")) && MatchesVerb(verb, GetNodeProp(n, "http_method")))
                 .ToList();
             if (both.Count > 0)
             {
@@ -810,7 +834,7 @@ public static class FlowBuilder
         if (!string.IsNullOrWhiteSpace(route))
         {
             var routeOnly = candidates
-                .Where(n => Matches(route, GetNodeProp(n, "route")))
+                .Where(n => MatchesRoute(route, GetNodeProp(n, "route")))
                 .ToList();
             if (routeOnly.Count > 0)
             {
@@ -821,7 +845,7 @@ public static class FlowBuilder
         if (!string.IsNullOrWhiteSpace(verb))
         {
             var verbOnly = candidates
-                .Where(n => Matches(verb, GetNodeProp(n, "http_method")))
+                .Where(n => MatchesVerb(verb, GetNodeProp(n, "http_method")))
                 .ToList();
             if (verbOnly.Count > 0)
             {
@@ -830,6 +854,22 @@ public static class FlowBuilder
         }
 
         return candidates;
+    }
+
+    private static string? CanonicalizeRoute(string? route)
+    {
+        if (string.IsNullOrWhiteSpace(route))
+        {
+            return null;
+        }
+
+        var path = route.Split('?', 2)[0].Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        return path.StartsWith("/", StringComparison.Ordinal) ? path : "/" + path;
     }
 
     private sealed class FlowRenderState
@@ -856,6 +896,7 @@ public static class FlowBuilder
         public HashSet<string> EndpointStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> HandlerStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> NotificationStack { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> TargetServiceVisited { get; } = new(StringComparer.Ordinal);
     }
 
     private static string? GetNodeProp(GraphNode node, string key)

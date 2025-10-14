@@ -62,6 +62,7 @@ public sealed partial class ProjectAnalyzer
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+        public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
     }
 
     private sealed record PipelineBehaviorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType)
@@ -83,6 +84,8 @@ public sealed partial class ProjectAnalyzer
     private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType);
 
     private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line);
+
+    private sealed record HandlerClientInvocation(string ClientType, string HttpMethod, string? RelativePath, int Line);
 
     private sealed record HandlerMapperCall(string? SourceType, string? DestinationType, int Line);
 
@@ -113,9 +116,21 @@ public sealed partial class ProjectAnalyzer
         public List<HttpClientCall> OutboundCalls { get; } = new();
     }
 
-    private sealed record HttpClientCall(string HttpMethod, string? Route, int Line)
+    private sealed record HttpClientCall(string HttpMethod, string? Route, int Line, IReadOnlyCollection<string> QueryParameters)
     {
-        public string? CanonicalRoute => Route is null ? null : CanonicalizeRoute(Route);
+        public string? CanonicalRoute
+        {
+            get
+            {
+                if (Route is null)
+                {
+                    return null;
+                }
+
+                var path = Route.Split('?', 2)[0];
+                return CanonicalizeRoute(path);
+            }
+        }
     }
 
     private sealed record HttpCallInfo(HttpClientInfo Client, HttpClientCall Call)
@@ -140,6 +155,7 @@ public sealed partial class ProjectAnalyzer
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+        public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
     }
 
     private sealed record RepositoryDbAccess(string Member, string Method, int Line);
@@ -206,3 +222,6 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record AuthorizationMetadata(List<EndpointAuthorization> Requirements, bool AllowsAnonymous);
 }
+
+
+

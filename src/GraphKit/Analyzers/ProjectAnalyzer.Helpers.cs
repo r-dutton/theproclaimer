@@ -204,9 +204,13 @@ public sealed partial class ProjectAnalyzer
 
         var simple = requestType.Split('.').Last();
 
-        return _handlers.Values.FirstOrDefault(h =>
-            h.RequestType.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
-            h.RequestType.Split('.').Last().Equals(simple, StringComparison.OrdinalIgnoreCase));
+        var matches = _handlers.Values
+            .Where(h =>
+                h.RequestType.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
+                h.RequestType.Split('.').Last().Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     private RequestInfo? FindRequestByType(string requestType)
@@ -218,9 +222,13 @@ public sealed partial class ProjectAnalyzer
 
         var simple = requestType.Split('.').Last();
 
-        return _requests.Values.FirstOrDefault(r =>
-            r.Fqdn.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
-            r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
+        var matches = _requests.Values
+            .Where(r =>
+                r.Fqdn.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
+                r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     private NotificationInfo? FindNotificationByType(string notificationType)
@@ -232,9 +240,13 @@ public sealed partial class ProjectAnalyzer
 
         var simple = notificationType.Split('.').Last();
 
-        return _notifications.Values.FirstOrDefault(n =>
-            n.Fqdn.Equals(notificationType, StringComparison.OrdinalIgnoreCase) ||
-            n.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
+        var matches = _notifications.Values
+            .Where(n =>
+                n.Fqdn.Equals(notificationType, StringComparison.OrdinalIgnoreCase) ||
+                n.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     private string? ResolveImplementationType(string typeName)
@@ -301,21 +313,54 @@ public sealed partial class ProjectAnalyzer
         {
             if (localVariables.TryGetValue(identifier.Identifier.Text, out var localType) && !string.Equals(localType, "var", StringComparison.OrdinalIgnoreCase))
             {
-                return localType;
+                return QualifyTypeName(localType);
             }
 
             if (parameterTypes.TryGetValue(identifier.Identifier.Text, out var parameterType) && !string.IsNullOrWhiteSpace(parameterType))
             {
-                return parameterType;
+                return QualifyTypeName(parameterType);
             }
         }
 
         if (expression is ObjectCreationExpressionSyntax creation)
         {
-            return creation.Type.ToString();
+            return QualifyTypeName(creation.Type.ToString());
         }
 
         return null;
+    }
+
+    private string QualifyTypeName(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return typeName;
+        }
+
+        if (_requests.ContainsKey(typeName) || _handlers.ContainsKey(typeName) || _notifications.ContainsKey(typeName))
+        {
+            return typeName;
+        }
+
+        var simple = typeName.Split('.').Last();
+
+        var requestMatches = _requests.Values
+            .Where(r => r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (requestMatches.Count == 1)
+        {
+            return requestMatches[0].Fqdn;
+        }
+
+        var handlerMatches = _handlers.Values
+            .Where(h => h.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (handlerMatches.Count == 1)
+        {
+            return handlerMatches[0].RequestType;
+        }
+
+        return typeName;
     }
 
     private static string? ExtractInnermostGenericType(string? typeName)
@@ -358,3 +403,5 @@ public sealed partial class ProjectAnalyzer
                 variable.Identifier.Text.Equals("SectionName", StringComparison.OrdinalIgnoreCase)));
     }
 }
+
+

@@ -302,7 +302,21 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
-        return fieldTypes.Values.Any(v => v.Type.Contains("HttpClient", StringComparison.Ordinal));
+        if (fieldTypes.Values.Any(v => v.Type.Contains("HttpClient", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (fieldTypes.Values.Any(v =>
+                v.Type.Contains("IOAuthClient", StringComparison.Ordinal) ||
+                v.Type.Contains("IDataGetService", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        return typeDeclaration.DescendantNodes()
+            .OfType<ObjectCreationExpressionSyntax>()
+            .Any(creation => creation.Type.ToString().EndsWith("UrlBuilder", StringComparison.Ordinal));
     }
 
     private static bool IsEntity(ClassDeclarationSyntax classDeclaration)

@@ -33,7 +33,10 @@ public sealed partial class ProjectAnalyzer
 
             var parameterTypes = method.ParameterList.Parameters
                 .Where(p => !string.IsNullOrWhiteSpace(p.Identifier.Text))
-                .ToDictionary(p => p.Identifier.Text, p => p.Type?.ToString(), StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(
+                    p => p.Identifier.Text,
+                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString()),
+                    StringComparer.OrdinalIgnoreCase);
 
             var methodName = method.Identifier.Text;
             var actionFqdn = $"{fqdn}.{methodName}";
@@ -90,6 +93,7 @@ public sealed partial class ProjectAnalyzer
                         resolvedType = creation.Type.ToString();
                     }
 
+                    resolvedType = QualifyTypeName(resolvedType);
                     info.LocalVariables[variable.Identifier.Text] = resolvedType;
                 }
             }
@@ -163,7 +167,7 @@ public sealed partial class ProjectAnalyzer
                                 var responseType = handler.ResponseType;
                                 if (invocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax assignTarget })
                                 {
-                                    info.LocalVariables[assignTarget.Identifier.Text] = responseType;
+                                    info.LocalVariables[assignTarget.Identifier.Text] = QualifyTypeName(responseType);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, assignTarget.Identifier.Text, GetLineNumber(tree, invocation), false));
@@ -172,7 +176,7 @@ public sealed partial class ProjectAnalyzer
                                 else if (invocation.Parent is AwaitExpressionSyntax awaitedInvocation &&
                                          awaitedInvocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax awaitAssign })
                                 {
-                                    info.LocalVariables[awaitAssign.Identifier.Text] = responseType;
+                                    info.LocalVariables[awaitAssign.Identifier.Text] = QualifyTypeName(responseType);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, awaitAssign.Identifier.Text, GetLineNumber(tree, awaitedInvocation), false));
@@ -180,7 +184,7 @@ public sealed partial class ProjectAnalyzer
                                 }
                                 else if (invocation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
                                 {
-                                    info.LocalVariables[declarator.Identifier.Text] = responseType;
+                                    info.LocalVariables[declarator.Identifier.Text] = QualifyTypeName(responseType);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, declarator.Identifier.Text, GetLineNumber(tree, invocation), false));
@@ -1700,3 +1704,6 @@ public sealed partial class ProjectAnalyzer
         }
     }
 }
+
+
+
