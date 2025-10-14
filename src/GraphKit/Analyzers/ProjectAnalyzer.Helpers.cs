@@ -259,6 +259,66 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
+    private PipelineBehaviorInfo? FindPipelineBehavior(string behaviorType)
+    {
+        if (string.IsNullOrWhiteSpace(behaviorType))
+        {
+            return null;
+        }
+
+        if (_pipelineBehaviors.TryGetValue(behaviorType, out var info))
+        {
+            return info;
+        }
+
+        var baseType = GetTypeNameWithoutGenerics(behaviorType);
+        if (!string.Equals(baseType, behaviorType, StringComparison.Ordinal) &&
+            _pipelineBehaviors.TryGetValue(baseType, out info))
+        {
+            return info;
+        }
+
+        var simple = baseType.Split('.').Last();
+        var matches = _pipelineBehaviors.Values
+            .Where(b =>
+                b.Fqdn.Equals(behaviorType, StringComparison.OrdinalIgnoreCase) ||
+                b.Fqdn.Equals(baseType, StringComparison.OrdinalIgnoreCase) ||
+                b.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    private RequestProcessorInfo? FindRequestProcessor(string processorType)
+    {
+        if (string.IsNullOrWhiteSpace(processorType))
+        {
+            return null;
+        }
+
+        if (_requestProcessors.TryGetValue(processorType, out var info))
+        {
+            return info;
+        }
+
+        var baseType = GetTypeNameWithoutGenerics(processorType);
+        if (!string.Equals(baseType, processorType, StringComparison.Ordinal) &&
+            _requestProcessors.TryGetValue(baseType, out info))
+        {
+            return info;
+        }
+
+        var simple = baseType.Split('.').Last();
+        var matches = _requestProcessors.Values
+            .Where(p =>
+                p.Fqdn.Equals(processorType, StringComparison.OrdinalIgnoreCase) ||
+                p.Fqdn.Equals(baseType, StringComparison.OrdinalIgnoreCase) ||
+                p.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
     private NotificationInfo? FindNotificationByType(string notificationType)
     {
         if (_notifications.TryGetValue(notificationType, out var notification))
@@ -417,6 +477,63 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
+    private static IReadOnlyList<string> SplitGenericArguments(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return Array.Empty<string>();
+        }
+
+        var start = typeName.IndexOf('<');
+        var end = typeName.LastIndexOf('>');
+        if (start < 0 || end <= start)
+        {
+            return Array.Empty<string>();
+        }
+
+        var inner = typeName.Substring(start + 1, end - start - 1);
+        var arguments = new List<string>();
+        var depth = 0;
+        var current = new List<char>();
+        foreach (var ch in inner)
+        {
+            if (ch == '<')
+            {
+                depth++;
+                current.Add(ch);
+                continue;
+            }
+
+            if (ch == '>')
+            {
+                depth--;
+                current.Add(ch);
+                continue;
+            }
+
+            if (ch == ',' && depth == 0)
+            {
+                var value = new string(current.ToArray()).Trim();
+                if (value.Length > 0)
+                {
+                    arguments.Add(value);
+                }
+                current.Clear();
+                continue;
+            }
+
+            current.Add(ch);
+        }
+
+        var last = new string(current.ToArray()).Trim();
+        if (last.Length > 0)
+        {
+            arguments.Add(last);
+        }
+
+        return arguments;
+    }
+
     private static bool IsOptionsDeclaration(TypeDeclarationSyntax declaration)
     {
         if (declaration.Identifier.Text.EndsWith("Options", StringComparison.Ordinal))
@@ -445,6 +562,60 @@ public sealed partial class ProjectAnalyzer
             if (a[i] != b[i]) break;
         }
         return i;
+    }
+
+    private static bool IsLoggerType(string? typeName)
+        => !string.IsNullOrWhiteSpace(typeName) && typeName.Contains("ILogger", StringComparison.Ordinal);
+
+    private static string? TryExtractLogLevel(string? methodName)
+    {
+        if (string.IsNullOrWhiteSpace(methodName))
+        {
+            return null;
+        }
+
+        if (methodName.StartsWith("Log", StringComparison.OrdinalIgnoreCase) && methodName.Length > 3)
+        {
+            var level = methodName[3..];
+            if (!string.IsNullOrWhiteSpace(level))
+            {
+                return level;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsGuardInvocation(MemberAccessExpressionSyntax access)
+    {
+        var expressionText = access.Expression.ToString();
+        if (!string.IsNullOrWhiteSpace(expressionText) && expressionText.Contains("Guard", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var method = access.Name.Identifier.Text;
+        if (string.IsNullOrWhiteSpace(method))
+        {
+            return false;
+        }
+
+        return method.StartsWith("Ensure", StringComparison.OrdinalIgnoreCase) ||
+               method.StartsWith("Validate", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsStorageService(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        var simple = GetTypeNameWithoutGenerics(typeName);
+        return simple.Contains("Storage", StringComparison.OrdinalIgnoreCase) ||
+               simple.Contains("Blob", StringComparison.OrdinalIgnoreCase) ||
+               simple.Contains("FileStore", StringComparison.OrdinalIgnoreCase) ||
+               simple.Contains("DocumentStore", StringComparison.OrdinalIgnoreCase);
     }
 }
 

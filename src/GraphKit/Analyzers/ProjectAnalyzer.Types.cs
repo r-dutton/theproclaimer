@@ -64,6 +64,8 @@ public sealed partial class ProjectAnalyzer
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
         public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
+        public List<HandlerValidationCall> ValidationCalls { get; } = new();
+        public List<HandlerLogInvocation> LogInvocations { get; } = new();
     }
 
     private sealed record PipelineBehaviorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType)
@@ -71,6 +73,7 @@ public sealed partial class ProjectAnalyzer
         public List<ServiceUsage> ServiceUsages { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
+        public HashSet<string> RegisteredRequestTypes { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed record RequestProcessorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType, string Kind)
@@ -78,19 +81,22 @@ public sealed partial class ProjectAnalyzer
         public List<ServiceUsage> ServiceUsages { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<CacheInvocation> CacheInvocations { get; } = new();
+        public HashSet<string> RegisteredRequestTypes { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed record HandlerDbAccess(string DbContextType, string Member, int Line);
 
     private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType);
 
-    private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line);
+    private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
 
     private sealed record HandlerClientInvocation(string ClientType, string HttpMethod, string? RelativePath, int Line);
 
     private sealed record HandlerMapperCall(string? SourceType, string? DestinationType, int Line);
 
     private sealed record HandlerNotificationPublication(string NotificationType, int Line);
+    private sealed record HandlerValidationCall(string GuardType, string Method, int Line);
+    private sealed record HandlerLogInvocation(string Level, int Line);
 
     private sealed record DtoInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name);
 
@@ -159,7 +165,7 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
     }
 
-    private sealed record RepositoryDbAccess(string Member, string Method, int Line);
+    private sealed record RepositoryDbAccess(string Member, string Method, int Line, string Operation);
 
     private sealed record RepositoryMapperCall(string? SourceType, string? DestinationType, int Line);
 
@@ -191,7 +197,7 @@ public sealed partial class ProjectAnalyzer
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
-    private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line);
+    private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
 
     private sealed record NotificationHandlerRequestInvocation(string RequestType, int Line);
 

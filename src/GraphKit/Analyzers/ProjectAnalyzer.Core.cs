@@ -19,6 +19,8 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, HandlerInfo> _handlers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, PipelineBehaviorInfo> _pipelineBehaviors = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RequestProcessorInfo> _requestProcessors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _requestPipelineRegistrations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _requestProcessorRegistrations = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RepositoryInfo> _repositories = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DtoInfo> _dtos = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<ValidatorInfo> _validators = new();
