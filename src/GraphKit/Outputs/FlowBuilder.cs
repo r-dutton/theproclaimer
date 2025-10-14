@@ -116,46 +116,9 @@ public static class FlowBuilder
                 AppendIndented(builder, childIndent, $"uses_validator {validatorNode.Name}{extra}{lineText}");
             }
 
-            foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
-            {
-                if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
-                {
-                    continue;
-                }
-
-                var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
-                    ? methodValue?.ToString()
-                    : null;
-                var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
-                    ? opValue?.ToString()
-                    : null;
-                var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
-                    ? keyValue?.ToString()
-                    : null;
-                var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
-                var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-                var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-                AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{cacheLineText}");
-
-                if (!string.IsNullOrWhiteSpace(cacheMethod))
-                {
-                    AppendIndented(builder, childIndent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
-                }
-            }
-
-            foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
-            {
-                if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
-                {
-                    continue;
-                }
-
-                var section = GetNodeProp(optionsNode, "section");
-                var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-                var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                AppendIndented(builder, childIndent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
-            }
+            AppendCacheUsages(builder, state, edges.Where(e => e.Kind == "uses_cache"), childIndent);
+            AppendOptionsUsages(builder, state, edges.Where(e => e.Kind == "uses_options"), childIndent);
+            AppendConfigurationUsages(builder, state, edges.Where(e => e.Kind == "uses_configuration"), childIndent);
 
             foreach (var callEdge in edges.Where(e => e.Kind == "calls"))
             {
@@ -194,29 +157,7 @@ public static class FlowBuilder
                 }
             }
 
-            foreach (var serviceEdge in edges.Where(e => e.Kind == "uses_service"))
-            {
-                if (!state.NodesById.TryGetValue(serviceEdge.To, out var serviceNode))
-                {
-                    continue;
-                }
-
-                var lineText = serviceEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var lifetime = serviceEdge.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
-                    ? lifetimeValue?.ToString()
-                    : null;
-                var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
-                var serviceMethodName = serviceEdge.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
-                    ? methodValue?.ToString()
-                    : null;
-                var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
-                AppendIndented(builder, childIndent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
-
-                if (!string.IsNullOrWhiteSpace(serviceMethodName))
-                {
-                    AppendIndented(builder, childIndent + 1, $"method {serviceMethodName}{lineText}");
-                }
-            }
+            AppendServiceUsages(builder, state, edges.Where(e => e.Kind == "uses_service"), childIndent);
 
             foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
             {
@@ -256,6 +197,166 @@ public static class FlowBuilder
         {
             state.EndpointStack.Remove(endpoint.Id);
         }
+    }
+
+    private static void AppendCacheUsages(
+        StringBuilder builder,
+        FlowRenderState state,
+        IEnumerable<GraphEdge> cacheEdges,
+        int indent)
+    {
+        foreach (var cacheEdge in cacheEdges)
+        {
+            if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
+            {
+                continue;
+            }
+
+            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+                ? methodValue?.ToString()
+                : null;
+            var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
+                ? opValue?.ToString()
+                : null;
+            var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
+                ? keyValue?.ToString()
+                : null;
+            var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+            var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
+            var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
+            var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
+            AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{cacheLineText}");
+
+            if (!string.IsNullOrWhiteSpace(cacheMethod))
+            {
+                AppendIndented(builder, indent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
+            }
+        }
+    }
+
+    private static void AppendOptionsUsages(
+        StringBuilder builder,
+        FlowRenderState state,
+        IEnumerable<GraphEdge> optionsEdges,
+        int indent)
+    {
+        foreach (var optionsEdge in optionsEdges)
+        {
+            if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
+            {
+                continue;
+            }
+
+            var section = GetNodeProp(optionsNode, "section");
+            var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
+            var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+            AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+        }
+    }
+
+    private static void AppendConfigurationUsages(
+        StringBuilder builder,
+        FlowRenderState state,
+        IEnumerable<GraphEdge> configurationEdges,
+        int indent)
+    {
+        foreach (var configurationEdge in configurationEdges)
+        {
+            if (!state.NodesById.TryGetValue(configurationEdge.To, out var configurationNode))
+            {
+                continue;
+            }
+
+            var lineText = configurationEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+            var props = configurationEdge.Props;
+            var key = props is { } && props.TryGetValue("key", out var keyValue)
+                ? keyValue?.ToString()
+                : configurationNode.Name;
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            var details = new List<string>();
+            if (props is { } && props.TryGetValue("accessor", out var accessorValue))
+            {
+                var accessor = accessorValue?.ToString();
+                if (!string.IsNullOrWhiteSpace(accessor))
+                {
+                    details.Add($"accessor={accessor}");
+                }
+            }
+
+            if (props is { } && props.TryGetValue("value", out var valueValue))
+            {
+                var value = valueValue?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    details.Add($"value={value}");
+                }
+            }
+
+            if (props is { } && props.TryGetValue("source_file", out var sourceValue))
+            {
+                var source = sourceValue?.ToString();
+                if (!string.IsNullOrWhiteSpace(source))
+                {
+                    details.Add($"source={source}");
+                }
+            }
+
+            var detailText = details.Count > 0 ? $" ({string.Join(", ", details)})" : string.Empty;
+            AppendIndented(builder, indent, $"uses_configuration {key}{detailText}{lineText}");
+        }
+    }
+
+    private static void AppendServiceUsages(
+        StringBuilder builder,
+        FlowRenderState state,
+        IEnumerable<GraphEdge> serviceEdges,
+        int indent)
+    {
+        foreach (var serviceEdge in serviceEdges)
+        {
+            if (!state.NodesById.TryGetValue(serviceEdge.To, out var serviceNode))
+            {
+                continue;
+            }
+
+            var lineText = serviceEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+            var lifetime = serviceEdge.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
+                ? lifetimeValue?.ToString()
+                : null;
+            var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
+            var serviceMethodName = serviceEdge.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
+                ? methodValue?.ToString()
+                : null;
+            var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
+            AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
+
+            if (!string.IsNullOrWhiteSpace(serviceMethodName))
+            {
+                AppendIndented(builder, indent + 1, $"method {serviceMethodName}{lineText}");
+            }
+        }
+    }
+
+    private static void AppendPipelineComponentFlow(
+        StringBuilder builder,
+        FlowRenderState state,
+        GraphNode component,
+        int indent)
+    {
+        if (!state.EdgesByFrom.TryGetValue(component.Id, out var edges))
+        {
+            return;
+        }
+
+        AppendServiceUsages(builder, state, edges.Where(e => e.Kind == "uses_service"), indent);
+        AppendCacheUsages(builder, state, edges.Where(e => e.Kind == "uses_cache"), indent);
+        AppendOptionsUsages(builder, state, edges.Where(e => e.Kind == "uses_options"), indent);
+        AppendConfigurationUsages(builder, state, edges.Where(e => e.Kind == "uses_configuration"), indent);
     }
 
     private static void AppendMappingEdge(
@@ -323,6 +424,43 @@ public static class FlowBuilder
             AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
             AppendHandlerFlow(builder, state, handlerNode, indent + 1);
         }
+
+        foreach (var processorEdge in edges.Where(e => e.Kind == "processed_by"))
+        {
+            if (!state.NodesById.TryGetValue(processorEdge.To, out var processorNode))
+            {
+                continue;
+            }
+
+            var props = processorEdge.Props;
+            var details = new List<string>();
+            if (props is { } && props.TryGetValue("stage", out var stageValue))
+            {
+                var stage = stageValue?.ToString();
+                if (!string.IsNullOrWhiteSpace(stage))
+                {
+                    details.Add($"stage={stage}");
+                }
+            }
+
+            if (props is { } && props.TryGetValue("response_type", out var responseValue))
+            {
+                var responseType = responseValue?.ToString();
+                if (!string.IsNullOrWhiteSpace(responseType) && !string.Equals(responseType, "void", StringComparison.OrdinalIgnoreCase))
+                {
+                    details.Add($"response={responseType}");
+                }
+            }
+
+            var detailText = details.Count > 0 ? $" ({string.Join(", ", details)})" : string.Empty;
+            var methodSpan = processorEdge.Transform?.MethodSpan ?? processorNode.Span;
+            var lineText = methodSpan is { StartLine: var start, EndLine: var end }
+                ? $" [L{start}–L{end}]"
+                : string.Empty;
+
+            AppendIndented(builder, indent, $"processed_by {processorNode.Fqdn}{detailText}{lineText}");
+            AppendPipelineComponentFlow(builder, state, processorNode, indent + 1);
+        }
     }
 
     private static void AppendHandlerFlow(
@@ -374,70 +512,10 @@ public static class FlowBuilder
                 AppendHttpClientUsage(builder, state, clientEdge, clientNode, indent);
             }
 
-            foreach (var service in edges.Where(e => e.Kind == "uses_service"))
-            {
-                if (!state.NodesById.TryGetValue(service.To, out var serviceNode))
-                {
-                    continue;
-                }
-
-                var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
-                    ? lifetimeValue?.ToString()
-                    : null;
-                var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
-                var serviceMethodName = service.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
-                    ? methodValue?.ToString()
-                    : null;
-                var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
-                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
-
-                if (!string.IsNullOrWhiteSpace(serviceMethodName))
-                {
-                    AppendIndented(builder, indent + 1, $"method {serviceMethodName}{lineText}");
-                }
-            }
-
-            foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
-            {
-                if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
-                {
-                    continue;
-                }
-
-                var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
-                    ? methodValue?.ToString()
-                    : null;
-                var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
-                    ? opValue?.ToString()
-                    : null;
-                var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
-                    ? keyValue?.ToString()
-                    : null;
-                var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
-                var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-                var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-                AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{cacheLineText}");
-
-                if (!string.IsNullOrWhiteSpace(cacheMethod))
-                {
-                    AppendIndented(builder, indent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
-                }
-            }
-
-            foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
-            {
-                if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
-                {
-                    continue;
-                }
-
-                var section = GetNodeProp(optionsNode, "section");
-                var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-                var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
-            }
+            AppendServiceUsages(builder, state, edges.Where(e => e.Kind == "uses_service"), indent);
+            AppendCacheUsages(builder, state, edges.Where(e => e.Kind == "uses_cache"), indent);
+            AppendOptionsUsages(builder, state, edges.Where(e => e.Kind == "uses_options"), indent);
+            AppendConfigurationUsages(builder, state, edges.Where(e => e.Kind == "uses_configuration"), indent);
 
             foreach (var publish in edges.Where(e => e.Kind == "publishes"))
             {
@@ -499,46 +577,9 @@ public static class FlowBuilder
             AppendEntityFlow(builder, state, entityNode, indent + 1);
         }
 
-        foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
-        {
-            if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
-            {
-                continue;
-            }
-
-            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
-                ? methodValue?.ToString()
-                : null;
-            var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
-                ? opValue?.ToString()
-                : null;
-            var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
-                ? keyValue?.ToString()
-                : null;
-            var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            var cacheLineText = string.IsNullOrWhiteSpace(cacheMethod) ? lineText : string.Empty;
-            var operationText = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-            var keyText = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-            AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{cacheLineText}");
-
-            if (!string.IsNullOrWhiteSpace(cacheMethod))
-            {
-                AppendIndented(builder, indent + 1, $"method {cacheMethod}{operationText}{keyText}{lineText}");
-            }
-        }
-
-        foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
-        {
-            if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
-            {
-                continue;
-            }
-
-            var section = GetNodeProp(optionsNode, "section");
-            var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-            var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
-        }
+        AppendCacheUsages(builder, state, edges.Where(e => e.Kind == "uses_cache"), indent);
+        AppendOptionsUsages(builder, state, edges.Where(e => e.Kind == "uses_options"), indent);
+        AppendConfigurationUsages(builder, state, edges.Where(e => e.Kind == "uses_configuration"), indent);
     }
 
     private static void AppendEntityFlow(
@@ -965,29 +1006,10 @@ public static class FlowBuilder
                 AppendMappingEdge(builder, state, mapping, indent);
             }
 
-            foreach (var service in edges.Where(e => e.Kind == "uses_service"))
-            {
-                if (!state.NodesById.TryGetValue(service.To, out var serviceNode))
-                {
-                    continue;
-                }
-
-                var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
-                    ? lifetimeValue?.ToString()
-                    : null;
-                var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
-                var serviceMethodName = service.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
-                    ? methodValue?.ToString()
-                    : null;
-                var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
-                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
-
-                if (!string.IsNullOrWhiteSpace(serviceMethodName))
-                {
-                    AppendIndented(builder, indent + 1, $"method {serviceMethodName}{lineText}");
-                }
-            }
+            AppendServiceUsages(builder, state, edges.Where(e => e.Kind == "uses_service"), indent);
+            AppendCacheUsages(builder, state, edges.Where(e => e.Kind == "uses_cache"), indent);
+            AppendOptionsUsages(builder, state, edges.Where(e => e.Kind == "uses_options"), indent);
+            AppendConfigurationUsages(builder, state, edges.Where(e => e.Kind == "uses_configuration"), indent);
 
             foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
             {
