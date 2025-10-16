@@ -2,4 +2,7 @@
   └─ uses_service IConnectionApiService (AddSingleton)
     └─ method GetFeatures [L481]
       └─ implementation Workpapers.Next.ApplicationService.Features.Connections.ConnectionApiService.GetFeatures [L20-L75]
+  └─ impact_summary
+    └─ services 1
+      └─ IConnectionApiService
 

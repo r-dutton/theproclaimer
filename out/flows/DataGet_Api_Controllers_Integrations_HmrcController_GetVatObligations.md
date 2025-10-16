@@ -2,4 +2,7 @@
   └─ uses_service HmrcApiService (AddScoped)
     └─ method GetVatObligations [L48]
       └─ implementation DataGet.Integrations.Hmrc.Api.Services.HmrcApiService.GetVatObligations [L17-L78]
+  └─ impact_summary
+    └─ services 1
+      └─ HmrcApiService
 

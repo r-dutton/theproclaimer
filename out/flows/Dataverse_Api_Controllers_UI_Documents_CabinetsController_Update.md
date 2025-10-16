@@ -2,7 +2,7 @@
   └─ calls CabinetRepository.WriteQuery [L61]
   └─ write Cabinet [L61]
     └─ reads_from Cabinets
-  └─ uses_service IControlledRepository<Cabinet>
-    └─ method WriteQuery [L61]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Cabinet writes=1 reads=0
 

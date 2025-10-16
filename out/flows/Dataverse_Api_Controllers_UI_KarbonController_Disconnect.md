@@ -2,4 +2,7 @@
   └─ uses_service IDatagetKarbonService (AddTransient)
     └─ method Disconnect [L47]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetKarbonService.Disconnect [L13-L53]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetKarbonService
 

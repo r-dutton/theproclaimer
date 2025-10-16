@@ -4,7 +4,9 @@
   └─ calls ReportPageLayoutRepository.ReadQuery [L58]
   └─ query ReportPageLayout [L58]
     └─ reads_from ReportPageLayouts
-  └─ uses_service IControlledRepository<ReportPageLayout>
-    └─ method ReadQuery [L58]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ReportPageLayout writes=0 reads=1
+    └─ mappings 1
+      └─ ReportPageLayoutLightDto
 

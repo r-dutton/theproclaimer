@@ -2,7 +2,7 @@
   └─ calls BinderTypeRecordTemplateSetRepository.ReadQuery [L100]
   └─ query BinderTypeRecordTemplateSet [L100]
     └─ reads_from BinderTypeRecordTemplateSets
-  └─ uses_service IControlledRepository<BinderTypeRecordTemplateSet>
-    └─ method ReadQuery [L100]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ BinderTypeRecordTemplateSet writes=0 reads=1
 

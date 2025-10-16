@@ -2,7 +2,7 @@
   └─ calls SyncConfigurationRepository.WriteQuery [L81]
   └─ write SyncConfiguration [L81]
     └─ reads_from SyncConfigurations
-  └─ uses_service IControlledRepository<SyncConfiguration>
-    └─ method WriteQuery [L81]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ SyncConfiguration writes=1 reads=0
 

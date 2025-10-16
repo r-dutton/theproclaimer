@@ -2,7 +2,7 @@
   └─ calls BinderDocumentDefaultsRepository.Add [L72]
   └─ insert BinderDocumentDefaults [L72]
     └─ reads_from BinderDocumentDefaults
-  └─ uses_service IControlledRepository<BinderDocumentDefaults>
-    └─ method Add [L72]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderDocumentDefaults writes=1 reads=0
 

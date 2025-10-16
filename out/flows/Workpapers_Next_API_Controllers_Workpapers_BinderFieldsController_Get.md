@@ -4,7 +4,9 @@
   └─ calls BinderFieldRepository.ReadQuery [L65]
   └─ query BinderField [L65]
     └─ reads_from BinderFields
-  └─ uses_service IControlledRepository<BinderField>
-    └─ method ReadQuery [L65]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ BinderField writes=0 reads=1
+    └─ mappings 1
+      └─ BinderFieldDto
 

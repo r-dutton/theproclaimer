@@ -4,7 +4,9 @@
   └─ calls DepreciationYearRepository.ReadQuery [L45]
   └─ query DepreciationYear [L45]
     └─ reads_from DepreciationYears
-  └─ uses_service IControlledRepository<DepreciationYear>
-    └─ method ReadQuery [L45]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DepreciationYear writes=0 reads=1
+    └─ mappings 1
+      └─ DepreciationYearDto
 

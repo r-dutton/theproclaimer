@@ -2,5 +2,10 @@
   └─ maps_to FirmLightWithSubscriptionsDto [L203]
   └─ uses_service UnitOfWork
     └─ method Table [L203]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ FirmLightWithSubscriptionsDto
 

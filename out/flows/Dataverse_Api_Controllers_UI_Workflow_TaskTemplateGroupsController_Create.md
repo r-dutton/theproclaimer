@@ -3,10 +3,9 @@
   └─ calls TaskTemplateGroupRepository.Add [L59]
   └─ insert TaskTemplateGroup [L59]
     └─ reads_from TaskTemplateGroups
-  └─ uses_service IControlledRepository<TaskTemplateGroup>
-    └─ method Add [L59]
-      └─ ... (no implementation details available)
-  └─ uses_service IMapper
-    └─ method Map [L61]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ TaskTemplateGroup writes=1 reads=0
+    └─ mappings 1
+      └─ TaskTemplateGroupLightDto
 

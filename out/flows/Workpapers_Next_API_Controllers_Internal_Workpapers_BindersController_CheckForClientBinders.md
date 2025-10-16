@@ -2,7 +2,7 @@
   └─ calls BinderRepository.ReadQuery [L50]
   └─ query Binder [L50]
     └─ reads_from Binders
-  └─ uses_service IControlledRepository<Binder>
-    └─ method ReadQuery [L50]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Binder writes=0 reads=1
 

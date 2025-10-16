@@ -2,7 +2,7 @@
   └─ calls ReportStyleRepository.Add [L76]
   └─ insert ReportStyle [L76]
     └─ reads_from ReportStyles
-  └─ uses_service IControlledRepository<ReportStyle>
-    └─ method Add [L76]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportStyle writes=1 reads=0
 

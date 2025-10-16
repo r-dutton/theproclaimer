@@ -2,7 +2,7 @@
   └─ calls TeamUserRepository.Add [L78]
   └─ insert TeamUser [L78]
     └─ reads_from TeamUsers
-  └─ uses_service IControlledRepository<TeamUser>
-    └─ method Add [L78]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ TeamUser writes=1 reads=0
 

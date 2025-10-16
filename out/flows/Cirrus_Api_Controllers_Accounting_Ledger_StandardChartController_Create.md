@@ -2,7 +2,7 @@
   └─ calls StandardChartRepository.Add [L157]
   └─ insert StandardChart [L157]
     └─ reads_from StandardCharts
-  └─ uses_service IControlledRepository<StandardChart>
-    └─ method Add [L157]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ StandardChart writes=1 reads=0
 

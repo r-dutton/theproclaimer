@@ -4,7 +4,9 @@
   └─ calls CabinetRepository.ReadQuery [L39]
   └─ query Cabinet [L39]
     └─ reads_from Cabinets
-  └─ uses_service IControlledRepository<Cabinet>
-    └─ method ReadQuery [L39]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Cabinet writes=0 reads=1
+    └─ mappings 1
+      └─ CabinetDto
 

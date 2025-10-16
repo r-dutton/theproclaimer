@@ -3,4 +3,7 @@
   └─ uses_service ReportContentRepository (InstancePerLifetimeScope)
     └─ method LoadWriteProperties [L349]
       └─ implementation Cirrus.Data.Repository.Accounting.Report.ReportContentRepository.LoadWriteProperties [L11-L65]
+  └─ impact_summary
+    └─ services 1
+      └─ ReportContentRepository
 

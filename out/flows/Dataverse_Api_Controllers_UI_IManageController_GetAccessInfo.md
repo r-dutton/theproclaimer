@@ -2,4 +2,7 @@
   └─ uses_service IDatagetImanageService (AddTransient)
     └─ method GetAccessInfo [L84]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetImanageService.GetAccessInfo [L19-L225]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetImanageService
 

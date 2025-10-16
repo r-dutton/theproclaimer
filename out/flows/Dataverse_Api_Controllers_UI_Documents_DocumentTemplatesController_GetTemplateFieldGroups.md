@@ -4,7 +4,9 @@
   └─ calls DocumentTemplateFieldGroupRepository.ReadQuery [L141]
   └─ query DocumentTemplateFieldGroup [L141]
     └─ reads_from DocumentTemplateFieldGroups
-  └─ uses_service IControlledRepository<DocumentTemplateFieldGroup>
-    └─ method ReadQuery [L141]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DocumentTemplateFieldGroup writes=0 reads=1
+    └─ mappings 1
+      └─ DocumentTemplateFieldGroupDto
 

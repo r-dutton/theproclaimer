@@ -2,7 +2,7 @@
   └─ calls MatchingRuleSetRepository.WriteQuery [L65]
   └─ write MatchingRuleSet [L65]
     └─ reads_from MatchingRuleSets
-  └─ uses_service IControlledRepository<MatchingRuleSet>
-    └─ method WriteQuery [L65]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ MatchingRuleSet writes=1 reads=0
 

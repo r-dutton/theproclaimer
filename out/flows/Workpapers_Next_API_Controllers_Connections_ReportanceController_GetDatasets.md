@@ -1,5 +1,5 @@
 [web] GET /api/connections/reportance/datasets/{fileId}  (Workpapers.Next.API.Controllers.Connections.ReportanceController.GetDatasets)  [L36–L42] status=200
-  └─ sends_request GetDatasetsQuery [L39]
+  └─ sends_request GetDatasetsQuery -> GetDatasetsQueryHandler [L39]
     └─ handled_by Workpapers.Next.CirrusServices.Queries.GetDatasetsQueryHandler.Handle [L21–L37]
       └─ uses_service CirrusConfig
         └─ method GetBaseUrl [L35]
@@ -7,4 +7,9 @@
       └─ uses_service CirrusHttp
         └─ method GetHttpResponseAsync [L35]
           └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ requests 1
+      └─ GetDatasetsQuery
+    └─ handlers 1
+      └─ GetDatasetsQueryHandler
 

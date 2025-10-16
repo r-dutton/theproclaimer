@@ -2,7 +2,7 @@
   └─ calls ReportingSuiteRepository.WriteQuery [L120]
   └─ write ReportingSuite [L120]
     └─ reads_from PolicySuites
-  └─ uses_service IControlledRepository<ReportingSuite>
-    └─ method WriteQuery [L120]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportingSuite writes=1 reads=0
 

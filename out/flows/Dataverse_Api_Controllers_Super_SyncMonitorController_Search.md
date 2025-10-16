@@ -2,7 +2,7 @@
   └─ calls DataverseEntityFailureLogRepository.ReadQuery [L67]
   └─ query DataverseEntityFailureLog [L67]
     └─ reads_from DataverseEntityFailureLogs
-  └─ uses_service IControlledRepository<DataverseEntityFailureLog>
-    └─ method ReadQuery [L67]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DataverseEntityFailureLog writes=0 reads=1
 

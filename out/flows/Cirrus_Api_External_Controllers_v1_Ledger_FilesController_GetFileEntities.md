@@ -3,7 +3,9 @@
   └─ calls FileRepository.ReadQuery [L98]
   └─ query File [L98]
     └─ reads_from Files
-  └─ uses_service IControlledRepository<File>
-    └─ method ReadQuery [L98]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ File writes=0 reads=1
+    └─ mappings 1
+      └─ EntityReferenceDto
 

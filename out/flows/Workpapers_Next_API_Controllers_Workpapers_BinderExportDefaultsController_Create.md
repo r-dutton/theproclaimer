@@ -2,7 +2,7 @@
   └─ calls BinderExportDefaultsRepository.Add [L47]
   └─ insert BinderExportDefaults [L47]
     └─ reads_from BinderExportDefaults
-  └─ uses_service IControlledRepository<BinderExportDefaults>
-    └─ method Add [L47]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderExportDefaults writes=1 reads=0
 

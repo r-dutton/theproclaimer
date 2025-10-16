@@ -4,7 +4,9 @@
   └─ calls ReportSettingsRepository.ReadQuery [L34]
   └─ query ReportSettings [L34]
     └─ reads_from ReportSettings
-  └─ uses_service IControlledRepository<ReportSettings>
-    └─ method ReadQuery [L34]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ReportSettings writes=0 reads=1
+    └─ mappings 1
+      └─ ReportSettingsDto
 

@@ -2,4 +2,10 @@
   └─ uses_service IdentityService
     └─ method Post [L123]
       └─ implementation Dataverse.Services.Features.Identity.IdentityService.Post [L14-L67]
+        └─ uses_service EnvironmentConfig
+          └─ method GetStandardQuery [L53]
+            └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ services 1
+      └─ IdentityService
 

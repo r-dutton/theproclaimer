@@ -4,7 +4,9 @@
   └─ calls JobStatusRepository.ReadQuery [L49]
   └─ query JobStatus [L49]
     └─ reads_from DVS_JobStatuses
-  └─ uses_service IControlledRepository<JobStatus>
-    └─ method ReadQuery [L49]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ JobStatus writes=0 reads=1
+    └─ mappings 1
+      └─ JobStatusLightDto
 

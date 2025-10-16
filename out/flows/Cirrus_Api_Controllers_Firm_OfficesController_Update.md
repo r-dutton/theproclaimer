@@ -2,7 +2,7 @@
   └─ calls OfficeRepository.WriteQuery [L93]
   └─ write Office [L93]
     └─ reads_from Offices
-  └─ uses_service IControlledRepository<Office>
-    └─ method WriteQuery [L93]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Office writes=1 reads=0
 

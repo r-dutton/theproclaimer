@@ -3,7 +3,9 @@
   └─ calls StandardAccountRepository.ReadQuery [L137]
   └─ query StandardAccount [L137]
     └─ reads_from StandardAccounts
-  └─ uses_service IControlledRepository<StandardAccount>
-    └─ method ReadQuery [L137]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ StandardAccount writes=0 reads=1
+    └─ mappings 1
+      └─ StandardHeaderDto
 

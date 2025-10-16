@@ -2,4 +2,7 @@
   └─ uses_service IDataGetCloudCapchaService (AddTransient)
     └─ method GetAccessInfo [L28]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetCloudCapchaService.GetAccessInfo [L13-L49]
+  └─ impact_summary
+    └─ services 1
+      └─ IDataGetCloudCapchaService
 

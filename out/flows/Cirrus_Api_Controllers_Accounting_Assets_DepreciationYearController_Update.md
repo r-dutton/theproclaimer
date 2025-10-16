@@ -2,7 +2,7 @@
   └─ calls DepreciationYearRepository.WriteQuery [L95]
   └─ write DepreciationYear [L95]
     └─ reads_from DepreciationYears
-  └─ uses_service IControlledRepository<DepreciationYear>
-    └─ method WriteQuery [L95]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ DepreciationYear writes=1 reads=0
 

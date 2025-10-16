@@ -4,17 +4,25 @@
   └─ calls ReportStyleRepository.ReadQuery [L44]
   └─ query ReportStyle [L44]
     └─ reads_from ReportStyles
-  └─ uses_service IControlledRepository<ReportStyle>
-    └─ method ReadQuery [L44]
-      └─ ... (no implementation details available)
-  └─ sends_request GetCustomCssQuery [L49]
+  └─ sends_request GetCustomCssQuery -> GetCustomCssQueryHandler [L49]
     └─ handled_by Cirrus.ApplicationService.Accounting.Queries.Reports.ReportStyles.GetCustomCssQueryHandler.Handle [L30–L86]
-      └─ uses_service IControlledRepository<ReportStyle>
-        └─ method ReadQuery [L43]
-          └─ ... (no implementation details available)
       └─ uses_service IStorageService (InstancePerLifetimeScope)
         └─ method GetFileBytes [L53]
-          └─ implementation IStorageService.GetFileBytes [L9-L9]
-          └─ ... (no implementation details available)
+          └─ implementation DataGet.Data.BlobStorage.StorageService.GetFileBytes [L11-L116]
+            └─ uses_service RequestContextProvider
+              └─ method GetContainer [L89]
+                └─ resolves_request DataGet.ApplicationService.Services.RequestContextProvider.GetContainer
+      └─ uses_service IControlledRepository<ReportStyle> (Scoped (inferred))
+        └─ method ReadQuery [L43]
+          └─ implementation Cirrus.Data.Repository.Accounting.Report.ReportStyleRepository.ReadQuery
       └─ uses_storage IStorageService.GetFileBytes [L53]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ReportStyle writes=0 reads=1
+    └─ requests 1
+      └─ GetCustomCssQuery
+    └─ handlers 1
+      └─ GetCustomCssQueryHandler
+    └─ mappings 1
+      └─ ReportStyleDto
 

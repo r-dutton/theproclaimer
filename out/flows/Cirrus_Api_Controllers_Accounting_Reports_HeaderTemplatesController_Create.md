@@ -2,7 +2,7 @@
   └─ calls HeaderTemplateRepository.Add [L66]
   └─ insert HeaderTemplate [L66]
     └─ reads_from ReportHeaderTemplates
-  └─ uses_service IControlledRepository<HeaderTemplate>
-    └─ method Add [L66]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ HeaderTemplate writes=1 reads=0
 

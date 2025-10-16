@@ -2,7 +2,7 @@
   └─ calls BinderTemplateRepository.WriteQuery [L133]
   └─ write BinderTemplate [L133]
     └─ reads_from BinderTemplates
-  └─ uses_service IControlledRepository<BinderTemplate>
-    └─ method WriteQuery [L133]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderTemplate writes=1 reads=0
 

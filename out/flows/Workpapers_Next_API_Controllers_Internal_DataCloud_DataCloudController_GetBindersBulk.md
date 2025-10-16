@@ -4,7 +4,9 @@
   └─ calls BinderRepository.ReadQuery [L45]
   └─ query Binder [L45]
     └─ reads_from Binders
-  └─ uses_service IControlledRepository<Binder>
-    └─ method ReadQuery [L45]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Binder writes=0 reads=1
+    └─ mappings 1
+      └─ BinderUltraLightDto
 

@@ -5,7 +5,9 @@
   └─ calls StandardChartRepository.ReadQuery [L48]
   └─ query StandardChart [L48]
     └─ reads_from StandardCharts
-  └─ uses_service IControlledRepository<StandardChart>
-    └─ method ReadQuery [L48]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ StandardChart writes=0 reads=1
+    └─ mappings 1
+      └─ StandardChartDto
 

@@ -2,9 +2,12 @@
   └─ maps_to WorkflowTaskDto [L52]
     └─ automapper.registration DataverseMappingProfile (WorkflowTask->WorkflowTaskDto) [L371]
     └─ automapper.registration ExternalApiMappingProfile (WorkflowTask->WorkflowTaskDto) [L143]
+  └─ calls TaskRepository.ReadQuery [L52]
   └─ query WorkflowTask [L52]
     └─ reads_from DVS_Tasks
-  └─ uses_service IControlledRepository<WorkflowTask>
-    └─ method ReadQuery [L52]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ WorkflowTask writes=0 reads=1
+    └─ mappings 1
+      └─ WorkflowTaskDto
 

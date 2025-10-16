@@ -2,4 +2,7 @@
   └─ uses_service IAuthorizationService
     └─ method AuthorizeAsync [L116]
       └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ services 1
+      └─ IAuthorizationService
 

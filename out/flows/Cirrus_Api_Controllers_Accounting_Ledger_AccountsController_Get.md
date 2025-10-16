@@ -3,7 +3,9 @@
     └─ automapper.registration CirrusMappingProfile (Account->AccountDto) [L327]
   └─ calls AccountRepository.ReadQuery [L71]
   └─ query Account [L71]
-  └─ uses_service IControlledRepository<Account>
-    └─ method ReadQuery [L71]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Account writes=0 reads=1
+    └─ mappings 1
+      └─ AccountDto
 

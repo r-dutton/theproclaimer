@@ -4,7 +4,9 @@
   └─ calls JobFilterSetRepository.ReadQuery [L68]
   └─ query JobFilterSet [L68]
     └─ reads_from JobFilterSets
-  └─ uses_service IControlledRepository<JobFilterSet>
-    └─ method ReadQuery [L68]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ JobFilterSet writes=0 reads=1
+    └─ mappings 1
+      └─ JobFilterSetDto
 

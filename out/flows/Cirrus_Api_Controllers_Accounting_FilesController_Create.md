@@ -4,15 +4,17 @@
   └─ insert File [L208]
     └─ reads_from Files
   └─ write Entity [L205]
-  └─ uses_service IControlledRepository<Entity>
-    └─ method WriteQuery [L205]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<File>
-    └─ method Add [L208]
-      └─ ... (no implementation details available)
-  └─ sends_request GetDefaultStandardChartIdQuery [L203]
+  └─ sends_request GetDefaultStandardChartIdQuery -> GetDefaultStandardChartIdQueryHandler [L203]
     └─ handled_by Cirrus.ApplicationService.Accounting.Queries.GetDefaultStandardChartIdQueryHandler.Handle [L24–L48]
-      └─ uses_service IControlledRepository<StandardChart>
+      └─ uses_service IControlledRepository<StandardChart> (Scoped (inferred))
         └─ method ReadQuery [L36]
-          └─ ... (no implementation details available)
+          └─ implementation Cirrus.Data.Repository.Accounting.Ledger.StandardChartRepository.ReadQuery
+  └─ impact_summary
+    └─ entities 2 (writes=2, reads=0)
+      └─ Entity writes=1 reads=0
+      └─ File writes=1 reads=0
+    └─ requests 1
+      └─ GetDefaultStandardChartIdQuery
+    └─ handlers 1
+      └─ GetDefaultStandardChartIdQueryHandler
 

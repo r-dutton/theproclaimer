@@ -3,10 +3,12 @@
   └─ calls ReportPageTypeRepository.WriteQuery [L173]
   └─ write ReportPageType [L173]
     └─ reads_from ReportPageTypes
-  └─ uses_service IControlledRepository<ReportPageType>
-    └─ method WriteQuery [L173]
-      └─ ... (no implementation details available)
   └─ uses_service ReportContentRepository (InstancePerLifetimeScope)
     └─ method LoadWriteProperties [L174]
       └─ implementation Cirrus.Data.Repository.Accounting.Report.ReportContentRepository.LoadWriteProperties [L11-L65]
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportPageType writes=1 reads=0
+    └─ services 1
+      └─ ReportContentRepository
 

@@ -1,17 +1,21 @@
 [web] GET /api/ui/sync-configuration/{id:Guid}  (Dataverse.Api.Controllers.UI.SyncConfigurationController.Get)  [L59–L63] status=200 [auth=Authentication.AdminPolicy]
-  └─ sends_request GetSyncConfigurationQuery [L62]
+  └─ sends_request GetSyncConfigurationQuery -> GetSyncConfigurationQueryHandler [L62]
     └─ handled_by Dataverse.ApplicationService.Queries.SyncConfigurations.GetSyncConfigurationQueryHandler.Handle [L34–L90]
       └─ maps_to SyncConfigurationDto [L54]
-      └─ uses_service IControlledRepository<SyncConfiguration>
-        └─ method ReadQuery [L49]
-          └─ ... (no implementation details available)
-      └─ uses_service IMapper
-        └─ method Map [L54]
-          └─ ... (no implementation details available)
       └─ uses_service RequestProcessor
         └─ method ProcessAsync [L65]
-          └─ implementation Dataverse.Services.Features.Requests.RequestProcessor.ProcessAsync [L8-L45]
-            └─ constructs RequestProcessorWrapper<TRequest,TResult>
-            └─ resolves IPipelineBehavior<TRequest,TResult> chain
-            └─ invokes IAsyncRequestHandler<TRequest,TResult>.Handle
+          └─ resolves_request Dataverse.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ resolves_request Cirrus.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ resolves_request DataGet.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ +1 additional_requests elided
+      └─ uses_service IControlledRepository<SyncConfiguration> (Scoped (inferred))
+        └─ method ReadQuery [L49]
+          └─ implementation Dataverse.Data.Repository.Sync.SyncConfigurationRepository.ReadQuery
+  └─ impact_summary
+    └─ requests 1
+      └─ GetSyncConfigurationQuery
+    └─ handlers 1
+      └─ GetSyncConfigurationQueryHandler
+    └─ mappings 1
+      └─ SyncConfigurationDto
 

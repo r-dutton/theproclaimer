@@ -2,7 +2,7 @@
   └─ calls TeamUserRepository.WriteQuery [L88]
   └─ write TeamUser [L88]
     └─ reads_from TeamUsers
-  └─ uses_service IControlledRepository<TeamUser>
-    └─ method WriteQuery [L88]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ TeamUser writes=1 reads=0
 

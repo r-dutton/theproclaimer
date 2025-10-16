@@ -2,7 +2,7 @@
   └─ calls DeliverableTypeRepository.WriteQuery [L82]
   └─ write DeliverableType [L82]
     └─ reads_from DeliverableTypes
-  └─ uses_service IControlledRepository<DeliverableType>
-    └─ method WriteQuery [L82]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ DeliverableType writes=1 reads=0
 

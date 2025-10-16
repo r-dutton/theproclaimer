@@ -2,7 +2,7 @@
   └─ calls TaskTemplateGroupRepository.ReadQuery [L70]
   └─ query TaskTemplateGroup [L70]
     └─ reads_from TaskTemplateGroups
-  └─ uses_service IControlledRepository<TaskTemplateGroup>
-    └─ method ReadQuery [L70]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ TaskTemplateGroup writes=0 reads=1
 

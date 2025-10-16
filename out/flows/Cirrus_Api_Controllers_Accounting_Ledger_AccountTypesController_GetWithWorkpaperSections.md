@@ -4,7 +4,9 @@
   └─ calls AccountTypeRepository.ReadQuery [L66]
   └─ query AccountType [L66]
     └─ reads_from AccountTypes
-  └─ uses_service IControlledRepository<AccountType>
-    └─ method ReadQuery [L66]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ AccountType writes=0 reads=1
+    └─ mappings 1
+      └─ AccountTypeWithWorkpaperSectionDto
 

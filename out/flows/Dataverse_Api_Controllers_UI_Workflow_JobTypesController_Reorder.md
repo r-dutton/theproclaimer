@@ -2,7 +2,7 @@
   └─ calls JobTypeRepository.WriteQuery [L106]
   └─ write JobType [L106]
     └─ reads_from JobTypes
-  └─ uses_service IControlledRepository<JobType>
-    └─ method WriteQuery [L106]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ JobType writes=1 reads=0
 

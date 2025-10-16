@@ -2,7 +2,7 @@
   └─ calls BinderExportDefaultsRepository.WriteQuery [L55]
   └─ write BinderExportDefaults [L55]
     └─ reads_from BinderExportDefaults
-  └─ uses_service IControlledRepository<BinderExportDefaults>
-    └─ method WriteQuery [L55]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderExportDefaults writes=1 reads=0
 

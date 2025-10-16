@@ -2,7 +2,7 @@
   └─ calls DocumentStatusRepository.WriteQuery [L107]
   └─ write DocumentStatus [L107]
     └─ reads_from DVS_DocumentStatuses
-  └─ uses_service IControlledRepository<DocumentStatus>
-    └─ method WriteQuery [L107]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ DocumentStatus writes=1 reads=0
 

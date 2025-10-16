@@ -2,7 +2,7 @@
   └─ calls MessageRepository.WriteQuery [L59]
   └─ write Message [L59]
     └─ reads_from Messages
-  └─ uses_service IControlledRepository<Message>
-    └─ method WriteQuery [L59]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Message writes=1 reads=0
 

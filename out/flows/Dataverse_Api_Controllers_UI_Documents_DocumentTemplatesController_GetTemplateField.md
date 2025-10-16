@@ -4,7 +4,9 @@
   └─ calls DocumentTemplateFieldRepository.ReadQuery [L125]
   └─ query DocumentTemplateField [L125]
     └─ reads_from DocumentTemplateFields
-  └─ uses_service IControlledRepository<DocumentTemplateField>
-    └─ method ReadQuery [L125]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DocumentTemplateField writes=0 reads=1
+    └─ mappings 1
+      └─ DocumentTemplateFieldDto
 

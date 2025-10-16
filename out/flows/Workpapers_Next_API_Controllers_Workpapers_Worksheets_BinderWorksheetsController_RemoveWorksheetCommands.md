@@ -2,7 +2,7 @@
   └─ calls WorksheetRepository.WriteQuery [L393]
   └─ write Worksheet [L393]
     └─ reads_from Worksheets
-  └─ uses_service IControlledRepository<Worksheet>
-    └─ method WriteQuery [L393]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Worksheet writes=1 reads=0
 

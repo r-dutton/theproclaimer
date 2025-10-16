@@ -2,7 +2,7 @@
   └─ calls ReportPageTypeRepository.ReadQuery [L100]
   └─ query ReportPageType [L100]
     └─ reads_from ReportPageTypes
-  └─ uses_service IControlledRepository<ReportPageType>
-    └─ method ReadQuery [L100]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ReportPageType writes=0 reads=1
 

@@ -2,5 +2,10 @@
   └─ maps_to OfficeDto [L76]
   └─ uses_service UnitOfWork
     └─ method Table [L76]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ OfficeDto
 

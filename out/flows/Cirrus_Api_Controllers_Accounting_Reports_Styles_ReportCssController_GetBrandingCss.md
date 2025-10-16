@@ -7,15 +7,19 @@
     └─ reads_from ReportSettings
   └─ query Office [L51]
     └─ reads_from Offices
-  └─ uses_service IControlledRepository<Office>
-    └─ method ReadQuery [L51]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<ReportSettings>
-    └─ method ReadQuery [L53]
-      └─ ... (no implementation details available)
-  └─ sends_request GetPdfBrandingCssQuery [L54]
+  └─ sends_request GetPdfBrandingCssQuery -> GetPdfBrandingCssQueryHandler [L54]
     └─ handled_by Cirrus.ApplicationService.Accounting.Queries.Reports.ReportStyles.GetPdfBrandingCssQueryHandler.Handle [L20–L41]
       └─ uses_service FileManagerService
         └─ method GetCurrentFolder [L31]
           └─ implementation Cirrus.ApplicationService.Services.FileManager.FileManagerService.GetCurrentFolder [L8-L34]
+  └─ impact_summary
+    └─ entities 2 (writes=0, reads=2)
+      └─ Office writes=0 reads=1
+      └─ ReportSettings writes=0 reads=1
+    └─ requests 1
+      └─ GetPdfBrandingCssQuery
+    └─ handlers 1
+      └─ GetPdfBrandingCssQueryHandler
+    └─ mappings 1
+      └─ ReportSettingsDto
 

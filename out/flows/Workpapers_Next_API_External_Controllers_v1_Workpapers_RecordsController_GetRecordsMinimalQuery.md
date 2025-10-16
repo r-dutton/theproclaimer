@@ -2,7 +2,7 @@
   └─ calls WorkpaperRecordRepository.ReadQuery [L61]
   └─ query WorkpaperRecord [L61]
     └─ reads_from WorkpaperRecords
-  └─ uses_service IControlledRepository<WorkpaperRecord>
-    └─ method ReadQuery [L61]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ WorkpaperRecord writes=0 reads=1
 

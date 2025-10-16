@@ -2,8 +2,15 @@
   └─ calls SourceAccountRepository.ReadQuery [L228]
   └─ query SourceAccount [L228]
     └─ reads_from SourceAccounts
-  └─ uses_service IControlledRepository<SourceAccount>
+  └─ uses_service SourceAccountRepository
     └─ method ReadQuery [L228]
-      └─ ... (no implementation details available)
+      └─ implementation Workpapers.Next.Data.Repository.Workpapers.SourceAccountRepository.ReadQuery [L8-L38]
   └─ sends_request GetChildStandardAccountsAsLightDtoQuery [L222]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ SourceAccount writes=0 reads=1
+    └─ services 1
+      └─ SourceAccountRepository
+    └─ requests 1
+      └─ GetChildStandardAccountsAsLightDtoQuery
 

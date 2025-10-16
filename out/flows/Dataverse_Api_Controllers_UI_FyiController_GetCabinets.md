@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method GetCabinetsAsync [L50]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.GetCabinetsAsync [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

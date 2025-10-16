@@ -2,7 +2,7 @@
   └─ calls TaskTemplateGroupRepository.WriteQuery [L67]
   └─ write TaskTemplateGroup [L67]
     └─ reads_from TaskTemplateGroups
-  └─ uses_service IControlledRepository<TaskTemplateGroup>
-    └─ method WriteQuery [L67]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ TaskTemplateGroup writes=1 reads=0
 

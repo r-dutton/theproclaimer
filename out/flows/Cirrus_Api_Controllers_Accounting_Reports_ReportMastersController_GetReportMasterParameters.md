@@ -2,7 +2,7 @@
   └─ calls ReportPageTypeRepository.WriteQuery [L185]
   └─ write ReportPageType [L185]
     └─ reads_from ReportPageTypes
-  └─ uses_service IControlledRepository<ReportPageType>
-    └─ method WriteQuery [L185]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportPageType writes=1 reads=0
 

@@ -5,7 +5,9 @@
   └─ calls DeliverableRepository.ReadQuery [L55]
   └─ query Deliverable [L55]
     └─ reads_from Deliverables
-  └─ uses_service IControlledRepository<Deliverable>
-    └─ method ReadQuery [L55]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Deliverable writes=0 reads=1
+    └─ mappings 1
+      └─ DeliverableDto
 

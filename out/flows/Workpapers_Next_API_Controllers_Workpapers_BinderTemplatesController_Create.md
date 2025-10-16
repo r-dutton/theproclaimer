@@ -2,7 +2,7 @@
   └─ calls BinderTemplateRepository.Add [L96]
   └─ insert BinderTemplate [L96]
     └─ reads_from BinderTemplates
-  └─ uses_service IControlledRepository<BinderTemplate>
-    └─ method Add [L96]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderTemplate writes=1 reads=0
 

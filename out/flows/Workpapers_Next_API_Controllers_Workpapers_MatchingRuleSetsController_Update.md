@@ -2,7 +2,12 @@
   └─ calls MatchingRuleSetRepository.WriteQuery [L79]
   └─ write MatchingRuleSet [L79]
     └─ reads_from MatchingRuleSets
-  └─ uses_service IControlledRepository<MatchingRuleSet>
+  └─ uses_service MatchingRuleSetRepository
     └─ method WriteQuery [L79]
-      └─ ... (no implementation details available)
+      └─ implementation Workpapers.Next.Data.Repository.Workpapers.MatchingRuleSetRepository.WriteQuery [L8-L38]
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ MatchingRuleSet writes=1 reads=0
+    └─ services 1
+      └─ MatchingRuleSetRepository
 

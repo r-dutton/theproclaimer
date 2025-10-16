@@ -4,7 +4,9 @@
   └─ calls SyncServiceRepository.ReadQuery [L40]
   └─ query SyncService [L40]
     └─ reads_from SyncServices
-  └─ uses_service IControlledRepository<SyncService>
-    └─ method ReadQuery [L40]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ SyncService writes=0 reads=1
+    └─ mappings 1
+      └─ SyncServiceDto
 

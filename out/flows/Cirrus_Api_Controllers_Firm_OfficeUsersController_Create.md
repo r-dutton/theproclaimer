@@ -2,7 +2,7 @@
   └─ calls OfficeUserRepository.Add [L77]
   └─ insert OfficeUser [L77]
     └─ reads_from OfficeUsers
-  └─ uses_service IControlledRepository<OfficeUser>
-    └─ method Add [L77]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ OfficeUser writes=1 reads=0
 

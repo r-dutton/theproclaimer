@@ -2,5 +2,10 @@
   └─ maps_to OfficeLightDto [L49]
   └─ uses_service UnitOfWork
     └─ method Table [L49]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ OfficeLightDto
 

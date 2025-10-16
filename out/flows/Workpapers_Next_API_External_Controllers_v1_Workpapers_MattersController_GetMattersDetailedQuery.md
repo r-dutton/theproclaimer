@@ -2,7 +2,7 @@
   └─ calls MatterRepository.ReadQuery [L93]
   └─ query Matter [L93]
     └─ reads_from Matters
-  └─ uses_service IControlledRepository<Matter>
-    └─ method ReadQuery [L93]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Matter writes=0 reads=1
 

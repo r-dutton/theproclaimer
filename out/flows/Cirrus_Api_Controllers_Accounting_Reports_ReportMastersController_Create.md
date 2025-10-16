@@ -2,7 +2,7 @@
   └─ calls ReportMasterRepository.Add [L140]
   └─ insert ReportMaster [L140]
     └─ reads_from ReportMasters
-  └─ uses_service IControlledRepository<ReportMaster>
-    └─ method Add [L140]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportMaster writes=1 reads=0
 

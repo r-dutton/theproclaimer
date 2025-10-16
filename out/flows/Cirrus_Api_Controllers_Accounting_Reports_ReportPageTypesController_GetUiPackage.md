@@ -9,10 +9,11 @@
     └─ reads_from ReportFooterTemplates
   └─ query HeaderTemplate [L126]
     └─ reads_from ReportHeaderTemplates
-  └─ uses_service IControlledRepository<FooterTemplate>
-    └─ method ReadQuery [L129]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<HeaderTemplate>
-    └─ method ReadQuery [L126]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 2 (writes=0, reads=2)
+      └─ FooterTemplate writes=0 reads=1
+      └─ HeaderTemplate writes=0 reads=1
+    └─ mappings 2
+      └─ FooterTemplateLightDto
+      └─ HeaderTemplateLightDto
 

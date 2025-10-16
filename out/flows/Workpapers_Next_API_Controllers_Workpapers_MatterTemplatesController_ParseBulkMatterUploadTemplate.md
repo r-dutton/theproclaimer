@@ -3,4 +3,9 @@
     └─ method GetFileBytes [L91]
       └─ implementation Workpapers.Next.Data.Storage.StorageService.GetFileBytes [L17-L282]
   └─ uses_storage StorageService.GetFileBytes [L91]
+  └─ impact_summary
+    └─ services 1
+      └─ StorageService
+    └─ storages 1
+      └─ StorageService
 

@@ -2,7 +2,7 @@
   └─ calls MatchingRuleSetRepository.Add [L58]
   └─ insert MatchingRuleSet [L58]
     └─ reads_from MatchingRuleSets
-  └─ uses_service IControlledRepository<MatchingRuleSet>
-    └─ method Add [L58]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ MatchingRuleSet writes=1 reads=0
 

@@ -2,7 +2,7 @@
   └─ calls PolicyVariantRepository.ReadQuery [L69]
   └─ query PolicyVariant [L69]
     └─ reads_from PolicyVariants
-  └─ uses_service IControlledRepository<PolicyVariant>
-    └─ method ReadQuery [L69]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ PolicyVariant writes=0 reads=1
 

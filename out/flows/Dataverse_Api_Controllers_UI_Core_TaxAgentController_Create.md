@@ -2,7 +2,7 @@
   └─ calls TaxAgentRepository.Add [L54]
   └─ insert TaxAgent [L54]
     └─ reads_from TaxAgents
-  └─ uses_service IControlledRepository<TaxAgent>
-    └─ method Add [L54]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ TaxAgent writes=1 reads=0
 

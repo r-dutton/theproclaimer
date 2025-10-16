@@ -2,12 +2,16 @@
   └─ calls ReportStyleRepository.WriteQuery [L87]
   └─ write ReportStyle [L87]
     └─ reads_from ReportStyles
-  └─ uses_service IControlledRepository<ReportStyle>
-    └─ method WriteQuery [L87]
-      └─ ... (no implementation details available)
-  └─ sends_request ValidateCssFontUrlsCommand [L91]
+  └─ sends_request ValidateCssFontUrlsCommand -> ValidateCssFontUrlsCommandHandler [L91]
     └─ handled_by Cirrus.ApplicationService.Accounting.Commands.Reports.ReportStyles.ValidateCssFontUrlsCommandHandler.Handle [L24–L60]
       └─ uses_service IOptions<CssTemplatesConfig>
         └─ method Value [L34]
           └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportStyle writes=1 reads=0
+    └─ requests 1
+      └─ ValidateCssFontUrlsCommand
+    └─ handlers 1
+      └─ ValidateCssFontUrlsCommandHandler
 

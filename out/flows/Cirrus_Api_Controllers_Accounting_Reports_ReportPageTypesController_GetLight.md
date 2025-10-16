@@ -4,7 +4,9 @@
   └─ calls ReportPageTypeRepository.ReadQuery [L75]
   └─ query ReportPageType [L75]
     └─ reads_from ReportPageTypes
-  └─ uses_service IControlledRepository<ReportPageType>
-    └─ method ReadQuery [L75]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ReportPageType writes=0 reads=1
+    └─ mappings 1
+      └─ ReportPageTypeLightWithContentFieldsDto
 

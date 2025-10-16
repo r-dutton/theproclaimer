@@ -2,7 +2,7 @@
   └─ calls ImageRepository.WriteQuery [L59]
   └─ write Image [L59]
     └─ reads_from Images
-  └─ uses_service IControlledRepository<Image>
-    └─ method WriteQuery [L59]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Image writes=1 reads=0
 

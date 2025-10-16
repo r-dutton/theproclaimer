@@ -4,17 +4,26 @@
     └─ automapper.registration WorkpapersMappingProfile (BinderTemplate->BinderTemplateDto) [L726]
   └─ calls ExcludedBinderTemplateRepository.ReadQuery [L70]
   └─ calls BinderTemplateRepository.ReadQuery [L55]
-  └─ query BinderTemplate [L55]
-    └─ reads_from BinderTemplates
   └─ query ExcludedBinderTemplate [L70]
     └─ reads_from ExcludedBinderTemplates
-  └─ uses_service IControlledRepository<BinderTemplate>
-    └─ method ReadQuery [L55]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<ExcludedBinderTemplate>
-    └─ method ReadQuery [L70]
-      └─ ... (no implementation details available)
+  └─ query BinderTemplate [L55]
+    └─ reads_from BinderTemplates
   └─ uses_service UserService
     └─ method IsSuperUser [L53]
       └─ implementation Workpapers.Next.ApplicationService.Services.UserService.IsSuperUser [L20-L295]
+        └─ uses_service bool?
+          └─ method IsSuperUser [L174]
+            └─ ... (no implementation details available)
+        └─ uses_cache IMemoryCache.GetOrCreate [read] [L280]
+  └─ impact_summary
+    └─ entities 2 (writes=0, reads=2)
+      └─ BinderTemplate writes=0 reads=1
+      └─ ExcludedBinderTemplate writes=0 reads=1
+    └─ services 1
+      └─ UserService
+    └─ caches 1
+      └─ IMemoryCache
+    └─ mappings 2
+      └─ BinderRecordTemplateDto
+      └─ BinderTemplateDto
 

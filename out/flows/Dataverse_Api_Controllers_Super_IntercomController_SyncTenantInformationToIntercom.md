@@ -2,4 +2,7 @@
   └─ uses_service MockMessagingService
     └─ method RequestTenantIntercomSync [L33]
       └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ services 1
+      └─ MockMessagingService
 

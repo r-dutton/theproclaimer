@@ -4,4 +4,9 @@
   └─ uses_service CentralRepository
     └─ method ReadTable [L41]
       └─ implementation Cirrus.Central.Data.CentralRepository.ReadTable [L10-L55]
+  └─ impact_summary
+    └─ services 1
+      └─ CentralRepository
+    └─ mappings 1
+      └─ DatabaseDto
 

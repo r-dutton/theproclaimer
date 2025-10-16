@@ -4,7 +4,9 @@
   └─ calls ContactRepository.ReadQuery [L49]
   └─ query Contact [L49]
     └─ reads_from DVS_Clients
-  └─ uses_service IControlledRepository<Contact>
-    └─ method ReadQuery [L49]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Contact writes=0 reads=1
+    └─ mappings 1
+      └─ ContactDto
 

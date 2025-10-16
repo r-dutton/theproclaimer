@@ -4,7 +4,9 @@
   └─ calls DocumentVersionRepository.ReadQuery [L47]
   └─ query DocumentVersion [L47]
     └─ reads_from DocumentVersions
-  └─ uses_service IControlledRepository<DocumentVersion>
-    └─ method ReadQuery [L47]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DocumentVersion writes=0 reads=1
+    └─ mappings 1
+      └─ DocumentVersionDto
 

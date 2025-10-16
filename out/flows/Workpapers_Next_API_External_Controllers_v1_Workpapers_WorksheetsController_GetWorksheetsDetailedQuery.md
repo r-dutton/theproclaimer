@@ -2,7 +2,7 @@
   └─ calls WorksheetRepository.ReadQuery [L80]
   └─ query Worksheet [L80]
     └─ reads_from Worksheets
-  └─ uses_service IControlledRepository<Worksheet>
-    └─ method ReadQuery [L80]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Worksheet writes=0 reads=1
 

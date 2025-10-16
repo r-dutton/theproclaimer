@@ -5,10 +5,8 @@
     └─ reads_from DataverseEntityFailureLogs
   └─ query SyncConfiguration [L87]
     └─ reads_from SyncConfigurations
-  └─ uses_service IControlledRepository<DataverseEntityFailureLog>
-    └─ method ReadQuery [L90]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<SyncConfiguration>
-    └─ method ReadQuery [L87]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 2 (writes=0, reads=2)
+      └─ DataverseEntityFailureLog writes=0 reads=1
+      └─ SyncConfiguration writes=0 reads=1
 

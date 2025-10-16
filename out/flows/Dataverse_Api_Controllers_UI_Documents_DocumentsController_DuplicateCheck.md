@@ -2,7 +2,7 @@
   └─ calls DocumentRepository.ReadQuery [L403]
   └─ query Document [L403]
     └─ reads_from Documents
-  └─ uses_service IControlledRepository<Document>
-    └─ method ReadQuery [L403]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Document writes=0 reads=1
 

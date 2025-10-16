@@ -2,7 +2,7 @@
   └─ calls ReportMasterRepository.WriteQuery [L160]
   └─ write ReportMaster [L160]
     └─ reads_from ReportMasters
-  └─ uses_service IControlledRepository<ReportMaster>
-    └─ method WriteQuery [L160]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportMaster writes=1 reads=0
 

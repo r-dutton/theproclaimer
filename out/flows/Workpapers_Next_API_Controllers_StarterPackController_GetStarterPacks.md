@@ -2,5 +2,10 @@
   └─ maps_to StarterPackDto [L34]
   └─ uses_service UnitOfWork
     └─ method Table [L34]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ StarterPackDto
 

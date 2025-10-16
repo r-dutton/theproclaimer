@@ -2,4 +2,7 @@
   └─ uses_service IDataGetCloudCapchaService (AddTransient)
     └─ method Authenticate [L35]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetCloudCapchaService.Authenticate [L13-L49]
+  └─ impact_summary
+    └─ services 1
+      └─ IDataGetCloudCapchaService
 

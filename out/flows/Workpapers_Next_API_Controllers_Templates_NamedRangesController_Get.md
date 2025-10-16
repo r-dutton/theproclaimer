@@ -2,7 +2,7 @@
   └─ calls NamedRangeRepository.ReadQuery [L33]
   └─ query NamedRange [L33]
     └─ reads_from NamedRanges
-  └─ uses_service IControlledRepository<NamedRange>
-    └─ method ReadQuery [L33]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ NamedRange writes=0 reads=1
 

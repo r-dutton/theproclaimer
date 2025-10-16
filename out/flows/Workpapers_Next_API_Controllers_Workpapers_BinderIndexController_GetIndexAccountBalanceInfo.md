@@ -1,21 +1,24 @@
 [web] GET /api/binder-index/account-balance-info  (Workpapers.Next.API.Controllers.Workpapers.BinderIndexController.GetIndexAccountBalanceInfo)  [L23–L27] status=200 [auth=AuthorizationPolicies.User]
-  └─ sends_request GetIndexAccountBalanceInfoQuery [L26]
+  └─ sends_request GetIndexAccountBalanceInfoQuery -> GetIndexAccountBalanceInfoQueryHandler [L26]
     └─ handled_by Workpapers.Next.ApplicationService.Queries.Workpapers.GetIndexAccountBalanceInfoQueryHandler.Handle [L36–L358]
+      └─ calls SourceRepository.ReadQuery [L129]
+      └─ calls SourceAccountRepository.ReadQuery [L74]
       └─ maps_to AccountBalanceInfoDto [L65]
         └─ automapper.registration WorkpapersMappingProfile (Binder->AccountBalanceInfoDto) [L457]
-      └─ uses_service IControlledRepository<Binder>
+      └─ uses_service IControlledRepository<Binder> (Scoped (inferred))
         └─ method ReadQuery [L65]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<Source>
-        └─ method ReadQuery [L129]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<SourceAccount>
-        └─ method ReadQuery [L74]
-          └─ ... (no implementation details available)
+          └─ implementation Workpapers.Next.Data.Repository.BinderRepository.ReadQuery
       └─ uses_service RequestProcessor
         └─ method ProcessAsync [L63]
-          └─ implementation Workpapers.Next.Services.Features.Requests.RequestProcessor.ProcessAsync [L9-L32]
-            └─ constructs RequestProcessorWrapper<TRequest,TResult>
-            └─ resolves IPipelineBehavior<TRequest,TResult> chain
-            └─ invokes IAsyncRequestHandler<TRequest,TResult>.Handle
+          └─ resolves_request Workpapers.Next.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ resolves_request Cirrus.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ resolves_request DataGet.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ +1 additional_requests elided
+  └─ impact_summary
+    └─ requests 1
+      └─ GetIndexAccountBalanceInfoQuery
+    └─ handlers 1
+      └─ GetIndexAccountBalanceInfoQueryHandler
+    └─ mappings 1
+      └─ AccountBalanceInfoDto
 

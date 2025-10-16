@@ -3,10 +3,9 @@
   └─ calls CabinetRepository.Add [L52]
   └─ insert Cabinet [L52]
     └─ reads_from Cabinets
-  └─ uses_service IControlledRepository<Cabinet>
-    └─ method Add [L52]
-      └─ ... (no implementation details available)
-  └─ uses_service IMapper
-    └─ method Map [L53]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Cabinet writes=1 reads=0
+    └─ mappings 1
+      └─ CabinetDto
 

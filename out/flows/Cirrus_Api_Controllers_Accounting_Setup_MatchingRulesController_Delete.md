@@ -1,11 +1,10 @@
 [web] DELETE /api/accounting/matching-rules/{id:Guid}  (Cirrus.Api.Controllers.Accounting.Setup.MatchingRulesController.Delete)  [L200–L208] status=200 [auth=user]
-  └─ calls MatchingRuleRepository.Remove [L205]
-  └─ calls MatchingRuleRepository.WriteQuery [L203]
+  └─ calls MatchingRuleRepository (methods: Remove,WriteQuery) [L205]
   └─ delete MatchingRule [L205]
     └─ reads_from MatchingRules
   └─ write MatchingRule [L203]
     └─ reads_from MatchingRules
-  └─ uses_service IControlledRepository<MatchingRule>
-    └─ method WriteQuery [L203]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=2, reads=0)
+      └─ MatchingRule writes=2 reads=0
 

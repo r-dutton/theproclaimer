@@ -3,7 +3,9 @@
   └─ calls JobRepository.ReadQuery [L86]
   └─ query Job [L86]
     └─ reads_from Jobs
-  └─ uses_service IControlledRepository<Job>
-    └─ method ReadQuery [L86]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Job writes=0 reads=1
+    └─ mappings 1
+      └─ DeliverableCirrusLinkDto
 

@@ -4,7 +4,9 @@
   └─ calls DocumentTypeRepository.ReadQuery [L41]
   └─ query DocumentType [L41]
     └─ reads_from DocumentTypes
-  └─ uses_service IControlledRepository<DocumentType>
-    └─ method ReadQuery [L41]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DocumentType writes=0 reads=1
+    └─ mappings 1
+      └─ DocumentTypeDto
 

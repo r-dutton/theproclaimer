@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method Disconnect [L202]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.Disconnect [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

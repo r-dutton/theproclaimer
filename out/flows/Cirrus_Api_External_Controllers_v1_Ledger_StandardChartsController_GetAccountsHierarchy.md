@@ -6,4 +6,9 @@
         └─ uses_service CirrusClient
           └─ method Get [L26]
             └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ clients 1
+      └─ CirrusClient
+    └─ services 1
+      └─ ICirrusProxyService
 

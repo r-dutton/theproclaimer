@@ -2,7 +2,7 @@
   └─ calls TaxAgentRepository.WriteQuery [L62]
   └─ write TaxAgent [L62]
     └─ reads_from TaxAgents
-  └─ uses_service IControlledRepository<TaxAgent>
-    └─ method WriteQuery [L62]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ TaxAgent writes=1 reads=0
 

@@ -5,4 +5,9 @@
   └─ uses_service TenantRepository
     └─ method WriteTable [L193]
       └─ implementation Dataverse.Tenants.Data.TenantRepository.WriteTable [L15-L180]
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Tenant writes=1 reads=0
+    └─ services 1
+      └─ TenantRepository
 

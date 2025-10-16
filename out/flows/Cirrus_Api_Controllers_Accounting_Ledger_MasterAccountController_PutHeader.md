@@ -2,7 +2,7 @@
   └─ calls MasterAccountRepository.WriteQuery [L45]
   └─ write MasterAccount [L45]
     └─ reads_from MasterAccounts
-  └─ uses_service IControlledRepository<MasterAccount>
-    └─ method WriteQuery [L45]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ MasterAccount writes=1 reads=0
 

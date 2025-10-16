@@ -2,7 +2,7 @@
   └─ calls OfficeUserRepository.WriteQuery [L87]
   └─ write OfficeUser [L87]
     └─ reads_from OfficeUsers
-  └─ uses_service IControlledRepository<OfficeUser>
-    └─ method WriteQuery [L87]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ OfficeUser writes=1 reads=0
 

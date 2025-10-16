@@ -5,7 +5,9 @@
   └─ calls FooterTemplateRepository.ReadQuery [L37]
   └─ query FooterTemplate [L37]
     └─ reads_from ReportFooterTemplates
-  └─ uses_service IControlledRepository<FooterTemplate>
-    └─ method ReadQuery [L37]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ FooterTemplate writes=0 reads=1
+    └─ mappings 1
+      └─ FooterTemplateDto
 

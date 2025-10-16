@@ -1,27 +1,27 @@
 [web] PUT /api/connections/reportance/trialbalance  (Workpapers.Next.API.Controllers.Connections.ReportanceController.GetTrialBalance)  [L68–L74] status=200
-  └─ sends_request GetTrialBalanceQuery [L71]
+  └─ sends_request GetTrialBalanceQuery -> GetTrialBalanceQueryHandler [L71]
     └─ handled_by Cirrus.Api.External.Queries.GetTrialBalanceQueryHandler.Handle [L44–L156]
-      └─ uses_service GetAccountsQuery
-        └─ method Execute [L73]
-          └─ implementation Cirrus.Connections.DataGet.Queries.GetAccountsQuery.Execute [L9-L23]
-            └─ handled_by Cirrus.Connections.DataGet.Queries.GetAccountsQueryHandler.Handle [L25–L59]
-              └─ uses_client DataGetClient [L40]
-                └─ calls GetAccounts (GET /api/accounting-file/{fileId}/accounts?apiType={*}&password={*}&username={*}, method=GetAccountsAsync, target=DataGet.Api, query=apiType={*}&password={*}&username={*}) [L65]
-                  └─ target_service DataGet.Api
-                    └─ [web] GET /api/accounting-file/{fileId}/accounts  (DataGet.Api.Controllers.Connections.AccountingFileController.GetAccounts)  [L44–L52] status=200 [auth=Authentication.MachineToMachinePolicy]
-                      └─ sends_request GetAccountsQuery [L48]
-                        └─ handled_by Cirrus.Connections.DataGet.Queries.GetAccountsQueryHandler.Handle [L25–L59]
-              └─ uses_service DatagetFileIdService
-                └─ method GetFileIdFromSource [L38]
-                  └─ implementation Cirrus.Connections.DataGet.Services.DatagetFileIdService.GetFileIdFromSource [L14-L37]
-              └─ uses_service DataGetClient
-                └─ method GetAccountsAsync [L40]
-                  └─ implementation Cirrus.Connections.DataGet.Client.DataGetClient.GetAccountsAsync [L15-L302]
-                    └─ calls GetAccounts [L106]
       └─ uses_service GetTrialBalanceForDatesQuery
         └─ method Execute [L93]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<Dataset>
+          └─ resolves_request Workpapers.Next.ApplicationService.Queries.LedgerReports.GetTrialBalanceForDatesQuery.Execute
+            └─ handled_by Workpapers.Next.ApplicationService.Queries.LedgerReports.GetTrialBalanceForDatesQueryHandler.Handle [L45–L251]
+      └─ uses_service GetAccountsQuery
+        └─ method Execute [L73]
+          └─ resolves_request Cirrus.Connections.DataGet.Queries.GetAccountsQuery.Execute
+            └─ handled_by Cirrus.Connections.DataGet.Queries.GetAccountsQueryHandler.Handle [L25–L59]
+          └─ resolves_request DataGet.Connections.App.Queries.GetAccountsQuery.Execute
+          └─ resolves_request DataGet.Connections.External.Bgl360.Api.Queries.GetAccountsQuery.Execute
+          └─ +4 additional_requests elided
+      └─ uses_service IControlledRepository<Dataset> (Scoped (inferred))
         └─ method ReadQuery [L65]
-          └─ ... (no implementation details available)
+          └─ implementation Cirrus.Data.Repository.Accounting.DatasetRepository.ReadQuery
+  └─ impact_summary
+    └─ requests 3
+      └─ GetAccountsQuery
+      └─ GetTrialBalanceForDatesQuery
+      └─ GetTrialBalanceQuery
+    └─ handlers 3
+      └─ GetAccountsQueryHandler
+      └─ GetTrialBalanceForDatesQueryHandler
+      └─ GetTrialBalanceQueryHandler
 

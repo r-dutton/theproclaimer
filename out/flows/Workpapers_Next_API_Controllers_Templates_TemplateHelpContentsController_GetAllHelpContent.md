@@ -4,7 +4,9 @@
   └─ calls TemplateHelpContentRepository.ReadQuery [L53]
   └─ query TemplateHelpContent [L53]
     └─ reads_from TemplateHelpContents
-  └─ uses_service IControlledRepository<TemplateHelpContent>
-    └─ method ReadQuery [L53]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ TemplateHelpContent writes=0 reads=1
+    └─ mappings 1
+      └─ TemplateHelpContentDto
 

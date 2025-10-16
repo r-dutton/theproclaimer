@@ -2,7 +2,7 @@
   └─ calls DisclosureTemplateRepository.WriteQuery [L171]
   └─ write DisclosureTemplate [L171]
     └─ reads_from DisclosureTemplates
-  └─ uses_service IControlledRepository<DisclosureTemplate>
-    └─ method WriteQuery [L171]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ DisclosureTemplate writes=1 reads=0
 

@@ -4,7 +4,9 @@
   └─ calls BinderStatusRequirementsRepository.ReadQuery [L36]
   └─ query BinderStatusRequirements [L36]
     └─ reads_from BinderStatusRequirements
-  └─ uses_service IControlledRepository<BinderStatusRequirements>
-    └─ method ReadQuery [L36]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ BinderStatusRequirements writes=0 reads=1
+    └─ mappings 1
+      └─ BinderStatusRequirementsDto
 

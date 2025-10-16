@@ -4,7 +4,9 @@
   └─ calls BinderDocumentDefaultsRepository.ReadQuery [L53]
   └─ query BinderDocumentDefaults [L53]
     └─ reads_from BinderDocumentDefaults
-  └─ uses_service IControlledRepository<BinderDocumentDefaults>
-    └─ method ReadQuery [L53]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ BinderDocumentDefaults writes=0 reads=1
+    └─ mappings 1
+      └─ BinderDocumentDefaultsDto
 

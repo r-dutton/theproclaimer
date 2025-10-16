@@ -2,7 +2,7 @@
   └─ calls ReportingSuiteRepository.Add [L110]
   └─ insert ReportingSuite [L110]
     └─ reads_from PolicySuites
-  └─ uses_service IControlledRepository<ReportingSuite>
-    └─ method Add [L110]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ ReportingSuite writes=1 reads=0
 

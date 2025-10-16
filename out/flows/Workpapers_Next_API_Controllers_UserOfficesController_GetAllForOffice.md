@@ -2,5 +2,10 @@
   └─ maps_to UserOfficeDto [L67]
   └─ uses_service UnitOfWork
     └─ method Table [L67]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ UserOfficeDto
 

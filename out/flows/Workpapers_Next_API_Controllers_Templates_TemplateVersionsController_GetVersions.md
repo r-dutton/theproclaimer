@@ -2,5 +2,10 @@
   └─ maps_to TemplateVersionDto [L66]
   └─ uses_service UnitOfWork
     └─ method Table [L66]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ TemplateVersionDto
 

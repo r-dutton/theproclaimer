@@ -4,7 +4,9 @@
   └─ calls BinderExportDefaultsRepository.ReadQuery [L36]
   └─ query BinderExportDefaults [L36]
     └─ reads_from BinderExportDefaults
-  └─ uses_service IControlledRepository<BinderExportDefaults>
-    └─ method ReadQuery [L36]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ BinderExportDefaults writes=0 reads=1
+    └─ mappings 1
+      └─ BinderExportDefaultsDto
 

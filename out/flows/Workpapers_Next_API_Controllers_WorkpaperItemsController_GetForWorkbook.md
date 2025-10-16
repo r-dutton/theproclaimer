@@ -2,5 +2,10 @@
   └─ maps_to WorkpaperItemDto [L98]
   └─ uses_service UnitOfWork
     └─ method Table [L98]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ WorkpaperItemDto
 

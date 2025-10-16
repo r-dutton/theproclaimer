@@ -3,7 +3,14 @@
   └─ calls OfficeRepository.ReadQuery [L142]
   └─ query Office [L142]
     └─ reads_from Offices
-  └─ uses_service IControlledRepository<Office>
+  └─ uses_service OfficeRepository
     └─ method ReadQuery [L142]
-      └─ ... (no implementation details available)
+      └─ implementation Dataverse.Data.Repository.Firm.OfficeRepository.ReadQuery [L8-L41]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Office writes=0 reads=1
+    └─ services 1
+      └─ OfficeRepository
+    └─ mappings 1
+      └─ OfficeUserWithUserDto
 

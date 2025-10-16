@@ -3,7 +3,9 @@
   └─ calls JobTypeRepository.ReadQuery [L105]
   └─ query JobType [L105]
     └─ reads_from JobTypes
-  └─ uses_service IControlledRepository<JobType>
-    └─ method ReadQuery [L105]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ JobType writes=0 reads=1
+    └─ mappings 1
+      └─ EntityAuditDto
 

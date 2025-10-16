@@ -2,7 +2,7 @@
   └─ calls MatchingRuleRepository.WriteQuery [L164]
   └─ write MatchingRule [L164]
     └─ reads_from MatchingRules
-  └─ uses_service IControlledRepository<MatchingRule>
-    └─ method WriteQuery [L164]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ MatchingRule writes=1 reads=0
 

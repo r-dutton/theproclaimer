@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method GetDocumentDownloadUrlAsync [L109]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.GetDocumentDownloadUrlAsync [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

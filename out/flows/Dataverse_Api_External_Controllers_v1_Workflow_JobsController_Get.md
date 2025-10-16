@@ -6,7 +6,9 @@
   └─ calls JobRepository.ReadQuery [L55]
   └─ query Job [L55]
     └─ reads_from Jobs
-  └─ uses_service IControlledRepository<Job>
-    └─ method ReadQuery [L55]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Job writes=0 reads=1
+    └─ mappings 1
+      └─ JobDto
 

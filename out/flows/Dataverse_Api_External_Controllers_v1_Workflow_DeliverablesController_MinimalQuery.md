@@ -2,7 +2,7 @@
   └─ calls DeliverableRepository.ReadQuery [L73]
   └─ query Deliverable [L73]
     └─ reads_from Deliverables
-  └─ uses_service IControlledRepository<Deliverable>
-    └─ method ReadQuery [L73]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Deliverable writes=0 reads=1
 

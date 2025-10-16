@@ -4,7 +4,9 @@
   └─ calls BinderAutomationRuleRepository.ReadQuery [L44]
   └─ query BinderAutomationRule [L44]
     └─ reads_from BinderAutomationRules
-  └─ uses_service IControlledRepository<BinderAutomationRule>
-    └─ method ReadQuery [L44]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ BinderAutomationRule writes=0 reads=1
+    └─ mappings 1
+      └─ BinderAutomationRuleDto
 

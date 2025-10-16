@@ -2,7 +2,7 @@
   └─ calls WebhookRepository.WriteQuery [L69]
   └─ write Webhook [L69]
     └─ reads_from Webhooks
-  └─ uses_service IControlledRepository<Webhook>
-    └─ method WriteQuery [L69]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Webhook writes=1 reads=0
 

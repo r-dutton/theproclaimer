@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method VerifyConnection [L218]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.VerifyConnection [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

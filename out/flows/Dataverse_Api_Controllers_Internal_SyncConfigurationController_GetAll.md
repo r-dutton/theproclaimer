@@ -4,7 +4,9 @@
   └─ calls SyncConfigurationRepository.ReadQuery [L47]
   └─ query SyncConfiguration [L47]
     └─ reads_from SyncConfigurations
-  └─ uses_service IControlledRepository<SyncConfiguration>
-    └─ method ReadQuery [L47]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ SyncConfiguration writes=0 reads=1
+    └─ mappings 1
+      └─ SyncConfigurationInsecureDto
 

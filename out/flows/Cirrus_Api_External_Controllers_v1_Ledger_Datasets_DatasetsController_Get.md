@@ -4,7 +4,9 @@
     └─ automapper.registration ExternalApiMappingProfile (Dataset->DatasetDto) [L64]
   └─ calls DatasetRepository.ReadQuery [L82]
   └─ query Dataset [L82]
-  └─ uses_service IControlledRepository<Dataset>
-    └─ method ReadQuery [L82]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Dataset writes=0 reads=1
+    └─ mappings 1
+      └─ DatasetDto
 

@@ -2,4 +2,7 @@
   └─ uses_service ApiService (SingleInstance)
     └─ method GetApiMethods [L40]
       └─ implementation Cirrus.ApplicationService.Accounting.Services.ApiService.GetApiMethods [L14-L75]
+  └─ impact_summary
+    └─ services 1
+      └─ ApiService
 

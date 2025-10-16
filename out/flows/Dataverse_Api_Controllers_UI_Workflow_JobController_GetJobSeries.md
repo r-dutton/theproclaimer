@@ -2,7 +2,7 @@
   └─ calls JobRepository.ReadQuery [L121]
   └─ query Job [L121]
     └─ reads_from Jobs
-  └─ uses_service IControlledRepository<Job>
-    └─ method ReadQuery [L121]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Job writes=0 reads=1
 

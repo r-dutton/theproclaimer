@@ -4,7 +4,9 @@
   └─ calls StandardAccountRepository.ReadQuery [L80]
   └─ query StandardAccount [L80]
     └─ reads_from StandardAccounts
-  └─ uses_service IControlledRepository<StandardAccount>
-    └─ method ReadQuery [L80]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ StandardAccount writes=0 reads=1
+    └─ mappings 1
+      └─ StandardAccountRecommendationDto
 

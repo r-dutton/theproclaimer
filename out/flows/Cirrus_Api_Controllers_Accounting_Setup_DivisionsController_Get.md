@@ -4,7 +4,9 @@
   └─ calls DivisionRepository.ReadQuery [L44]
   └─ query Division [L44]
     └─ reads_from Divisions
-  └─ uses_service IControlledRepository<Division>
-    └─ method ReadQuery [L44]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Division writes=0 reads=1
+    └─ mappings 1
+      └─ DivisionDto
 

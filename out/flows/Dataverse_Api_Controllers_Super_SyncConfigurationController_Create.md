@@ -3,10 +3,9 @@
   └─ calls SyncConfigurationRepository.Add [L122]
   └─ insert SyncConfiguration [L122]
     └─ reads_from SyncConfigurations
-  └─ uses_service IControlledRepository<SyncConfiguration>
-    └─ method Add [L122]
-      └─ ... (no implementation details available)
-  └─ uses_service IMapper
-    └─ method Map [L124]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ SyncConfiguration writes=1 reads=0
+    └─ mappings 1
+      └─ SyncConfigurationLightDto
 

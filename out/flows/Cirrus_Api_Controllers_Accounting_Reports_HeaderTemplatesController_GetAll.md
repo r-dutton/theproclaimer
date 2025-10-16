@@ -4,7 +4,9 @@
   └─ calls HeaderTemplateRepository.ReadQuery [L57]
   └─ query HeaderTemplate [L57]
     └─ reads_from ReportHeaderTemplates
-  └─ uses_service IControlledRepository<HeaderTemplate>
-    └─ method ReadQuery [L57]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ HeaderTemplate writes=0 reads=1
+    └─ mappings 1
+      └─ HeaderTemplateLightDto
 

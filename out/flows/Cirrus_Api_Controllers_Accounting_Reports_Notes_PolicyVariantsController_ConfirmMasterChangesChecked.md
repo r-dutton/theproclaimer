@@ -2,7 +2,7 @@
   └─ calls PolicyVariantRepository.WriteQuery [L138]
   └─ write PolicyVariant [L138]
     └─ reads_from PolicyVariants
-  └─ uses_service IControlledRepository<PolicyVariant>
-    └─ method WriteQuery [L138]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ PolicyVariant writes=1 reads=0
 

@@ -2,7 +2,7 @@
   └─ calls BinderStatusRequirementsRepository.WriteQuery [L55]
   └─ write BinderStatusRequirements [L55]
     └─ reads_from BinderStatusRequirements
-  └─ uses_service IControlledRepository<BinderStatusRequirements>
-    └─ method WriteQuery [L55]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderStatusRequirements writes=1 reads=0
 

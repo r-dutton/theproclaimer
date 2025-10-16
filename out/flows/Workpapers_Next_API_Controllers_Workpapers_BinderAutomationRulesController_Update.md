@@ -2,7 +2,7 @@
   └─ calls BinderAutomationRuleRepository.WriteQuery [L73]
   └─ write BinderAutomationRule [L73]
     └─ reads_from BinderAutomationRules
-  └─ uses_service IControlledRepository<BinderAutomationRule>
-    └─ method WriteQuery [L73]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderAutomationRule writes=1 reads=0
 

@@ -2,7 +2,7 @@
   └─ calls TaxAgentRepository.ReadQuery [L35]
   └─ query TaxAgent [L35]
     └─ reads_from TaxAgents
-  └─ uses_service IControlledRepository<TaxAgent>
-    └─ method ReadQuery [L35]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ TaxAgent writes=0 reads=1
 

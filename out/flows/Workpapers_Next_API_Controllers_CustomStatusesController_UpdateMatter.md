@@ -2,4 +2,7 @@
   └─ uses_service IControlledRepository<MatterStatus> (AddScoped)
     └─ method WriteQuery [L125]
       └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ services 1
+      └─ IControlledRepository<MatterStatus>
 

@@ -3,7 +3,9 @@
   └─ calls DocumentRepository.ReadQuery [L90]
   └─ query Document [L90]
     └─ reads_from Documents
-  └─ uses_service IControlledRepository<Document>
-    └─ method ReadQuery [L90]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Document writes=0 reads=1
+    └─ mappings 1
+      └─ DocumentMinimalDto
 

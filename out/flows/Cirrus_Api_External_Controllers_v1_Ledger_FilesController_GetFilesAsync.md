@@ -2,7 +2,7 @@
   └─ calls FileRepository.ReadQuery [L53]
   └─ query File [L53]
     └─ reads_from Files
-  └─ uses_service IControlledRepository<File>
-    └─ method ReadQuery [L53]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ File writes=0 reads=1
 

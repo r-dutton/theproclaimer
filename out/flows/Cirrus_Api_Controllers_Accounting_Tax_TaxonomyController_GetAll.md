@@ -3,4 +3,9 @@
   └─ uses_service IReadRepository (InstancePerLifetimeScope)
     └─ method Table [L39]
       └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ services 1
+      └─ IReadRepository
+    └─ mappings 1
+      └─ TaxonomyLightDto
 

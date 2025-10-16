@@ -4,7 +4,9 @@
   └─ calls ReportStyleRepository.ReadQuery [L62]
   └─ query ReportStyle [L62]
     └─ reads_from ReportStyles
-  └─ uses_service IControlledRepository<ReportStyle>
-    └─ method ReadQuery [L62]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ReportStyle writes=0 reads=1
+    └─ mappings 1
+      └─ ReportStyleLightDto
 

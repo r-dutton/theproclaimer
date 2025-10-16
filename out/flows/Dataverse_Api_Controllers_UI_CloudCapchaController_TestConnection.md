@@ -2,4 +2,7 @@
   └─ uses_service IDataGetCloudCapchaService (AddTransient)
     └─ method TestConnection [L49]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetCloudCapchaService.TestConnection [L13-L49]
+  └─ impact_summary
+    └─ services 1
+      └─ IDataGetCloudCapchaService
 

@@ -4,7 +4,9 @@
   └─ calls ArchivedWorkpaperRecordTemplateMappingRepository.ReadQuery [L74]
   └─ query ArchivedWorkpaperRecordTemplateMapping [L74]
     └─ reads_from ArchivedWorkpaperRecordTemplateMappings
-  └─ uses_service IControlledRepository<ArchivedWorkpaperRecordTemplateMapping>
-    └─ method ReadQuery [L74]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ArchivedWorkpaperRecordTemplateMapping writes=0 reads=1
+    └─ mappings 1
+      └─ ArchivedWorkpaperRecordTemplateMappingLightDto
 

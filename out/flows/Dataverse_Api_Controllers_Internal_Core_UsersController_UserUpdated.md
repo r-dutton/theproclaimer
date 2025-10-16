@@ -2,10 +2,14 @@
   └─ maps_to UserWithIdentityInfoDto [L191]
   └─ calls UserRepository.WriteQuery [L186]
   └─ write User [L186]
-  └─ uses_service IControlledRepository<User>
+  └─ uses_service UserRepository
     └─ method WriteQuery [L186]
-      └─ ... (no implementation details available)
-  └─ uses_service IMapper
-    └─ method Map [L191]
-      └─ ... (no implementation details available)
+      └─ implementation Dataverse.Data.Repository.Users.UserRepository.WriteQuery [L8-L51]
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ User writes=1 reads=0
+    └─ services 1
+      └─ UserRepository
+    └─ mappings 1
+      └─ UserWithIdentityInfoDto
 

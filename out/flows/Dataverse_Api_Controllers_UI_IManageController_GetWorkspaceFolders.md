@@ -4,10 +4,14 @@
   └─ calls IntegrationSettingsRepository.ReadQuery [L203]
   └─ query IntegrationSettings [L203]
     └─ reads_from IntegrationSettingss
-  └─ uses_service IControlledRepository<IntegrationSettings>
-    └─ method ReadQuery [L203]
-      └─ ... (no implementation details available)
   └─ uses_service IDatagetImanageService (AddTransient)
     └─ method GetWorkspaceFoldersAsync [L209]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetImanageService.GetWorkspaceFoldersAsync [L19-L225]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ IntegrationSettings writes=0 reads=1
+    └─ services 1
+      └─ IDatagetImanageService
+    └─ mappings 1
+      └─ IntegrationSettingsDto
 

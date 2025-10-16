@@ -2,7 +2,7 @@
   └─ calls DocumentTagRepository.ReadQuery [L33]
   └─ query DocumentTag [L33]
     └─ reads_from DocumentTags
-  └─ uses_service IControlledRepository<DocumentTag>
-    └─ method ReadQuery [L33]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DocumentTag writes=0 reads=1
 

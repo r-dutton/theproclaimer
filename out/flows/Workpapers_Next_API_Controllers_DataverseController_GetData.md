@@ -5,37 +5,44 @@
         └─ uses_service TenantIdentificationService
           └─ method GetCurrentTenant [L20]
             └─ implementation Workpapers.Next.ApplicationService.Services.TenantIdentificationService.GetCurrentTenant [L15-L131]
-  └─ sends_request DataverseAuditQuery [L376]
+              └─ uses_service RequestProcessor
+                └─ method GetCatalogByFirmId [L104]
+                  └─ resolves_request Workpapers.Next.Services.Features.Requests.RequestProcessor.GetCatalogByFirmId
+                  └─ resolves_request Cirrus.Services.Features.Requests.RequestProcessor.GetCatalogByFirmId
+                  └─ resolves_request DataGet.Services.Features.Requests.RequestProcessor.GetCatalogByFirmId
+                  └─ +1 additional_requests elided
+              └─ uses_service FirmLightDto
+                └─ method AssignActiveTenant [L77]
+                  └─ implementation Workpapers.Next.DTOs.FirmLightDto.AssignActiveTenant [L8-L17]
+              └─ uses_cache IMemoryCache.GetOrCreate [read] [L116]
+  └─ sends_request DataverseAuditQuery -> DataverseAuditQueryHandler [L376]
     └─ handled_by Cirrus.ApplicationService.Firm.Queries.DataverseAuditQueryHandler.Handle [L26–L69]
       └─ maps_to DataverseAuditDto [L63]
         └─ automapper.registration CirrusMappingProfile (Entity->DataverseAuditDto) [L178]
-      └─ maps_to DataverseAuditDto [L62]
-        └─ automapper.registration CirrusMappingProfile (Client->DataverseAuditDto) [L162]
-        └─ automapper.registration DataverseMappingProfile (Client->DataverseAuditDto) [L81]
-      └─ maps_to DataverseAuditDto [L60]
-        └─ automapper.registration DataverseMappingProfile (User->DataverseAuditDto) [L78]
-        └─ automapper.registration CirrusMappingProfile (User->DataverseAuditDto) [L123]
-      └─ maps_to DataverseAuditDto [L58]
-        └─ automapper.registration CirrusMappingProfile (Team->DataverseAuditDto) [L143]
-      └─ maps_to DataverseAuditDto [L56]
-        └─ automapper.registration CirrusMappingProfile (Office->DataverseAuditDto) [L135]
-        └─ automapper.registration DataverseMappingProfile (Office->DataverseAuditDto) [L79]
-      └─ uses_service IControlledRepository<Client>
-        └─ method ReadQuery [L62]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<Entity>
+      └─ uses_service IControlledRepository<Entity> (Scoped (inferred))
         └─ method ReadQuery [L63]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<Office>
-        └─ method ReadQuery [L56]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<Team>
-        └─ method ReadQuery [L58]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<User>
+          └─ implementation Cirrus.Data.Repository.Firm.EntityRepository.ReadQuery
+      └─ uses_service IControlledRepository<Client> (Scoped (inferred))
+        └─ method ReadQuery [L62]
+          └─ implementation Cirrus.Data.Repository.Firm.ClientRepository.ReadQuery
+      └─ uses_service IControlledRepository<User> (Scoped (inferred))
         └─ method ReadQuery [L60]
-          └─ ... (no implementation details available)
-      └─ uses_service IMapper
-        └─ method ConfigurationProvider [L56]
-          └─ ... (no implementation details available)
+          └─ implementation Cirrus.Data.Repository.Firm.UserRepository.ReadQuery
+      └─ uses_service IControlledRepository<Team> (Scoped (inferred))
+        └─ method ReadQuery [L58]
+          └─ implementation Cirrus.Data.Repository.Firm.TeamRepository.ReadQuery
+      └─ uses_service IControlledRepository<Office> (Scoped (inferred))
+        └─ method ReadQuery [L56]
+          └─ implementation Cirrus.Data.Repository.Firm.OfficeRepository.ReadQuery
+  └─ impact_summary
+    └─ services 1
+      └─ TenantService
+    └─ requests 1
+      └─ DataverseAuditQuery
+    └─ handlers 1
+      └─ DataverseAuditQueryHandler
+    └─ caches 1
+      └─ IMemoryCache
+    └─ mappings 1
+      └─ DataverseAuditDto
 

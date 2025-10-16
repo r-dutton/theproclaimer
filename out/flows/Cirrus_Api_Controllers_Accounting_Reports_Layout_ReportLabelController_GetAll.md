@@ -4,7 +4,9 @@
   └─ calls ReportLabelRepository.ReadQuery [L45]
   └─ query ReportLabel [L45]
     └─ reads_from ReportLabels
-  └─ uses_service IControlledRepository<ReportLabel>
-    └─ method ReadQuery [L45]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ ReportLabel writes=0 reads=1
+    └─ mappings 1
+      └─ ReportLabelWithAccountDto
 

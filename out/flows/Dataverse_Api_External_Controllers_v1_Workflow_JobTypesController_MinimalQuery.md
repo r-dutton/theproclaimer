@@ -2,7 +2,7 @@
   └─ calls JobTypeRepository.ReadQuery [L73]
   └─ query JobType [L73]
     └─ reads_from JobTypes
-  └─ uses_service IControlledRepository<JobType>
-    └─ method ReadQuery [L73]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ JobType writes=0 reads=1
 

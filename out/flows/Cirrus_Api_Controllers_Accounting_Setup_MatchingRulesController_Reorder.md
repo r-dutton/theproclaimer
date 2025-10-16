@@ -1,11 +1,10 @@
 [web] PUT /api/accounting/matching-rules/{id}/reorder  (Cirrus.Api.Controllers.Accounting.Setup.MatchingRulesController.Reorder)  [L177–L195] status=200 [auth=user,admin]
-  └─ calls MatchingRuleRepository.WriteQuery [L186]
-  └─ calls MatchingRuleRepository.ReadQuery [L180]
-  └─ query MatchingRule [L180]
-    └─ reads_from MatchingRules
+  └─ calls MatchingRuleRepository (methods: WriteQuery,ReadQuery) [L186]
   └─ write MatchingRule [L186]
     └─ reads_from MatchingRules
-  └─ uses_service IControlledRepository<MatchingRule>
-    └─ method ReadQuery [L180]
-      └─ ... (no implementation details available)
+  └─ query MatchingRule [L180]
+    └─ reads_from MatchingRules
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=1)
+      └─ MatchingRule writes=1 reads=1
 

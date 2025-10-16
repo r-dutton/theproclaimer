@@ -2,7 +2,7 @@
   └─ calls JobStatusRepository.WriteQuery [L119]
   └─ write JobStatus [L119]
     └─ reads_from DVS_JobStatuses
-  └─ uses_service IControlledRepository<JobStatus>
-    └─ method WriteQuery [L119]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ JobStatus writes=1 reads=0
 

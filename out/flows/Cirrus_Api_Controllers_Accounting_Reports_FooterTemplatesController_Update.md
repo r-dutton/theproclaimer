@@ -2,7 +2,7 @@
   └─ calls FooterTemplateRepository.WriteQuery [L63]
   └─ write FooterTemplate [L63]
     └─ reads_from ReportFooterTemplates
-  └─ uses_service IControlledRepository<FooterTemplate>
-    └─ method WriteQuery [L63]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ FooterTemplate writes=1 reads=0
 

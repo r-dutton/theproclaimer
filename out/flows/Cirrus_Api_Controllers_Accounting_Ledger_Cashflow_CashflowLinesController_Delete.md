@@ -1,32 +1,47 @@
 [web] DELETE /api/accounting/ledger/cashflow/lines/{id}  (Cirrus.Api.Controllers.Accounting.Ledger.Cashflow.CashflowLinesController.Delete)  [L116–L122] status=200 [auth=Authentication.UserPolicy]
-  └─ calls CashflowLineRepository.Remove [L121]
-  └─ calls CashflowLineRepository.WriteQuery [L119]
+  └─ calls CashflowLineRepository (methods: Remove,WriteQuery) [L121]
   └─ delete CashflowLine [L121]
     └─ reads_from CashflowLines
   └─ write CashflowLine [L119]
     └─ reads_from CashflowLines
-  └─ uses_service IControlledRepository<CashflowLine>
-    └─ method WriteQuery [L119]
-      └─ ... (no implementation details available)
-  └─ sends_request CanIAccessFileQuery [L120]
+  └─ sends_request CanIAccessFileQuery -> CanIAccessFileQueryHandler [L120]
     └─ handled_by Cirrus.ApplicationService.Firm.Queries.CanIAccessFileQueryHandler.Handle [L43–L101]
-      └─ uses_service IRequestInfoService (AddScoped)
-        └─ method IsValidServiceAccountRequest [L66]
-          └─ implementation IRequestInfoService.IsValidServiceAccountRequest [L20-L20]
-          └─ ... (no implementation details available)
       └─ uses_service IRequestProcessor (InstancePerDependency)
         └─ method ProcessAsync [L90]
-          └─ implementation IRequestProcessor.ProcessAsync [L9-L9]
-          └─ ... (no implementation details available)
-      └─ uses_service ITenantService (AddScoped)
-        └─ method GetCurrentTenant [L68]
-          └─ implementation ITenantService.GetCurrentTenant [L14-L14]
-          └─ ... (no implementation details available)
+          └─ implementation DataGet.Services.Features.Requests.RequestProcessor.ProcessAsync [L7-L35]
+            └─ ... (no dispatches detected)
       └─ uses_service IUserService (InstancePerLifetimeScope)
         └─ method GetUserId [L68]
-          └─ implementation IUserService.GetUserId [L18-L18]
-          └─ ... (no implementation details available)
+          └─ implementation Workpapers.Next.ApplicationService.Services.UserService.GetUserId [L20-L295]
+            └─ uses_service User
+              └─ method GetUserId [L67]
+                └─ implementation Workpapers.Next.DomainModel.Model.Firms.User.GetUserId [L18-L368]
+            └─ uses_service Guid?
+              └─ method GetUserId [L64]
+                └─ ... (no implementation details available)
+            └─ uses_cache IMemoryCache.GetOrCreate [read] [L280]
+      └─ uses_service ITenantService (AddScoped)
+        └─ method GetCurrentTenant [L68]
+          └─ implementation Dataverse.Services.Features.Tenants.TenantService.GetCurrentTenant [L6-L27]
+            └─ uses_service TenantIdentificationService
+              └─ method GetCurrentTenant [L20]
+                └─ implementation Dataverse.Tenants.Tenants.TenantIdentificationService.GetCurrentTenant [L27-L149]
+                  └─ uses_cache IMemoryCache.GetOrCreateAsync [read] [L117]
+                  └─ uses_cache IMemoryCache.GetOrCreate [read] [L96]
+                  └─ logs ILogger<ITenantIdentificationService> [Warning] [L53]
+      └─ uses_service IRequestInfoService (AddScoped)
+        └─ method IsValidServiceAccountRequest [L66]
+          └─ implementation Dataverse.Services.Features.RequestInfoService.IsValidServiceAccountRequest [L11-L92]
       └─ uses_cache IDistributedCache.SetRecordAsync [write] [L79]
       └─ uses_cache IDistributedCache.DoesRecordExistAsync [access] [L71]
       └─ uses_cache IDistributedCache.CreateAccessKey [write] [L68]
+  └─ impact_summary
+    └─ entities 1 (writes=2, reads=0)
+      └─ CashflowLine writes=2 reads=0
+    └─ requests 1
+      └─ CanIAccessFileQuery
+    └─ handlers 1
+      └─ CanIAccessFileQueryHandler
+    └─ caches 1
+      └─ IMemoryCache
 

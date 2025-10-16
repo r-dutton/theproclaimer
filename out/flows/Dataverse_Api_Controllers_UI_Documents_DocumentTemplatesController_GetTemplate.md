@@ -4,7 +4,9 @@
   └─ calls DocumentTemplateRepository.ReadQuery [L93]
   └─ query DocumentTemplate [L93]
     └─ reads_from DocumentTemplates
-  └─ uses_service IControlledRepository<DocumentTemplate>
-    └─ method ReadQuery [L93]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DocumentTemplate writes=0 reads=1
+    └─ mappings 1
+      └─ DocumentTemplateDto
 

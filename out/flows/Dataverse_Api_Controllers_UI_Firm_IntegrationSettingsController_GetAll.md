@@ -4,7 +4,9 @@
   └─ calls IntegrationSettingsRepository.ReadQuery [L40]
   └─ query IntegrationSettings [L40]
     └─ reads_from IntegrationSettingss
-  └─ uses_service IControlledRepository<IntegrationSettings>
-    └─ method ReadQuery [L40]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ IntegrationSettings writes=0 reads=1
+    └─ mappings 1
+      └─ IntegrationSettingsDto
 

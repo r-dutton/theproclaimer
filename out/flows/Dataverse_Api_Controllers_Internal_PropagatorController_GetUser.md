@@ -3,7 +3,14 @@
     └─ automapper.registration DataverseMappingProfile (User->UserWithLicensesDto) [L90]
   └─ calls UserRepository.ReadQuery [L116]
   └─ query User [L116]
-  └─ uses_service IControlledRepository<User>
+  └─ uses_service UserRepository
     └─ method ReadQuery [L116]
-      └─ ... (no implementation details available)
+      └─ implementation Dataverse.Data.Repository.Users.UserRepository.ReadQuery [L8-L51]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ User writes=0 reads=1
+    └─ services 1
+      └─ UserRepository
+    └─ mappings 1
+      └─ UserWithLicensesDto
 

@@ -1,16 +1,19 @@
 [web] POST /api/internal/sync-configuration/{id:Guid}/notification  (Dataverse.Api.Controllers.Internal.SyncConfigurationController.Notification)  [L146–L150] status=201 [auth=Authentication.MachineToMachinePolicy,Authentication.RequireTenantIdPolicy]
-  └─ sends_request NotifyUserOfFailedSyncCommand [L149]
+  └─ sends_request NotifyUserOfFailedSyncCommand -> NotifyUserOfFailedSyncCommandHandler [L149]
     └─ handled_by Dataverse.ApplicationService.Commands.Connections.NotifyUserOfFailedSyncCommandHandler.Handle [L33–L97]
-      └─ uses_service BaseUrls
-        └─ method Site [L67]
-          └─ ... (no implementation details available)
+      └─ calls UserRepository.ReadQuery [L63]
       └─ uses_service EmailSender
         └─ method SendEmailAsync [L90]
           └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<SyncConfiguration>
+      └─ uses_service BaseUrls
+        └─ method Site [L67]
+          └─ ... (no implementation details available)
+      └─ uses_service IControlledRepository<SyncConfiguration> (Scoped (inferred))
         └─ method WriteQuery [L57]
-          └─ ... (no implementation details available)
-      └─ uses_service IControlledRepository<User>
-        └─ method ReadQuery [L63]
-          └─ ... (no implementation details available)
+          └─ implementation Dataverse.Data.Repository.Sync.SyncConfigurationRepository.WriteQuery
+  └─ impact_summary
+    └─ requests 1
+      └─ NotifyUserOfFailedSyncCommand
+    └─ handlers 1
+      └─ NotifyUserOfFailedSyncCommandHandler
 

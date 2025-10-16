@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiEliteService (AddTransient)
     └─ method GetAccessInfo [L45]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiEliteService.GetAccessInfo [L13-L53]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiEliteService
 

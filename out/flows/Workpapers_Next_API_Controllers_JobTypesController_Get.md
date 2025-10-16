@@ -4,7 +4,14 @@
   └─ calls JobTypeRepository.ReadQuery [L46]
   └─ query JobType [L46]
     └─ reads_from JobTypes
-  └─ uses_service IControlledRepository<JobType>
+  └─ uses_service JobTypeRepository
     └─ method ReadQuery [L46]
-      └─ ... (no implementation details available)
+      └─ implementation Workpapers.Next.Data.Repository.Workpapers.JobTypeRepository.ReadQuery [L8-L38]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ JobType writes=0 reads=1
+    └─ services 1
+      └─ JobTypeRepository
+    └─ mappings 1
+      └─ JobTypeLightDto
 

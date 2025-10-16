@@ -2,7 +2,12 @@
   └─ calls OfficeRepository.WriteQuery [L91]
   └─ write Office [L91]
     └─ reads_from Offices
-  └─ uses_service IControlledRepository<Office>
+  └─ uses_service OfficeRepository
     └─ method WriteQuery [L91]
-      └─ ... (no implementation details available)
+      └─ implementation Dataverse.Data.Repository.Firm.OfficeRepository.WriteQuery [L8-L41]
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Office writes=1 reads=0
+    └─ services 1
+      └─ OfficeRepository
 

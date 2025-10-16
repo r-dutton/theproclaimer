@@ -4,7 +4,9 @@
   └─ calls MatterTemplateRepository.ReadQuery [L61]
   └─ query MatterTemplate [L61]
     └─ reads_from MatterTemplates
-  └─ uses_service IControlledRepository<MatterTemplate>
-    └─ method ReadQuery [L61]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ MatterTemplate writes=0 reads=1
+    └─ mappings 1
+      └─ MatterTemplateDto
 

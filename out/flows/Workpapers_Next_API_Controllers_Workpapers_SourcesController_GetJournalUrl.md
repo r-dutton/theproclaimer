@@ -5,7 +5,9 @@
   └─ uses_service IConnectionApiService (AddSingleton)
     └─ method GetApiMethods [L472]
       └─ implementation Workpapers.Next.ApplicationService.Features.Connections.ConnectionApiService.GetApiMethods [L20-L75]
-  └─ uses_service IControlledRepository<Binder>
-    └─ method ReadQuery [L458]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Binder writes=0 reads=1
+    └─ services 1
+      └─ IConnectionApiService
 

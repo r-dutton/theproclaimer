@@ -3,4 +3,7 @@
   └─ uses_service CentralRepository
     └─ method ReadTable [L111]
       └─ implementation Cirrus.Central.Data.CentralRepository.ReadTable [L10-L55]
+  └─ impact_summary
+    └─ services 1
+      └─ CentralRepository
 

@@ -2,7 +2,7 @@
   └─ calls BinderAutomationRuleRepository.Add [L65]
   └─ insert BinderAutomationRule [L65]
     └─ reads_from BinderAutomationRules
-  └─ uses_service IControlledRepository<BinderAutomationRule>
-    └─ method Add [L65]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderAutomationRule writes=1 reads=0
 

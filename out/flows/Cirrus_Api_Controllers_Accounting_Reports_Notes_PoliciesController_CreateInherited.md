@@ -1,9 +1,8 @@
 [web] POST /api/accounting/reports/notes/policies/inherit  (Cirrus.Api.Controllers.Accounting.Reports.Notes.PoliciesController.CreateInherited)  [L164–L175] status=201 [auth=Authentication.UserPolicy]
-  └─ calls PolicyRepository.Add [L173]
-  └─ calls PolicyRepository.ReadQuery [L167]
+  └─ calls PolicyRepository (methods: Add,ReadQuery) [L173]
   └─ insert Policy [L173]
   └─ query Policy [L167]
-  └─ uses_service IControlledRepository<Policy>
-    └─ method ReadQuery [L167]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=1)
+      └─ Policy writes=1 reads=1
 

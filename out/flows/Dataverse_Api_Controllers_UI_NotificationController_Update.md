@@ -2,7 +2,7 @@
   └─ calls NotificationRepository.WriteQuery [L38]
   └─ write Notification [L38]
     └─ reads_from Notifications
-  └─ uses_service IControlledRepository<Notification>
-    └─ method WriteQuery [L38]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Notification writes=1 reads=0
 

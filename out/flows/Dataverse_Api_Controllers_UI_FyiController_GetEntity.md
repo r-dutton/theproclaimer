@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method GetEntityAsync [L153]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.GetEntityAsync [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

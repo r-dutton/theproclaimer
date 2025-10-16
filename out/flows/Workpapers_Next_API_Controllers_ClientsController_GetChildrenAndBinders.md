@@ -3,15 +3,17 @@
     └─ automapper.registration WorkpapersMappingProfile (Binder->BinderListItemClientDto) [L438]
   └─ maps_to ClientWithBindersDto [L95]
     └─ automapper.registration WorkpapersMappingProfile (Client->ClientWithBindersDto) [L72]
-  └─ calls ClientRepository.ReadQuery [L87]
+  └─ uses_client ClientRepository [L95]
+  └─ uses_client ClientRepository [L87]
   └─ calls BinderRepository.ReadQuery [L102]
   └─ query Binder [L102]
     └─ reads_from Binders
-  └─ query Client [L87]
-  └─ uses_service IControlledRepository<Binder>
-    └─ method ReadQuery [L102]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<Client>
-    └─ method ReadQuery [L87]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Binder writes=0 reads=1
+    └─ clients 1
+      └─ ClientRepository
+    └─ mappings 2
+      └─ BinderListItemClientDto
+      └─ ClientWithBindersDto
 

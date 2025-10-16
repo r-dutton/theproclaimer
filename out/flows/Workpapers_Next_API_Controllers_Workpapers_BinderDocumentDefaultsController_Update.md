@@ -2,7 +2,7 @@
   └─ calls BinderDocumentDefaultsRepository.WriteQuery [L80]
   └─ write BinderDocumentDefaults [L80]
     └─ reads_from BinderDocumentDefaults
-  └─ uses_service IControlledRepository<BinderDocumentDefaults>
-    └─ method WriteQuery [L80]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ BinderDocumentDefaults writes=1 reads=0
 

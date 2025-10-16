@@ -4,7 +4,9 @@
   └─ calls AssetGroupRepository.ReadQuery [L44]
   └─ query AssetGroup [L44]
     └─ reads_from AssetGroups
-  └─ uses_service IControlledRepository<AssetGroup>
-    └─ method ReadQuery [L44]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ AssetGroup writes=0 reads=1
+    └─ mappings 1
+      └─ AssetGroupDto
 

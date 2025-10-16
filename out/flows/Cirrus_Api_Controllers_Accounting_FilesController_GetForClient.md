@@ -6,10 +6,10 @@
   └─ query File [L122]
     └─ reads_from Files
   └─ query Client [L112]
-  └─ uses_service IControlledRepository<Client>
-    └─ method ReadQuery [L112]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<File>
-    └─ method ReadQuery [L122]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 2 (writes=0, reads=2)
+      └─ Client writes=0 reads=1
+      └─ File writes=0 reads=1
+    └─ mappings 1
+      └─ FileLightDto
 

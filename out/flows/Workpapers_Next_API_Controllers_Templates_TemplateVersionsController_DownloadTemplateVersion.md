@@ -4,6 +4,12 @@
       └─ implementation Workpapers.Next.Data.Storage.StorageService.CreateDownloadUrl [L17-L282]
   └─ uses_service UnitOfWork
     └─ method Table [L78]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
   └─ uses_storage StorageService.CreateDownloadUrl [L81]
+  └─ impact_summary
+    └─ services 2
+      └─ StorageService
+      └─ UnitOfWork
+    └─ storages 1
+      └─ StorageService
 

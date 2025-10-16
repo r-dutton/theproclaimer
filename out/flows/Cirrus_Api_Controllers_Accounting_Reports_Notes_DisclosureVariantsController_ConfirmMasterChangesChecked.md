@@ -2,7 +2,7 @@
   └─ calls DisclosureVariantRepository.WriteQuery [L156]
   └─ write DisclosureVariant [L156]
     └─ reads_from DisclosureVariants
-  └─ uses_service IControlledRepository<DisclosureVariant>
-    └─ method WriteQuery [L156]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ DisclosureVariant writes=1 reads=0
 

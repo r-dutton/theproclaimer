@@ -1,5 +1,5 @@
 [web] GET /api/companies-house-gateway/e-reminder  (DataGet.Api.Controllers.Integrations.CompaniesHouseGatewayController.GetEReminderAsync)  [L100–L104] status=200 [auth=Authentication.MachineToMachinePolicy]
-  └─ sends_request GetEReminderQuery [L103]
+  └─ sends_request GetEReminderQuery -> GetEReminderQueryHandler [L103]
     └─ handled_by DataGet.Integrations.CompaniesHouseGateway.Api.Queries.GetEReminderQueryHandler.Handle [L33–L61]
       └─ maps_to ERemindersResponseDto [L59]
       └─ uses_client CompaniesHouseInputGatewayClient [L55]
@@ -9,7 +9,13 @@
       └─ uses_service GovTalkEnvelopeCreator
         └─ method Create [L54]
           └─ ... (no implementation details available)
-      └─ uses_service IMapper
-        └─ method Map [L59]
-          └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ clients 1
+      └─ CompaniesHouseInputGatewayClient
+    └─ requests 1
+      └─ GetEReminderQuery
+    └─ handlers 1
+      └─ GetEReminderQueryHandler
+    └─ mappings 1
+      └─ ERemindersResponseDto
 

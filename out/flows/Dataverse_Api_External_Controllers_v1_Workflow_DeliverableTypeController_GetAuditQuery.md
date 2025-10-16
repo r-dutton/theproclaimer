@@ -3,7 +3,9 @@
   └─ calls DeliverableTypeRepository.ReadQuery [L119]
   └─ query DeliverableType [L119]
     └─ reads_from DeliverableTypes
-  └─ uses_service IControlledRepository<DeliverableType>
-    └─ method ReadQuery [L119]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DeliverableType writes=0 reads=1
+    └─ mappings 1
+      └─ EntityAuditDto
 

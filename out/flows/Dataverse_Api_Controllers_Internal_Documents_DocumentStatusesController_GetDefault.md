@@ -4,7 +4,9 @@
   └─ calls DocumentStatusRepository.ReadQuery [L35]
   └─ query DocumentStatus [L35]
     └─ reads_from DVS_DocumentStatuses
-  └─ uses_service IControlledRepository<DocumentStatus>
-    └─ method ReadQuery [L35]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DocumentStatus writes=0 reads=1
+    └─ mappings 1
+      └─ DocumentStatusDto
 

@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method GetGroupsAsync [L161]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.GetGroupsAsync [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

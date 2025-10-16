@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method GetCategoryAsync [L74]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.GetCategoryAsync [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

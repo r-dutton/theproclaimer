@@ -2,7 +2,7 @@
   └─ calls WebhookRepository.ReadQuery [L90]
   └─ query Webhook [L90]
     └─ reads_from Webhooks
-  └─ uses_service IControlledRepository<Webhook>
-    └─ method ReadQuery [L90]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Webhook writes=0 reads=1
 

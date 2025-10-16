@@ -3,7 +3,9 @@
   └─ calls BinderTypeRecordTemplateSetRepository.ReadQuery [L59]
   └─ query BinderTypeRecordTemplateSet [L59]
     └─ reads_from BinderTypeRecordTemplateSets
-  └─ uses_service IControlledRepository<BinderTypeRecordTemplateSet>
-    └─ method ReadQuery [L59]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ BinderTypeRecordTemplateSet writes=0 reads=1
+    └─ mappings 1
+      └─ BinderRecordTemplateDto
 

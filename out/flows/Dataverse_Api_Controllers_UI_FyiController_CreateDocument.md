@@ -2,4 +2,7 @@
   └─ uses_service IDatagetFyiService (AddTransient)
     └─ method PostDocument [L125]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetFyiService.PostDocument [L19-L291]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetFyiService
 

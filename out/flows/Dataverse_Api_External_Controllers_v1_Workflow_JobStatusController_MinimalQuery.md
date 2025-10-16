@@ -2,7 +2,7 @@
   └─ calls JobStatusRepository.ReadQuery [L73]
   └─ query JobStatus [L73]
     └─ reads_from DVS_JobStatuses
-  └─ uses_service IControlledRepository<JobStatus>
-    └─ method ReadQuery [L73]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ JobStatus writes=0 reads=1
 

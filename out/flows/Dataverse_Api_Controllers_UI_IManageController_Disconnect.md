@@ -2,4 +2,7 @@
   └─ uses_service IDatagetImanageService (AddTransient)
     └─ method Disconnect [L103]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetImanageService.Disconnect [L19-L225]
+  └─ impact_summary
+    └─ services 1
+      └─ IDatagetImanageService
 

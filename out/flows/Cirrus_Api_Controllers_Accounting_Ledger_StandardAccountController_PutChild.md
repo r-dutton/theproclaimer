@@ -2,7 +2,7 @@
   └─ calls StandardAccountRepository.WriteQuery [L126]
   └─ write StandardAccount [L126]
     └─ reads_from StandardAccounts
-  └─ uses_service IControlledRepository<StandardAccount>
-    └─ method WriteQuery [L126]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ StandardAccount writes=1 reads=0
 

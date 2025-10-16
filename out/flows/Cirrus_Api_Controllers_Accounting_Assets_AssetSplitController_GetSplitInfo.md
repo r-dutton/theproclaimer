@@ -4,7 +4,9 @@
   └─ calls AssetRepository.ReadQuery [L42]
   └─ query Asset [L42]
     └─ reads_from Assets
-  └─ uses_service IControlledRepository<Asset>
-    └─ method ReadQuery [L42]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Asset writes=0 reads=1
+    └─ mappings 1
+      └─ AssetSplitInfoDto
 

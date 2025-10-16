@@ -2,7 +2,7 @@
   └─ calls OfficeRepository.Add [L83]
   └─ insert Office [L83]
     └─ reads_from Offices
-  └─ uses_service IControlledRepository<Office>
-    └─ method Add [L83]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Office writes=1 reads=0
 

@@ -2,4 +2,7 @@
   └─ uses_service IControlledRepository<RecordStatus> (AddScoped)
     └─ method ReadQuery [L76]
       └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ services 1
+      └─ IControlledRepository<RecordStatus>
 

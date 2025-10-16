@@ -6,4 +6,9 @@
         └─ uses_service WorkpapersClient
           └─ method Get [L31]
             └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ clients 1
+      └─ WorkpapersClient
+    └─ services 1
+      └─ IWorkpapersProxyService
 

@@ -4,7 +4,9 @@
   └─ calls FirmSettingsRepository.ReadQuery [L41]
   └─ query FirmSettings [L41]
     └─ reads_from FirmSettingss
-  └─ uses_service IControlledRepository<FirmSettings>
-    └─ method ReadQuery [L41]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ FirmSettings writes=0 reads=1
+    └─ mappings 1
+      └─ FirmSettingsDto
 

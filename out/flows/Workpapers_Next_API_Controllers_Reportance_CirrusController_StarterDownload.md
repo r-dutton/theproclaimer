@@ -5,11 +5,23 @@
       └─ implementation Workpapers.Next.Data.Storage.StorageService.CreateDownloadUrl [L17-L282]
   └─ uses_service UnitOfWork
     └─ method Table [L75]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
   └─ uses_storage StorageService.CreateDownloadUrl [L97]
-  └─ sends_request GetProductQuery [L82]
+  └─ sends_request GetProductQuery -> GetProductQueryHandler [L82]
     └─ handled_by Workpapers.Next.ApplicationService.Queries.Licensing.Products.GetProductQueryHandler.Handle [L57–L101]
       └─ uses_service UnitOfWork
         └─ method Table [L71]
-          └─ ... (no implementation details available)
+          └─ implementation UnitOfWork.Table (see previous expansion)
+  └─ impact_summary
+    └─ clients 1
+      └─ KeenClient
+    └─ services 2
+      └─ StorageService
+      └─ UnitOfWork
+    └─ requests 1
+      └─ GetProductQuery
+    └─ handlers 1
+      └─ GetProductQueryHandler
+    └─ storages 1
+      └─ StorageService
 

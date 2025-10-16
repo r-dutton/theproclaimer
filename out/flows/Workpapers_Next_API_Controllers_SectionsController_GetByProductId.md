@@ -2,5 +2,10 @@
   └─ maps_to SectionDto [L68]
   └─ uses_service UnitOfWork
     └─ method Table [L68]
-      └─ ... (no implementation details available)
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ SectionDto
 

@@ -2,7 +2,7 @@
   └─ calls DisclosureVariantRepository.ReadQuery [L84]
   └─ query DisclosureVariant [L84]
     └─ reads_from DisclosureVariants
-  └─ uses_service IControlledRepository<DisclosureVariant>
-    └─ method ReadQuery [L84]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DisclosureVariant writes=0 reads=1
 

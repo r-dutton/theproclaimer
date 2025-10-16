@@ -2,7 +2,7 @@
   └─ calls KanbanColumnRepository.WriteQuery [L89]
   └─ write KanbanColumn [L89]
     └─ reads_from KanbanColumns
-  └─ uses_service IControlledRepository<KanbanColumn>
-    └─ method WriteQuery [L89]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ KanbanColumn writes=1 reads=0
 

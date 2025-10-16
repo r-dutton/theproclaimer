@@ -5,8 +5,12 @@
   └─ uses_service RequestRegionService
     └─ method GetTimeZone [L174]
       └─ implementation Dataverse.Services.Features.Localisation.RequestRegionService.GetTimeZone [L10-L74]
-      └─ implementation Dataverse.Services.Features.Localisation.RequestRegionService.GetTimeZone [L10-L74]
-  └─ uses_service IControlledRepository<SyncConfiguration>
-    └─ method WriteQuery [L170]
-      └─ ... (no implementation details available)
+        └─ uses_service Dictionary<string, string>
+          └─ method GetTimeZone [L39]
+            └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ SyncConfiguration writes=1 reads=0
+    └─ services 1
+      └─ RequestRegionService
 

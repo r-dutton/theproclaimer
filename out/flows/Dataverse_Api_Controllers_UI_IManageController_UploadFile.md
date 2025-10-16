@@ -4,10 +4,14 @@
   └─ calls IntegrationSettingsRepository.ReadQuery [L316]
   └─ query IntegrationSettings [L316]
     └─ reads_from IntegrationSettingss
-  └─ uses_service IControlledRepository<IntegrationSettings>
-    └─ method ReadQuery [L316]
-      └─ ... (no implementation details available)
   └─ uses_service IDatagetImanageService (AddTransient)
     └─ method UploadFile [L322]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetImanageService.UploadFile [L19-L225]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ IntegrationSettings writes=0 reads=1
+    └─ services 1
+      └─ IDatagetImanageService
+    └─ mappings 1
+      └─ IntegrationSettingsDto
 

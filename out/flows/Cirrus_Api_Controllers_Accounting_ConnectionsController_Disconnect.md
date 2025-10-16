@@ -2,4 +2,7 @@
   └─ uses_service ApiService (SingleInstance)
     └─ method GetFeatures [L72]
       └─ implementation Cirrus.ApplicationService.Accounting.Services.ApiService.GetFeatures [L14-L75]
+  └─ impact_summary
+    └─ services 1
+      └─ ApiService
 

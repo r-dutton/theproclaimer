@@ -5,7 +5,9 @@
   └─ calls WebhookRepository.ReadQuery [L60]
   └─ query Webhook [L60]
     └─ reads_from Webhooks
-  └─ uses_service IControlledRepository<Webhook>
-    └─ method ReadQuery [L60]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Webhook writes=0 reads=1
+    └─ mappings 1
+      └─ WebhookDto
 

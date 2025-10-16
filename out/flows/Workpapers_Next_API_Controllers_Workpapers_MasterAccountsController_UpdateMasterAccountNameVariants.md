@@ -2,7 +2,12 @@
   └─ calls MasterAccountRepository.WriteQuery [L94]
   └─ write MasterAccount [L94]
     └─ reads_from MasterAccounts
-  └─ uses_service IControlledRepository<MasterAccount>
+  └─ uses_service MasterAccountRepository
     └─ method WriteQuery [L94]
-      └─ ... (no implementation details available)
+      └─ implementation Workpapers.Next.Data.Repository.Workpapers.MasterAccountRepository.WriteQuery [L8-L41]
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ MasterAccount writes=1 reads=0
+    └─ services 1
+      └─ MasterAccountRepository
 

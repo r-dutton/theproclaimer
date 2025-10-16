@@ -2,7 +2,12 @@
   └─ calls TeamRepository.WriteQuery [L135]
   └─ write Team [L135]
     └─ reads_from Teams
-  └─ uses_service IControlledRepository<Team>
+  └─ uses_service TeamRepository
     └─ method WriteQuery [L135]
-      └─ ... (no implementation details available)
+      └─ implementation Dataverse.Data.Repository.Firm.TeamRepository.WriteQuery [L8-L40]
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ Team writes=1 reads=0
+    └─ services 1
+      └─ TeamRepository
 

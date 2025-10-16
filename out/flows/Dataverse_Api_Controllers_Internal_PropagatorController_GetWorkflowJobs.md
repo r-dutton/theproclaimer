@@ -5,4 +5,9 @@
   └─ uses_service JobRepository
     └─ method ReadQuery [L153]
       └─ implementation Dataverse.Data.Repository.Workflow.JobRepository.ReadQuery [L8-L46]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Job writes=0 reads=1
+    └─ services 1
+      └─ JobRepository
 

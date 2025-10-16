@@ -3,4 +3,7 @@
   └─ uses_service TaskRepository
     └─ method ReadQuery [L136]
       └─ implementation Dataverse.Data.Repository.Workflow.TaskRepository.ReadQuery [L8-L40]
+  └─ impact_summary
+    └─ services 1
+      └─ TaskRepository
 

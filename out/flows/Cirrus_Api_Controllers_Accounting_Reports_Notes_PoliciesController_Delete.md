@@ -1,9 +1,8 @@
 [web] DELETE /api/accounting/reports/notes/policies/{id:Guid}  (Cirrus.Api.Controllers.Accounting.Reports.Notes.PoliciesController.Delete)  [L192–L199] status=200 [auth=Authentication.UserPolicy]
-  └─ calls PolicyRepository.Remove [L197]
-  └─ calls PolicyRepository.WriteQuery [L195]
+  └─ calls PolicyRepository (methods: Remove,WriteQuery) [L197]
   └─ delete Policy [L197]
   └─ write Policy [L195]
-  └─ uses_service IControlledRepository<Policy>
-    └─ method WriteQuery [L195]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=2, reads=0)
+      └─ Policy writes=2 reads=0
 

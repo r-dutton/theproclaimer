@@ -1,37 +1,51 @@
 [web] DELETE /api/accounting/ledger/auto-journals/primary-production/{datasetId}/{tradingAccountId}  (Cirrus.Api.Controllers.Accounting.Ledger.AutoJournals.PrimaryProductionController.Delete)  [L119–L129] status=200 [auth=user]
-  └─ calls PrimaryProductionConfigRepository.Remove [L128]
-  └─ calls PrimaryProductionConfigRepository.WriteQuery [L124]
+  └─ calls PrimaryProductionConfigRepository (methods: Remove,WriteQuery) [L128]
   └─ delete PrimaryProductionConfig [L128]
     └─ reads_from PrimaryProductionConfigs
   └─ write PrimaryProductionConfig [L124]
     └─ reads_from PrimaryProductionConfigs
-  └─ uses_service IControlledRepository<PrimaryProductionConfig>
-    └─ method WriteQuery [L124]
-      └─ ... (no implementation details available)
-  └─ sends_request CanIAccessDatasetQuery [L122]
+  └─ sends_request CanIAccessDatasetQuery -> CanIAccessDatasetQueryHandler [L122]
     └─ handled_by Cirrus.ApplicationService.Accounting.Queries.CanIAccessDatasetQueryHandler.Handle [L58–L140]
-      └─ uses_service IControlledRepository<Dataset>
-        └─ method ReadQuery [L127]
-          └─ ... (no implementation details available)
-      └─ uses_service IRequestInfoService (AddScoped)
-        └─ method IsValidServiceAccountRequest [L101]
-          └─ implementation IRequestInfoService.IsValidServiceAccountRequest [L20-L20]
-          └─ ... (no implementation details available)
       └─ uses_service IRequestProcessor (InstancePerDependency)
         └─ method ProcessAsync [L129]
-          └─ implementation IRequestProcessor.ProcessAsync [L9-L9]
-          └─ ... (no implementation details available)
-      └─ uses_service ITenantService (AddScoped)
-        └─ method GetCurrentTenant [L88]
-          └─ implementation ITenantService.GetCurrentTenant [L14-L14]
-          └─ ... (no implementation details available)
+          └─ implementation DataGet.Services.Features.Requests.RequestProcessor.ProcessAsync [L7-L35]
+            └─ ... (no dispatches detected)
+      └─ uses_service IControlledRepository<Dataset> (Scoped (inferred))
+        └─ method ReadQuery [L127]
+          └─ implementation Cirrus.Data.Repository.Accounting.DatasetRepository.ReadQuery
       └─ uses_service IUserService (InstancePerLifetimeScope)
         └─ method GetUserId [L103]
-          └─ implementation IUserService.GetUserId [L18-L18]
-          └─ ... (no implementation details available)
+          └─ implementation Workpapers.Next.ApplicationService.Services.UserService.GetUserId [L20-L295]
+            └─ uses_service User
+              └─ method GetUserId [L67]
+                └─ implementation Workpapers.Next.DomainModel.Model.Firms.User.GetUserId [L18-L368]
+            └─ uses_service Guid?
+              └─ method GetUserId [L64]
+                └─ ... (no implementation details available)
+            └─ uses_cache IMemoryCache.GetOrCreate [read] [L280]
+      └─ uses_service IRequestInfoService (AddScoped)
+        └─ method IsValidServiceAccountRequest [L101]
+          └─ implementation Dataverse.Services.Features.RequestInfoService.IsValidServiceAccountRequest [L11-L92]
+      └─ uses_service ITenantService (AddScoped)
+        └─ method GetCurrentTenant [L88]
+          └─ implementation Dataverse.Services.Features.Tenants.TenantService.GetCurrentTenant [L6-L27]
+            └─ uses_service TenantIdentificationService
+              └─ method GetCurrentTenant [L20]
+                └─ implementation Dataverse.Tenants.Tenants.TenantIdentificationService.GetCurrentTenant [L27-L149]
+                  └─ uses_cache IMemoryCache.GetOrCreateAsync [read] [L117]
+                  └─ uses_cache IMemoryCache.GetOrCreate [read] [L96]
+                  └─ logs ILogger<ITenantIdentificationService> [Warning] [L53]
       └─ uses_cache IDistributedCache.SetRecordAsync [write] [L116]
       └─ uses_cache IDistributedCache.DoesRecordExistAsync [access] [L106]
       └─ uses_cache IDistributedCache.CreateAccessKey [write] [L103]
-      └─ uses_cache IDistributedCache.DoesRecordExistAsync [access] [L90]
       └─ uses_cache IDistributedCache.CreateDatasetLockKey [write] [L88]
+  └─ impact_summary
+    └─ entities 1 (writes=2, reads=0)
+      └─ PrimaryProductionConfig writes=2 reads=0
+    └─ requests 1
+      └─ CanIAccessDatasetQuery
+    └─ handlers 1
+      └─ CanIAccessDatasetQueryHandler
+    └─ caches 1
+      └─ IMemoryCache
 

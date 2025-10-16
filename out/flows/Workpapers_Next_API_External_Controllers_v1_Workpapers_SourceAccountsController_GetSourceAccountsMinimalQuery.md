@@ -2,7 +2,12 @@
   └─ calls SourceAccountRepository.ReadQuery [L60]
   └─ query SourceAccount [L60]
     └─ reads_from SourceAccounts
-  └─ uses_service IControlledRepository<SourceAccount>
+  └─ uses_service SourceAccountRepository
     └─ method ReadQuery [L60]
-      └─ ... (no implementation details available)
+      └─ implementation Workpapers.Next.Data.Repository.Workpapers.SourceAccountRepository.ReadQuery [L8-L38]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ SourceAccount writes=0 reads=1
+    └─ services 1
+      └─ SourceAccountRepository
 

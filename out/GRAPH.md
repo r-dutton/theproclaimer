@@ -1,15 +1,15 @@
 # Graph Summary
 
 - Analyzer version: 0.1.0
-- Nodes: 10762
-- Edges: 14880
+- Nodes: 10826
+- Edges: 16439
 
 ## Node Types
 - app.background_service: 3
 - app.guard: 3
 - app.repository: 209
 - app.service: 178
-- app.service_contract: 625
+- app.service_contract: 688
 - cache.distributed: 1
 - cache.memory: 1
 - cqrs.handler: 939
@@ -21,28 +21,29 @@
 - ef.db_context: 9
 - ef.entity: 404
 - endpoint.controller: 2064
-- http.client: 49
+- http.client: 50
 - mapping.automapper.map: 1653
 - mapping.automapper.profile: 47
 
 ## Edge Kinds
-- calls: 1365
+- calls: 2836
 - converts_to: 824
 - deletes_from: 78
 - generated_from: 1653
-- handled_by: 1699
-- implemented_by: 144
-- inserts_into: 94
+- handled_by: 1704
+- implemented_by: 331
+- inserts_into: 93
 - logs: 35
 - manages: 1
 - maps_to: 1719
-- queries: 584
+- queries: 557
 - reads_from: 404
 - returns: 18
-- sends_request: 1069
-- uses_cache: 130
-- uses_client: 211
-- uses_service: 4372
+- sends_request: 1074
+- service_located: 113
+- uses_cache: 128
+- uses_client: 274
+- uses_service: 4121
 - uses_storage: 83
 - validation: 4
-- writes_to: 393
+- writes_to: 389

@@ -3,10 +3,9 @@
   └─ calls DocumentTypeRepository.Add [L63]
   └─ insert DocumentType [L63]
     └─ reads_from DocumentTypes
-  └─ uses_service IControlledRepository<DocumentType>
-    └─ method Add [L63]
-      └─ ... (no implementation details available)
-  └─ uses_service IMapper
-    └─ method Map [L65]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=1, reads=0)
+      └─ DocumentType writes=1 reads=0
+    └─ mappings 1
+      └─ DocumentTypeDto
 

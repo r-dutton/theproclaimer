@@ -2,7 +2,7 @@
   └─ calls DeliverableTypeRepository.ReadQuery [L92]
   └─ query DeliverableType [L92]
     └─ reads_from DeliverableTypes
-  └─ uses_service IControlledRepository<DeliverableType>
-    └─ method ReadQuery [L92]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ DeliverableType writes=0 reads=1
 

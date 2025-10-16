@@ -5,10 +5,13 @@
     └─ reads_from SourceAccounts
   └─ query Binder [L524]
     └─ reads_from Binders
-  └─ uses_service IControlledRepository<Binder>
-    └─ method ReadQuery [L524]
-      └─ ... (no implementation details available)
-  └─ uses_service IControlledRepository<SourceAccount>
+  └─ uses_service SourceAccountRepository
     └─ method ReadQuery [L529]
-      └─ ... (no implementation details available)
+      └─ implementation Workpapers.Next.Data.Repository.Workpapers.SourceAccountRepository.ReadQuery [L8-L38]
+  └─ impact_summary
+    └─ entities 2 (writes=0, reads=2)
+      └─ Binder writes=0 reads=1
+      └─ SourceAccount writes=0 reads=1
+    └─ services 1
+      └─ SourceAccountRepository
 

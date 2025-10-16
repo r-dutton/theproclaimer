@@ -2,4 +2,7 @@
   └─ uses_service IDataGetCloudCapchaService (AddTransient)
     └─ method Disconnect [L42]
       └─ implementation Dataverse.Connections.DataGet.Services.DataGetCloudCapchaService.Disconnect [L13-L49]
+  └─ impact_summary
+    └─ services 1
+      └─ IDataGetCloudCapchaService
 

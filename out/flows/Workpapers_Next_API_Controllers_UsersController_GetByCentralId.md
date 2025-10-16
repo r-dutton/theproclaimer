@@ -2,10 +2,14 @@
   └─ maps_to UserDto (var user) [L123]
   └─ calls UserRepository.ReadQuery [L123]
   └─ query User [L123]
-  └─ uses_service IControlledRepository<User>
+  └─ uses_service UserRepository
     └─ method ReadQuery [L123]
-      └─ ... (no implementation details available)
-  └─ uses_service IMapper
-    └─ method Map [L123]
-      └─ ... (no implementation details available)
+      └─ implementation Workpapers.Next.Data.Repository.Firms.UserRepository.ReadQuery [L9-L41]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ User writes=0 reads=1
+    └─ services 1
+      └─ UserRepository
+    └─ mappings 1
+      └─ UserDto
 

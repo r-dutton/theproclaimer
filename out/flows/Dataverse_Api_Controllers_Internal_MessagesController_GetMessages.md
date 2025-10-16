@@ -2,7 +2,7 @@
   └─ calls MessageRepository.ReadQuery [L35]
   └─ query Message [L35]
     └─ reads_from Messages
-  └─ uses_service IControlledRepository<Message>
-    └─ method ReadQuery [L35]
-      └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Message writes=0 reads=1
 
