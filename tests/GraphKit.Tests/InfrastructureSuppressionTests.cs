@@ -1,11 +1,12 @@
+using System.Collections.Generic;
 using GraphKit.Graph;
 using GraphKit.Outputs;
 using Xunit;
 
-namespace GraphKit.Tests
+namespace GraphKit.Tests;
+
+public class InfrastructureSuppressionTests
 {
-    public class InfrastructureSuppressionTests
-    {
     [Fact]
     public void ILogger_And_IMapper_UsesService_Suppressed()
     {
@@ -19,13 +20,14 @@ namespace GraphKit.Tests
             Project = "Api",
             FilePath = "C.cs",
             SymbolId = "T:Api.C.Do",
-            Props = new System.Collections.Generic.Dictionary<string, object>
+            Props = new Dictionary<string, object>
             {
-                { "http_method", "GET" },
-                { "route", "/do" },
-                { "status_codes", new[] { 200 } }
+                ["http_method"] = "GET",
+                ["route"] = "/do",
+                ["status_codes"] = new[] { 200 }
             }
         };
+
         var logger = new GraphNode
         {
             Id = "l",
@@ -37,6 +39,7 @@ namespace GraphKit.Tests
             FilePath = "external:ILogger.cs",
             SymbolId = "T:Microsoft.Extensions.Logging.ILogger`1"
         };
+
         var mapper = new GraphNode
         {
             Id = "m",
@@ -48,6 +51,7 @@ namespace GraphKit.Tests
             FilePath = "external:IMapper.cs",
             SymbolId = "T:AutoMapper.IMapper"
         };
+
         var handlerInterface = new GraphNode
         {
             Id = "hI",
@@ -59,6 +63,7 @@ namespace GraphKit.Tests
             FilePath = "IDoHandler.cs",
             SymbolId = "T:App.IDoHandler"
         };
+
         var handlerImpl = new GraphNode
         {
             Id = "h",
@@ -71,41 +76,63 @@ namespace GraphKit.Tests
             SymbolId = "T:App.DoHandler",
             Span = new GraphSpan { StartLine = 5, EndLine = 25 }
         };
-        var implEdge = new GraphEdge { From = handlerInterface.Id, To = handlerImpl.Id, Kind = "implemented_by", Source = "static" };
+
+        var implEdge = new GraphEdge
+        {
+            From = handlerInterface.Id,
+            To = handlerImpl.Id,
+            Kind = "implemented_by",
+            Source = "static"
+        };
+
         var usesLogger = new GraphEdge
         {
             From = endpoint.Id,
             To = logger.Id,
             Kind = "uses_service",
             Source = "static",
-            Transform = new GraphTransform { Location = new GraphLocation { File = "C.cs", Line = 10 } },
-            Props = new System.Collections.Generic.Dictionary<string, object> { { "method", "LogInformation" } }
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "C.cs", Line = 10 }
+            },
+            Props = new Dictionary<string, object> { ["method"] = "LogInformation" }
         };
+
         var usesMapper = new GraphEdge
         {
             From = endpoint.Id,
             To = mapper.Id,
             Kind = "uses_service",
             Source = "static",
-            Transform = new GraphTransform { Location = new GraphLocation { File = "C.cs", Line = 11 } },
-            Props = new System.Collections.Generic.Dictionary<string, object> { { "method", "Map" } }
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "C.cs", Line = 11 }
+            },
+            Props = new Dictionary<string, object> { ["method"] = "Map" }
         };
+
         var usesHandler = new GraphEdge
         {
             From = endpoint.Id,
             To = handlerInterface.Id,
             Kind = "uses_service",
             Source = "static",
-            Transform = new GraphTransform { Location = new GraphLocation { File = "C.cs", Line = 12 } },
-            Props = new System.Collections.Generic.Dictionary<string, object> { { "method", "Handle" } }
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "C.cs", Line = 12 }
+            },
+            Props = new Dictionary<string, object> { ["method"] = "Handle" }
         };
+
         var doc = new GraphDocument
         {
             Version = "1.0",
             Nodes = new[] { endpoint, logger, mapper, handlerInterface, handlerImpl },
             Edges = new[] { implEdge, usesLogger, usesMapper, usesHandler }
         };
-        var flow = FlowBuilder.BuildFlows(doc, n => true);
+
+        var flow = FlowBuilder.BuildFlows(doc, _ => true);
+
         Assert.DoesNotContain("uses_service ILogger", flow);
         Assert.DoesNotContain("uses_service IMapper", flow);
         Assert.Contains("implementation App.DoHandler.Handle", flow);
@@ -124,13 +151,13 @@ namespace GraphKit.Tests
             Project = "Api",
             FilePath = "C2.cs",
             SymbolId = "T:Api.C.Do2",
-            Props = new System.Collections.Generic.Dictionary<string, object>
+            Props = new Dictionary<string, object>
             {
-                { "http_method", "POST" },
-                { "route", "/do2" },
-                { "status_codes", new[] { 200 } }
+                ["http_method"] = "POST",
+                ["route"] = "/do2",
             }
         };
+
         var behavior = new GraphNode
         {
             Id = "pb",
@@ -142,6 +169,7 @@ namespace GraphKit.Tests
             FilePath = "Pipeline.cs",
             SymbolId = "T:MediatR.IPipelineBehavior`2"
         };
+
         var innerInterface = new GraphNode
         {
             Id = "svcI",
@@ -153,6 +181,7 @@ namespace GraphKit.Tests
             FilePath = "IInnerSvc.cs",
             SymbolId = "T:App.IInnerSvc"
         };
+
         var innerImpl = new GraphNode
         {
             Id = "svc",
@@ -165,33 +194,180 @@ namespace GraphKit.Tests
             SymbolId = "T:App.InnerSvc",
             Span = new GraphSpan { StartLine = 3, EndLine = 15 }
         };
-        var implEdge = new GraphEdge { From = innerInterface.Id, To = innerImpl.Id, Kind = "implemented_by", Source = "static" };
+
+        var implEdge = new GraphEdge
+        {
+            From = innerInterface.Id,
+            To = innerImpl.Id,
+            Kind = "implemented_by",
+            Source = "static"
+        };
+
         var usesBehavior = new GraphEdge
         {
             From = endpoint.Id,
             To = behavior.Id,
             Kind = "uses_service",
             Source = "static",
-            Transform = new GraphTransform { Location = new GraphLocation { File = "C2.cs", Line = 5 } },
-            Props = new System.Collections.Generic.Dictionary<string, object> { { "method", "Handle" } }
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "C2.cs", Line = 5 }
+            },
+            Props = new Dictionary<string, object> { ["method"] = "Handle" }
         };
+
         var behaviorUsesInner = new GraphEdge
         {
             From = behavior.Id,
             To = innerInterface.Id,
             Kind = "uses_service",
             Source = "static",
-            Transform = new GraphTransform { Location = new GraphLocation { File = "Pipeline.cs", Line = 22 } },
-            Props = new System.Collections.Generic.Dictionary<string, object> { { "method", "Handle" } }
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "Pipeline.cs", Line = 22 }
+            },
+            Props = new Dictionary<string, object> { ["method"] = "Handle" }
         };
+
         var doc = new GraphDocument
         {
             Version = "1.0",
             Nodes = new[] { endpoint, behavior, innerInterface, innerImpl },
             Edges = new[] { implEdge, usesBehavior, behaviorUsesInner }
         };
-        var flow = FlowBuilder.BuildFlows(doc, n => true);
+
+        var flow = FlowBuilder.BuildFlows(doc, _ => true);
+
         Assert.True(flow.Contains("uses_service IInnerSvc") || flow.Contains("uses_service InnerSvc"), flow);
     }
+
+    [Fact]
+    public void ILogger_NonGeneric_Suppressed_But_Logs_Remain()
+    {
+        var endpoint = new GraphNode
+        {
+            Id = "endpoint-plain-logger",
+            Type = "endpoint.controller",
+            Name = "Do",
+            Fqdn = "Api.C.Do",
+            Assembly = "Api",
+            Project = "Api",
+            FilePath = "Controller.cs",
+            SymbolId = "T:Api.C.Do",
+            Props = new Dictionary<string, object>
+            {
+                ["http_method"] = "GET",
+                ["route"] = "/do",
+                ["status_codes"] = new[] { 200 }
+            }
+        };
+
+        var logger = new GraphNode
+        {
+            Id = "plain-logger",
+            Type = "app.service",
+            Name = "ILogger",
+            Fqdn = "Microsoft.Extensions.Logging.ILogger",
+            Assembly = "Logging",
+            Project = "Logging",
+            FilePath = "external:ILogger.cs",
+            SymbolId = "T:Microsoft.Extensions.Logging.ILogger"
+        };
+
+        var usesLogger = new GraphEdge
+        {
+            From = endpoint.Id,
+            To = logger.Id,
+            Kind = "uses_service",
+            Source = "static",
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "Controller.cs", Line = 15 }
+            },
+            Props = new Dictionary<string, object> { ["method"] = "LogWarning" }
+        };
+
+        var logsEdge = new GraphEdge
+        {
+            From = endpoint.Id,
+            To = logger.Id,
+            Kind = "logs",
+            Source = "static",
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "Controller.cs", Line = 16 }
+            },
+            Props = new Dictionary<string, object> { ["level"] = "Warning" }
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1.0",
+            Nodes = new[] { endpoint, logger },
+            Edges = new[] { usesLogger, logsEdge }
+        };
+
+        var flow = FlowBuilder.BuildFlows(document, _ => true);
+
+        Assert.DoesNotContain("uses_service ILogger", flow);
+        Assert.Contains("logs ILogger [Warning]", flow);
+        Assert.DoesNotContain("Services: ILogger", flow);
+    }
+
+    [Fact]
+    public void IHttpContextAccessor_Suppressed()
+    {
+        var endpoint = new GraphNode
+        {
+            Id = "endpoint-http-context",
+            Type = "endpoint.controller",
+            Name = "Do",
+            Fqdn = "Api.C.Do",
+            Assembly = "Api",
+            Project = "Api",
+            FilePath = "Controller.cs",
+            SymbolId = "T:Api.C.Do",
+            Props = new Dictionary<string, object>
+            {
+                ["http_method"] = "GET",
+                ["route"] = "/do",
+                ["status_codes"] = new[] { 200 }
+            }
+        };
+
+        var accessor = new GraphNode
+        {
+            Id = "accessor",
+            Type = "app.service",
+            Name = "IHttpContextAccessor",
+            Fqdn = "Microsoft.AspNetCore.Http.IHttpContextAccessor",
+            Assembly = "Microsoft.AspNetCore.Http.Abstractions",
+            Project = "Microsoft.AspNetCore.Http.Abstractions",
+            FilePath = "external:IHttpContextAccessor.cs",
+            SymbolId = "T:Microsoft.AspNetCore.Http.IHttpContextAccessor"
+        };
+
+        var usesAccessor = new GraphEdge
+        {
+            From = endpoint.Id,
+            To = accessor.Id,
+            Kind = "uses_service",
+            Source = "static",
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = "Controller.cs", Line = 20 }
+            }
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1.0",
+            Nodes = new[] { endpoint, accessor },
+            Edges = new[] { usesAccessor }
+        };
+
+        var flow = FlowBuilder.BuildFlows(document, _ => true);
+
+        Assert.DoesNotContain("uses_service IHttpContextAccessor", flow);
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using GraphKit.Graph;
@@ -7,8 +8,48 @@ using GraphKit.Workspace;
 
 namespace GraphKit.Outputs;
 
-public static class FlowBuilder
+public static partial class FlowBuilder
 {
+    private static readonly HashSet<string> WriteOperationKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "writes_to",
+        "inserts_into",
+        "updates",
+        "deletes_from",
+        "upserts"
+    };
+
+    private static readonly HashSet<string> ReadOperationKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "queries",
+        "reads_from",
+        "selects"
+    };
+
+    private static bool IsWriteOperationKind(string? operationKind)
+        => !string.IsNullOrWhiteSpace(operationKind) && WriteOperationKinds.Contains(operationKind!);
+
+    private static bool IsReadOperationKind(string? operationKind)
+    {
+        if (string.IsNullOrWhiteSpace(operationKind))
+        {
+            return true;
+        }
+
+        if (WriteOperationKinds.Contains(operationKind!))
+        {
+            return false;
+        }
+
+        if (ReadOperationKinds.Contains(operationKind!))
+        {
+            return true;
+        }
+
+        return string.Equals(operationKind, "read", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(operationKind, "query", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string BuildFlows(GraphDocument document, Func<GraphNode, bool> controllerPredicate, FlowWorkspaceIndex? workspace = null, int? maxDepth = null)
     {
         // Core node index (unique IDs)
@@ -143,9 +184,123 @@ public static class FlowBuilder
         return visited;
     }
 
+    private static string BuildCallDedupKey(GraphEdge edge, GraphNode target, string? method)
+    {
+        var methodKey = string.IsNullOrWhiteSpace(method) ? "*" : method.Trim();
+        var location = edge.Transform?.Location;
+        var lineKey = location?.Line.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "*";
+        var fileKey = location?.File ?? string.Empty;
+        var ilRange = edge.Transform?.IlRange;
+        var ilStart = ilRange?.StartOffset.HasValue == true
+            ? ilRange.StartOffset.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "*";
+        var ilEnd = ilRange?.EndOffset.HasValue == true
+            ? ilRange.EndOffset.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "*";
+        return $"{edge.From}->{target.Id}::{edge.Source}::{methodKey}::{fileKey}::{lineKey}::{ilStart}-{ilEnd}";
+    }
+
+    private static string GetDisplayName(GraphNode node)
+    {
+        if (!string.IsNullOrWhiteSpace(node.Name))
+        {
+            return node.Name!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.Fqdn))
+        {
+            return node.Fqdn!;
+        }
+
+        return node.Id;
+    }
+
+    private static bool IsMutationVerb(string verb)
+        => !string.Equals(verb, "GET", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(verb, "HEAD", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(verb, "OPTIONS", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ExtractHost(string? baseUrl, string? route)
+    {
+        if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri))
+        {
+            return baseUri.Host.ToLowerInvariant();
+        }
+
+        if (!string.IsNullOrWhiteSpace(route) && Uri.TryCreate(route, UriKind.Absolute, out var routeUri))
+        {
+            return routeUri.Host.ToLowerInvariant();
+        }
+
+        return null;
+    }
+
+    private static string DetermineRemoteScope(string? host, string label, string callerRoot)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return string.Equals(label, callerRoot, StringComparison.OrdinalIgnoreCase) ? "internal" : "service";
+        }
+
+        var lowered = host.ToLowerInvariant();
+        if (lowered.Contains("localhost", StringComparison.Ordinal) ||
+            lowered.StartsWith("127.", StringComparison.Ordinal) ||
+            lowered.StartsWith("10.", StringComparison.Ordinal) ||
+            lowered.StartsWith("192.168.", StringComparison.Ordinal) ||
+            IsPrivate172(lowered))
+        {
+            return "internal";
+        }
+
+        if (lowered.EndsWith(".internal", StringComparison.Ordinal) ||
+            lowered.EndsWith(".local", StringComparison.Ordinal) ||
+            lowered.EndsWith(".svc", StringComparison.Ordinal))
+        {
+            return "internal";
+        }
+
+        if (!string.IsNullOrWhiteSpace(callerRoot) && lowered.Contains(callerRoot.ToLowerInvariant(), StringComparison.Ordinal))
+        {
+            return "internal";
+        }
+
+        return "external";
+    }
+
+    private static bool IsPrivate172(string host)
+    {
+        if (!host.StartsWith("172.", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var parts = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            return false;
+        }
+
+        if (int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var secondOctet))
+        {
+            return secondOctet >= 16 && secondOctet <= 31;
+        }
+
+        return false;
+    }
+
     private static void AppendControllerFlow(StringBuilder builder, FlowRenderState state, GraphNode controller)
     {
-        AppendEndpointFlow(builder, state, controller, indent: 0);
+        var impact = new ImpactAccumulator(GetAssemblyRoot(controller.Assembly));
+        state.PushImpact(impact);
+        try
+        {
+            AppendEndpointFlow(builder, state, controller, indent: 0);
+            AppendImpactSummary(builder, impact);
+        }
+        finally
+        {
+            state.PopImpact();
+        }
     }
 
     private static void AppendEndpointFlow(StringBuilder builder, FlowRenderState state, GraphNode endpoint, int indent)
@@ -282,6 +437,7 @@ public static class FlowBuilder
                     : null;
                 var extra = string.IsNullOrWhiteSpace(targetType) ? string.Empty : $" ({targetType})";
                 AppendIndented(builder, childIndent, $"uses_validator {validatorNode.Name}{extra}{lineText}");
+                state.CurrentImpact?.RecordValidator(GetDisplayName(validatorNode));
             }
 
             foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
@@ -308,6 +464,7 @@ public static class FlowBuilder
                 state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
                 if (!state.DedupRequests.Add("CACHE::" + cacheKey)) continue;
                 AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
+                state.CurrentImpact?.RecordCache(GetDisplayName(cacheNode));
             }
 
             foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -321,10 +478,12 @@ public static class FlowBuilder
                 var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
                 var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 AppendIndented(builder, childIndent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+                state.CurrentImpact?.RecordOption(GetDisplayName(optionsNode));
             }
 
             // Group repository calls: aggregate consecutive calls to same repository with list of methods
             var callEdges = edges.Where(e => e.Kind == "calls").ToList();
+            var printedDirectCallKeys = new HashSet<string>(StringComparer.Ordinal);
             for (int i = 0; i < callEdges.Count; i++)
             {
                 var callEdge = callEdges[i];
@@ -333,6 +492,11 @@ public static class FlowBuilder
                 if (!isRepo)
                 {
                     var callMethod = callEdge.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
+                    var dedupKey = BuildCallDedupKey(callEdge, targetNode, callMethod);
+                    if (!printedDirectCallKeys.Add(dedupKey))
+                    {
+                        continue;
+                    }
                     var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
                     var lineText = callEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     AppendIndented(builder, childIndent, $"calls {targetNode.Name}{serviceMethodText}{lineText}");
@@ -383,6 +547,7 @@ public static class FlowBuilder
                 var lineText = dataEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 var label = ExtractOperationLabel(dataEdge);
                 AppendIndented(builder, childIndent, $"{label} {entityNode.Name}{lineText}");
+                state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
 
                 if (entityNode.Type == "ef.entity")
                 {
@@ -427,13 +592,20 @@ public static class FlowBuilder
 
                 // Specialized handling for generic controlled repositories: treat interface invocation as a direct repository call
                 var isControlledRepoInterface = serviceNode.Name != null && serviceNode.Name.StartsWith("IControlledRepository<", StringComparison.Ordinal);
-                if (isControlledRepoInterface && !string.IsNullOrWhiteSpace(serviceMethodName))
+                if (isControlledRepoInterface)
                 {
-                    var repoImpl = collapseImpl ?? TryResolveSingleImplementation(state, endpoint, serviceNode) ?? serviceNode;
-                    var repoName = repoImpl.Name ?? serviceNode.Name ?? "Repository";
-                    AppendIndented(builder, childIndent, $"calls {repoName}.{serviceMethodName}{lineText}");
-                    AppendRepositoryFlow(builder, state, repoImpl, childIndent + 1);
-                    continue; // Skip generic service expansion path
+                    var repoImpl = TryResolveControlledRepository(state, endpoint, serviceNode) ?? collapseImpl ?? TryResolveSingleImplementation(state, endpoint, serviceNode);
+                    if (repoImpl != null && repoImpl.Type is "app.repository" or "repository")
+                    {
+                        var alreadyPrinted = callEdges.Any(call => call.To == repoImpl.Id && string.Equals(GetCallMethod(call), serviceMethodName, StringComparison.OrdinalIgnoreCase));
+                        if (!alreadyPrinted)
+                        {
+                            var repoMethodSuffix = string.IsNullOrWhiteSpace(serviceMethodName) ? string.Empty : $".{serviceMethodName}";
+                            AppendIndented(builder, childIndent, $"calls {repoImpl.Name}{repoMethodSuffix}{lineText}");
+                        }
+                        AppendRepositoryFlow(builder, state, repoImpl, childIndent + 1);
+                        continue; // Skip generic service expansion path
+                    }
                 }
 
                 var printedName = collapse && collapseImpl != null ? collapseImpl.Name : serviceNode.Name;
@@ -442,6 +614,7 @@ public static class FlowBuilder
                     // Defensive: trim dangling '>' that can appear if generic argument stripped earlier
                     printedName = printedName.TrimEnd('>');
                 }
+                state.CurrentImpact?.RecordServiceUsage(printedName ?? GetDisplayName(serviceNode));
                 AppendIndented(builder, childIndent, $"uses_service {printedName}{suffix}{serviceLineText}");
                 // Ensure test expectations: if collapsing interface to single implementation, explicitly emit implementation header even if already printed elsewhere
                 if (collapse && collapseImpl != null && collapseImpl.Name != serviceNode.Name)
@@ -497,6 +670,7 @@ public static class FlowBuilder
                     : null;
                 var methodSuffix = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{methodName}";
                 AppendIndented(builder, childIndent, $"uses_storage {storageNode.Name}{methodSuffix}{lineText}");
+                state.CurrentImpact?.RecordStorage(GetDisplayName(storageNode));
             }
 
             foreach (var logEdge in edges.Where(e => e.Kind == "logs"))
@@ -550,6 +724,11 @@ public static class FlowBuilder
                 var synthetic = string.Equals(requestEdge.Source, "synthetic", StringComparison.OrdinalIgnoreCase) && requestEdge.Transform?.Type == "requestprocessor.dispatch";
                 var prefix = synthetic ? "dispatches" : "sends_request";
                 AppendIndented(builder, childIndent, $"{prefix} {requestNode.Name}{handlerPart}{responsePart}{lineText}");
+                state.CurrentImpact?.RecordRequest(GetDisplayName(requestNode));
+                if (!string.IsNullOrWhiteSpace(handlerName))
+                {
+                    state.CurrentImpact?.RecordHandler(handlerName);
+                }
                 AppendCommandFlow(builder, state, requestNode, childIndent + 1);
             }
 
@@ -572,6 +751,7 @@ public static class FlowBuilder
                     ? $" [L{line}]"
                     : string.Empty;
                 AppendIndented(builder, childIndent, $"publishes_notification {notificationNode.Name}{lineText}");
+                state.CurrentImpact?.RecordNotification(GetDisplayName(notificationNode));
                 AppendNotificationFlow(builder, state, notificationNode, childIndent + 1);
             }
         }
@@ -611,6 +791,7 @@ public static class FlowBuilder
         var variableText = string.IsNullOrWhiteSpace(variable) ? string.Empty : $" (var {variable})";
         var annotationText = string.IsNullOrWhiteSpace(annotation) ? string.Empty : $" [{annotation}]";
         AppendIndented(builder, indent, $"{label} {destination.Name}{variableText}{lineText}{annotationText}");
+        state.CurrentImpact?.RecordMapping(GetDisplayName(destination));
 
         if (includeAutomapper)
         {
@@ -646,6 +827,8 @@ public static class FlowBuilder
             return;
         }
 
+        state.CurrentImpact?.RecordRequest(GetDisplayName(command));
+
         // Pipeline behaviors / request processors (processed_by edges)
         foreach (var pipelineEdge in edges.Where(e => e.Kind == "processed_by"))
         {
@@ -664,6 +847,7 @@ public static class FlowBuilder
             var stageText = string.IsNullOrWhiteSpace(stage) ? string.Empty : $" [{stage}]";
             var responseText = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" (response={responseType})";
             AppendIndented(builder, indent, $"processed_by {behaviorNode.Name}{stageText}{responseText}");
+            state.CurrentImpact?.RecordPipelineBehavior(GetDisplayName(behaviorNode));
         }
 
         // If no concrete pipeline edges, attempt to list generic pipeline behaviors (nodes tagged generic_request)
@@ -675,6 +859,7 @@ public static class FlowBuilder
             if (genericBehaviors.Count > 0)
             {
                 AppendIndented(builder, indent, $"generic_pipeline_behaviors {genericBehaviors.Count}");
+                state.CurrentImpact?.RecordGenericPipelineBehaviors(genericBehaviors.Count);
                 foreach (var gb in genericBehaviors.OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase).Take(5))
                 {
                     AppendIndented(builder, indent + 1, $"{gb.Name}");
@@ -698,6 +883,7 @@ public static class FlowBuilder
             state.DedupHandlers ??= new HashSet<string>(StringComparer.Ordinal);
             if (!state.DedupHandlers.Add(handlerKey)) continue;
             AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
+            state.CurrentImpact?.RecordHandler(GetDisplayName(handlerNode));
             AppendHandlerFlow(builder, state, handlerNode, indent + 1);
         }
     }
@@ -753,6 +939,7 @@ public static class FlowBuilder
 
             // Group repository calls in handler
             var handlerCallEdges = edges.Where(e => e.Kind == "calls").ToList();
+            var printedHandlerCallKeys = new HashSet<string>(StringComparer.Ordinal);
             for (int i = 0; i < handlerCallEdges.Count; i++)
             {
                 var call = handlerCallEdges[i];
@@ -762,6 +949,11 @@ public static class FlowBuilder
                 if (!isRepo)
                 {
                     var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
+                    var dedupKey = BuildCallDedupKey(call, target, callMethod);
+                    if (!printedHandlerCallKeys.Add(dedupKey))
+                    {
+                        continue;
+                    }
                     var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
                     var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     AppendIndented(builder, indent, $"calls {target.Name}{serviceMethodText}{lineText}");
@@ -941,6 +1133,7 @@ public static class FlowBuilder
                 var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 var details = BuildPublisherDetails(messageNode);
                 AppendIndented(builder, indent, $"publishes {messageNode.Name}{details}{lineText}");
+                state.CurrentImpact?.RecordMessage(GetDisplayName(messageNode));
                 AppendPublisherFlow(builder, state, messageNode, indent + 1);
             }
 
@@ -1001,6 +1194,7 @@ public static class FlowBuilder
             var lineText = write.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var operation = ExtractOperationLabel(write);
             AppendIndented(builder, indent, $"{operation} {entityNode.Name}{lineText}");
+            state.CurrentImpact?.RecordRepositoryOperation(GetDisplayName(repository), write.Kind, GetDisplayName(entityNode));
             AppendEntityFlow(builder, state, entityNode, indent + 1);
         }
 
@@ -1028,6 +1222,7 @@ public static class FlowBuilder
             state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
             if (!state.DedupRequests.Add("CACHE::" + cacheKey)) continue;
             AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
+            state.CurrentImpact?.RecordCache(GetDisplayName(cacheNode));
         }
 
         foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
@@ -1041,6 +1236,7 @@ public static class FlowBuilder
             var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
             var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+            state.CurrentImpact?.RecordOption(GetDisplayName(optionsNode));
         }
     }
 
@@ -1225,7 +1421,9 @@ public static class FlowBuilder
         int indent)
     {
         var lineText = clientEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-        AppendIndented(builder, indent, $"uses_client {clientNode.Name}{lineText}");
+        var clientDisplay = GetDisplayName(clientNode);
+        AppendIndented(builder, indent, $"uses_client {clientDisplay}{lineText}");
+        state.CurrentImpact?.RecordClient(clientDisplay);
 
         List<string>? allowedMethods = null;
         if (clientEdge.Props is { } clientProps)
@@ -1304,6 +1502,15 @@ public static class FlowBuilder
             .GroupBy(x => (x.Method, x.Verb, x.Route, x.TargetService))
             .Select(g => g.First())
             .ToList();
+
+        foreach (var call in distinctCalls)
+        {
+            var callEdge = call.Edge;
+            var baseUrlValue = callEdge.Props is { } baseProps && baseProps.TryGetValue("base_url", out var baseObj)
+                ? baseObj?.ToString()
+                : null;
+            state.CurrentImpact?.RecordRemoteCall(clientDisplay, call.Verb, call.Route, baseUrlValue, call.TargetService);
+        }
 
         const int ExplosionThreshold = 25;
         if (distinctCalls.Count > ExplosionThreshold)
@@ -1402,14 +1609,23 @@ public static class FlowBuilder
                 return; // Nothing to resolve.
             }
 
+            var routeText = route ?? string.Empty;
+            var verbText = verb ?? string.Empty;
+            var lookupKey = $"lookup::{callEdge.From}::{verbText}::{routeText}";
+            if (!state.RemoteLookupKeys.Add(lookupKey))
+            {
+                AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText} (see previous lookup)");
+                return;
+            }
+
             var globalCandidates = state.Document.Nodes
                 .Where(n => n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api")
                 .ToList();
             var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
-            AppendIndented(builder, indent, $"remote_endpoint_lookup route={route} verb={verb}");
+            AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}");
             if (globalMatched.Count == 0)
             {
-                AppendIndented(builder, indent + 1, $"unmatched_endpoint route={route} verb={verb}");
+                AppendIndented(builder, indent + 1, $"unmatched_endpoint route={routeText} verb={verbText}");
                 return;
             }
 
@@ -1558,285 +1774,6 @@ public static class FlowBuilder
         return candidates;
     }
 
-    private static void AppendServiceContractFlow(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphNode caller,
-        GraphNode serviceNode,
-        string? methodName,
-        int indent)
-    {
-        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
-        {
-            AppendIndented(builder, indent, "... (max depth reached)");
-            return;
-        }
-
-        var stackKey = $"{serviceNode.Id}:{methodName ?? "*"}";
-        if (!state.ServiceStack.Add(stackKey))
-        {
-            AppendIndented(builder, indent, "... (service recursion detected)");
-            return;
-        }
-
-        try
-        {
-            var candidateList = new List<GraphNode>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-
-            // Special-case: ILogger<TDependency> where TDependency is an interface/service we already have a contract for.
-            // When encountering ILogger<IFooService>, attempt to locate IFooService node(s) and treat their implementations as the logger's implementation details.
-            // This prevents a dead-end placeholder under logging wrappers.
-            if (serviceNode.Fqdn is { } fqdn && fqdn.StartsWith("Microsoft.Extensions.Logging.ILogger<", StringComparison.Ordinal) && fqdn.EndsWith('>'))
-            {
-                var inner = fqdn.Substring("Microsoft.Extensions.Logging.ILogger<".Length, fqdn.Length - "Microsoft.Extensions.Logging.ILogger<".Length - 1);
-                var simpleInner = inner.Split('.').Last();
-                // Prefer interface form (leading I) match first
-                IEnumerable<GraphNode> innerCandidates = Array.Empty<GraphNode>();
-                if (state.NodesByName.TryGetValue(simpleInner, out var nameMatches))
-                {
-                    innerCandidates = nameMatches;
-                }
-                // Also try full FQDN lookup
-                if (state.NodesByFqdn.TryGetValue(inner, out var fqdnMatches))
-                {
-                    innerCandidates = innerCandidates.Concat(fqdnMatches);
-                }
-                foreach (var innerNode in innerCandidates.DistinctBy(n => n.Id))
-                {
-                    // Reuse its implementations (implemented_by) or heuristic match
-                    if (state.EdgesByFrom.TryGetValue(innerNode.Id, out var innerEdges))
-                    {
-                        foreach (var implEdge in innerEdges.Where(e => e.Kind == "implemented_by"))
-                        {
-                            if (!state.NodesById.TryGetValue(implEdge.To, out var implNode)) continue;
-                            if (!ShouldIncludeImplementation(caller, implNode)) continue;
-                            if (seen.Add(implNode.Id)) candidateList.Add(implNode);
-                        }
-                    }
-                    if (candidateList.Count == 0)
-                    {
-                        foreach (var candidate in state.FindCandidateImplementations(innerNode))
-                        {
-                            if (!ShouldIncludeImplementation(caller, candidate)) continue;
-                            if (seen.Add(candidate.Id)) candidateList.Add(candidate);
-                        }
-                    }
-                }
-                // If we resolved something for the inner type, we can treat those as logger implementation context and still render below.
-            }
-
-            // Direct implemented_by edges first
-            if (state.EdgesByFrom.TryGetValue(serviceNode.Id, out var serviceEdges))
-            {
-                foreach (var implEdge in serviceEdges.Where(e => e.Kind == "implemented_by"))
-                {
-                    if (!state.NodesById.TryGetValue(implEdge.To, out var implementation)) continue;
-                    if (!ShouldIncludeImplementation(caller, implementation)) continue;
-                    if (seen.Add(implementation.Id)) candidateList.Add(implementation);
-                }
-            }
-
-            // Fallback: same-name/fqdn candidate implementations
-            if (candidateList.Count == 0)
-            {
-                foreach (var candidate in state.FindCandidateImplementations(serviceNode))
-                {
-                    if (!ShouldIncludeImplementation(caller, candidate)) continue;
-                    if (seen.Add(candidate.Id)) candidateList.Add(candidate);
-                }
-            }
-
-            // Fallback: treat the service node itself as its own implementation if it has edges (self-contained concrete type)
-            if (candidateList.Count == 0 && state.EdgesByFrom.TryGetValue(serviceNode.Id, out var directEdges) && directEdges.Count > 0)
-            {
-                if (seen.Add(serviceNode.Id)) candidateList.Add(serviceNode);
-            }
-
-            var callerRoot = GetAssemblyRoot(caller.Assembly);
-            var sameRoot = candidateList.Where(c => string.Equals(GetAssemblyRoot(c.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (sameRoot.Count > 0)
-            {
-                candidateList = sameRoot; // Prefer same-root implementations to reduce cross-solution noise
-            }
-            else
-            {
-                // As a secondary filter, if multiple implementations exist across roots, keep only those with a file (internal) to drop heuristic externals.
-                var withFiles = candidateList.Where(c => !string.IsNullOrWhiteSpace(c.FilePath) && !c.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase)).ToList();
-                if (withFiles.Count > 0)
-                {
-                    candidateList = withFiles;
-                }
-            }
-
-            // If still nothing, attempt heuristic search (limited) to surface at least one plausible implementation.
-            if (candidateList.Count == 0)
-            {
-                foreach (var candidate in state.FindHeuristicImplementations(serviceNode).Take(5))
-                {
-                    if (!ShouldIncludeImplementation(caller, candidate)) continue;
-                    if (seen.Add(candidate.Id)) candidateList.Add(candidate);
-                }
-            }
-
-            if (candidateList.Count == 0)
-            {
-                // Attempt collapse using single implementation resolution even if none directly enumerated yet
-                var single = TryResolveSingleImplementation(state, caller, serviceNode);
-                if (single is null)
-                {
-                    AppendIndented(builder, indent, "... (no implementation details available)");
-                    return;
-                }
-                candidateList.Add(single);
-            }
-
-            // Collapse interface -> single implementation: replace service header with concrete name and suppress explicit implementation node
-            if (!string.IsNullOrWhiteSpace(methodName) && serviceNode.Name is { } svcName && svcName.StartsWith("I", StringComparison.Ordinal) && candidateList.Count == 1 && candidateList[0].Type == "app.service")
-            {
-                var impl = candidateList[0];
-                // Print concrete implementation header (no separate service header already; parent line printed method)
-                AppendServiceImplementationFlow(builder, state, caller, impl, methodName, indent, heuristic: !state.EdgesByFrom.ContainsKey(impl.Id), suppressHeader: false);
-                return;
-            }
-
-            {
-                candidateList = candidateList
-                    .GroupBy(c => c.Fqdn, StringComparer.OrdinalIgnoreCase)
-                    .Select(g => g
-                        .OrderByDescending(c => state.EdgesByFrom.ContainsKey(c.Id))
-                        .ThenBy(c => c.Fqdn, StringComparer.OrdinalIgnoreCase)
-                        .First())
-                    .OrderBy(c => c.Fqdn, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                var printed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var impl in candidateList)
-                {
-                    var key = impl.Fqdn + "::" + (methodName ?? "*");
-                    if (!printed.Add(key)) continue;
-                    // Refined heuristic detection: only mark as heuristic when no outgoing edges AND no concrete file path (likely synthetic/external)
-                    var hasEdges = state.EdgesByFrom.ContainsKey(impl.Id);
-                    var implHeuristic = !hasEdges && (string.IsNullOrWhiteSpace(impl.FilePath) || impl.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase));
-                    AppendServiceImplementationFlow(builder, state, caller, impl, methodName, indent, heuristic: implHeuristic);
-                }
-            }
-        }
-        finally
-        {
-            state.ServiceStack.Remove(stackKey);
-        }
-    }
-
-    private static void AppendServiceImplementationFlow(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphNode caller,
-        GraphNode implementation,
-        string? invokedMethod,
-        int indent,
-        bool heuristic = false,
-        bool suppressHeader = false) // heuristic flag retained for future conditional formatting
-    {
-        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
-        {
-            AppendIndented(builder, indent, "... (max depth reached)");
-            return;
-        }
-
-        state.ExpandedImplementations ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var expansionKey = implementation.Id + ":" + (invokedMethod ?? "*");
-        var alreadyExpanded = state.ExpandedImplementations.Contains(expansionKey);
-
-        var span = implementation.Span;
-        var spanText = span is null ? string.Empty : $" [L{span.StartLine}-L{span.EndLine}]";
-        var methodSuffix = string.IsNullOrWhiteSpace(invokedMethod) ? string.Empty : $".{invokedMethod}";
-        // Only append heuristic suffix when flagged AND we lack concrete evidence (span or internal file or outgoing edges)
-        var hasConcreteEvidence = implementation.Span is not null ||
-                                   (!string.IsNullOrWhiteSpace(implementation.FilePath) && !implementation.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase)) ||
-                                   state.EdgesByFrom.ContainsKey(implementation.Id);
-        var heuristicSuffix = heuristic && !hasConcreteEvidence ? " [heuristic]" : string.Empty;
-        if (!suppressHeader)
-        {
-            if (alreadyExpanded)
-            {
-                AppendIndented(builder, indent, $"implementation {implementation.Fqdn}{methodSuffix} (see previous expansion){heuristicSuffix}");
-            }
-            else
-            {
-                AppendIndented(builder, indent, $"implementation {implementation.Fqdn}{methodSuffix}{spanText}{heuristicSuffix}");
-            }
-        }
-
-        if (alreadyExpanded)
-        {
-            return; // Do not re-expand internals to save memory and avoid recursion loops
-        }
-        state.ExpandedImplementations.Add(expansionKey);
-
-        // If a specific method was invoked on an interface/service, attempt to expand only edges whose method prop matches invokedMethod
-        if (!string.IsNullOrWhiteSpace(invokedMethod) && state.EdgesByFrom.TryGetValue(implementation.Id, out var methodImplEdges))
-        {
-            var filtered = methodImplEdges.Where(e => e.Props is { } p && p.TryGetValue("method", out var mv) && string.Equals(mv?.ToString(), invokedMethod, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (filtered.Count > 0)
-            {
-                // Narrow expansion strictly to edges tagged with the invoked method
-                AppendGenericServiceNode(builder, state, implementation, invokedMethod, indent + 1, suppressSelfHeuristic: true);
-                return; // Avoid double-expansion via switch below
-            }
-            else
-            {
-                // Fallback: no tagged edges for the method; allow a broader expansion (untagged internal edges) so we don't show an empty block
-                AppendGenericServiceNode(builder, state, implementation, null, indent + 1, suppressSelfHeuristic: true);
-                return;
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(implementation.Fqdn) &&
-            string.Equals(invokedMethod, "ProcessAsync", StringComparison.OrdinalIgnoreCase) &&
-            (implementation.Fqdn.EndsWith(".RequestProcessor", StringComparison.Ordinal) ||
-             implementation.Fqdn.EndsWith(".SimpleRequestProcessor", StringComparison.Ordinal)))
-        {
-            AppendRequestProcessorFlow(builder, state, caller, indent + 1);
-            return;
-        }
-
-        switch (implementation.Type)
-        {
-            case "cqrs.handler":
-                AppendHandlerFlow(builder, state, implementation, indent + 1);
-                break;
-            case "cqrs.request":
-                AppendCommandFlow(builder, state, implementation, indent + 1);
-                break;
-            case "app.repository":
-            case "repository":
-                AppendRepositoryFlow(builder, state, implementation, indent + 1);
-                break;
-            case "app.service":
-                // Special handling: treat pipeline behaviors as transparent wrappers that dispatch the same request chain
-                if (!string.IsNullOrWhiteSpace(implementation.Fqdn) && implementation.Fqdn.StartsWith("MediatR.IPipelineBehavior<", StringComparison.Ordinal))
-                {
-                    // Expand internal uses_service edges but avoid recursive noise.
-                    if (state.EdgesByFrom.TryGetValue(implementation.Id, out var implEdges))
-                    {
-                        foreach (var innerService in implEdges.Where(e => e.Kind == "uses_service"))
-                        {
-                            if (!state.NodesById.TryGetValue(innerService.To, out var innerNode)) continue;
-                            if (IsInfrastructureNoiseService(innerNode)) continue;
-                            AppendIndented(builder, indent + 1, $"uses_service {innerNode.Name}");
-                            AppendServiceContractFlow(builder, state, implementation, innerNode, innerService.Props is { } sp && sp.TryGetValue("method", out var mv) ? mv?.ToString() : null, indent + 2);
-                        }
-                    }
-                    break;
-                }
-                goto default;
-            default:
-                AppendGenericServiceNode(builder, state, implementation, invokedMethod, indent + 1, suppressSelfHeuristic: true);
-                break;
-        }
-    }
-
     private static GraphNode? TryResolveSingleImplementation(FlowRenderState state, GraphNode caller, GraphNode serviceNode)
     {
         var candidates = new List<GraphNode>();
@@ -1880,12 +1817,99 @@ public static class FlowBuilder
         return grouped.Count == 1 ? grouped[0] : null;
     }
 
+    private static GraphNode? TryResolveControlledRepository(FlowRenderState state, GraphNode caller, GraphNode serviceNode)
+    {
+        var name = serviceNode.Name ?? serviceNode.Fqdn ?? string.Empty;
+        var genericStart = name.IndexOf('<');
+        var genericEnd = name.LastIndexOf('>');
+        if (genericStart < 0 || genericEnd <= genericStart + 1)
+        {
+            return null;
+        }
+
+        var genericArgument = name.Substring(genericStart + 1, genericEnd - genericStart - 1).Trim();
+        if (string.IsNullOrWhiteSpace(genericArgument))
+        {
+            return null;
+        }
+
+        var simpleArg = genericArgument.Split('.').Last();
+        if (string.IsNullOrWhiteSpace(simpleArg))
+        {
+            return null;
+        }
+
+        var candidateNames = new[]
+        {
+            simpleArg + "Repository",
+            simpleArg + "ControlledRepository",
+        };
+
+        GraphNode? best = null;
+        var callerRoot = GetAssemblyRoot(caller.Assembly);
+
+        foreach (var candidateName in candidateNames)
+        {
+            if (!state.NodesByName.TryGetValue(candidateName, out var matches))
+            {
+                continue;
+            }
+
+            var repositories = matches
+                .Where(n => n.Type is "app.repository" or "repository")
+                .ToList();
+
+            if (repositories.Count == 0)
+            {
+                continue;
+            }
+
+            if (repositories.Count == 1)
+            {
+                return repositories[0];
+            }
+
+            var sameRoot = repositories
+                .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (sameRoot.Count == 1)
+            {
+                return sameRoot[0];
+            }
+
+            if (sameRoot.Count > 1)
+            {
+                best ??= sameRoot
+                    .OrderBy(r => r.Fqdn ?? r.Name, StringComparer.OrdinalIgnoreCase)
+                    .First();
+            }
+            else
+            {
+                best ??= repositories
+                    .OrderBy(r => r.Fqdn ?? r.Name, StringComparer.OrdinalIgnoreCase)
+                    .First();
+            }
+        }
+
+        return best;
+    }
+
+    private static string? GetCallMethod(GraphEdge edge)
+    {
+        return edge.Props is { } props && props.TryGetValue("method", out var methodValue)
+            ? methodValue?.ToString()
+            : null;
+    }
+
     private static bool IsInfrastructureNoiseService(GraphNode serviceNode)
     {
         var name = serviceNode.Name ?? string.Empty;
         var fqdn = serviceNode.Fqdn ?? string.Empty;
 
         if (name.StartsWith("ILogger<", StringComparison.Ordinal) || fqdn.StartsWith("Microsoft.Extensions.Logging.ILogger<", StringComparison.Ordinal))
+            return true;
+        if (string.Equals(name, "ILogger", StringComparison.Ordinal) || fqdn.Contains("Microsoft.Extensions.Logging.ILogger", StringComparison.Ordinal))
             return true;
         if (string.Equals(name, "IMapper", StringComparison.Ordinal) || fqdn.Contains("AutoMapper.IMapper", StringComparison.Ordinal))
             return true;
@@ -1901,6 +1925,8 @@ public static class FlowBuilder
         if (name is "ITracer" || fqdn.Contains("Tracing", StringComparison.Ordinal))
             return true;
         if (name is "IDistributedCache" || fqdn.Contains("Microsoft.Extensions.Caching.Distributed.IDistributedCache", StringComparison.Ordinal))
+            return true;
+        if (string.Equals(name, "IHttpContextAccessor", StringComparison.Ordinal) || fqdn.Contains("Microsoft.AspNetCore.Http.IHttpContextAccessor", StringComparison.Ordinal))
             return true;
         return false;
     }
@@ -1927,6 +1953,8 @@ public static class FlowBuilder
             }
             return;
         }
+
+        var printedServiceCallKeys = new HashSet<string>(StringComparer.Ordinal);
 
         // Configuration usages
         foreach (var configEdge in edges.Where(e => e.Kind == "uses_configuration"))
@@ -1955,6 +1983,11 @@ public static class FlowBuilder
             if (!isRepo)
             {
                 var callMethod = callEdge.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
+                var dedupKey = BuildCallDedupKey(callEdge, targetNode, callMethod);
+                if (!printedServiceCallKeys.Add(dedupKey))
+                {
+                    continue;
+                }
                 var methodSuffix = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
                 var lineText = callEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                 AppendIndented(builder, indent, $"calls {targetNode.Name}{methodSuffix}{lineText}");
@@ -2059,6 +2092,7 @@ public static class FlowBuilder
                 : null;
             var methodSuffix = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{methodName}";
             AppendIndented(builder, indent, $"uses_storage {storageNode.Name}{methodSuffix}{lineText}");
+            state.CurrentImpact?.RecordStorage(GetDisplayName(storageNode));
         }
 
         foreach (var dataEdge in edges.Where(e => e.Kind is "queries" or "writes_to" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
@@ -2074,6 +2108,7 @@ public static class FlowBuilder
             var lineText = dataEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var label = ExtractOperationLabel(dataEdge);
             AppendIndented(builder, indent, $"{label} {entityNode.Name}{lineText}");
+            state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
         }
 
         // Mapping edges directly off the service implementation
@@ -2100,6 +2135,7 @@ public static class FlowBuilder
                 continue; // suppress duplicate
             }
             AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
+            state.CurrentImpact?.RecordCache(GetDisplayName(cacheNode));
         }
 
         // Options
@@ -2110,6 +2146,7 @@ public static class FlowBuilder
             var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
             var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+            state.CurrentImpact?.RecordOption(GetDisplayName(optionsNode));
         }
 
         // Logging
@@ -2155,6 +2192,11 @@ public static class FlowBuilder
                 continue;
             }
             AppendIndented(builder, indent, $"{prefix} {requestNode.Name}{handlerPart}{responsePart}{lineText}");
+            state.CurrentImpact?.RecordRequest(GetDisplayName(requestNode));
+            if (!string.IsNullOrWhiteSpace(handlerName))
+            {
+                state.CurrentImpact?.RecordHandler(handlerName);
+            }
             AppendCommandFlow(builder, state, requestNode, indent + 1);
         }
 
@@ -2171,6 +2213,7 @@ public static class FlowBuilder
             if (!state.NodesById.TryGetValue(notificationEdge.To, out var notificationNode)) continue;
             var lineText = notificationEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
+            state.CurrentImpact?.RecordNotification(GetDisplayName(notificationNode));
             AppendNotificationFlow(builder, state, notificationNode, indent + 1);
         }
 
@@ -2181,6 +2224,7 @@ public static class FlowBuilder
             var lineText = publishEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var details = BuildPublisherDetails(messageNode);
             AppendIndented(builder, indent, $"publishes {messageNode.Name}{details}{lineText}");
+            state.CurrentImpact?.RecordMessage(GetDisplayName(messageNode));
             AppendPublisherFlow(builder, state, messageNode, indent + 1);
         }
     }
@@ -2338,492 +2382,113 @@ public static class FlowBuilder
             return null;
         }
 
-        var path = route.Split('?', 2)[0].Trim();
-        if (string.IsNullOrWhiteSpace(path))
+        var trimmed = route.Trim();
+
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absolute))
         {
-            return null;
+            trimmed = absolute.AbsolutePath;
+        }
+        else if (trimmed.Contains("://", StringComparison.Ordinal))
+        {
+            var parts = trimmed.Split(new[] { "://" }, 2, StringSplitOptions.None);
+            var remainder = parts.Length == 2 ? parts[1] : trimmed;
+            var slashIndex = remainder.IndexOf('/');
+            trimmed = slashIndex >= 0 ? remainder[slashIndex..] : "/";
         }
 
-        return path.StartsWith("/", StringComparison.Ordinal) ? path : "/" + path;
-    }
-
-    private sealed class FlowRenderState
-    {
-        public FlowRenderState(
-            GraphDocument document,
-            IReadOnlyDictionary<string, GraphNode> nodesById,
-            IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
-            IReadOnlyDictionary<string, IReadOnlyList<GraphNode>> nodesByFqdn,
-            IReadOnlyDictionary<string, IReadOnlyList<GraphNode>> nodesByName,
-            IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
-            FlowWorkspaceIndex? workspace,
-            int? maxDepth)
+        var questionIndex = trimmed.IndexOf('?', StringComparison.Ordinal);
+        if (questionIndex >= 0)
         {
-            Document = document;
-            NodesById = nodesById;
-            EdgesByFrom = edgesByFrom;
-            NodesByFqdn = nodesByFqdn;
-            NodesByName = nodesByName;
-            MapLookup = mapLookup;
-            Workspace = workspace;
-            MaxDepth = maxDepth;
+            trimmed = trimmed[..questionIndex];
         }
 
-        public GraphDocument Document { get; }
-        public IReadOnlyDictionary<string, GraphNode> NodesById { get; }
-        public IReadOnlyDictionary<string, List<GraphEdge>> EdgesByFrom { get; }
-        public IReadOnlyDictionary<string, IReadOnlyList<GraphNode>> NodesByFqdn { get; }
-        public IReadOnlyDictionary<string, IReadOnlyList<GraphNode>> NodesByName { get; }
-        public IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> MapLookup { get; }
-        public FlowWorkspaceIndex? Workspace { get; }
-        public HashSet<string> EndpointStack { get; } = new(StringComparer.Ordinal);
-        public HashSet<string> HandlerStack { get; } = new(StringComparer.Ordinal);
-        public HashSet<string> NotificationStack { get; } = new(StringComparer.Ordinal);
-        public HashSet<string> TargetServiceVisited { get; } = new(StringComparer.Ordinal);
-        public HashSet<string> ServiceStack { get; } = new(StringComparer.Ordinal);
-    // Deduplication sets to suppress repeated request dispatch and handler expansion noise within a single flow render
-    public HashSet<string>? DedupRequests { get; set; }
-    public HashSet<string>? DedupHandlers { get; set; }
-    public HashSet<string>? ExpandedImplementations { get; set; }
-    public HashSet<string>? RenderedEndpoints { get; set; }
-        // Track mapping edges printed: key format FromNodeId::ToNodeId::Variable(optional)
-        public HashSet<string> PrintedMappings { get; } = new(StringComparer.Ordinal);
-        public int? MaxDepth { get; }
-    // Reachability filter: if populated, only nodes whose Id is contained will be expanded/emitted.
-    public HashSet<string>? AllowedIds { get; set; }
-    // Prevent repeated HttpClient remote endpoint expansions (clientId::targetEndpointId::verb::route)
-    public HashSet<string> HttpClientExpansionKeys { get; } = new(StringComparer.Ordinal);
-
-        public IEnumerable<GraphNode> FindCandidateImplementations(GraphNode serviceNode)
+        trimmed = trimmed.Replace('\\', '/');
+        while (trimmed.Contains("//", StringComparison.Ordinal))
         {
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            if (NodesByFqdn.TryGetValue(serviceNode.Fqdn ?? string.Empty, out var fqdnMatches))
+            trimmed = trimmed.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        trimmed = trimmed.Trim();
+        if (trimmed.Length == 0)
+        {
+            return "/";
+        }
+
+        if (!trimmed.StartsWith("/", StringComparison.Ordinal))
+        {
+            trimmed = "/" + trimmed;
+        }
+
+        trimmed = Uri.UnescapeDataString(trimmed);
+
+        var segments = trimmed.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var cleaned = new List<string>(segments.Length);
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var segment = segments[i];
+            if (segment.StartsWith("{", StringComparison.Ordinal) && segment.EndsWith("}", StringComparison.Ordinal))
             {
-                foreach (var candidate in fqdnMatches)
+                var colonIndex = segment.IndexOf(':');
+                if (colonIndex > 0)
                 {
-                    if (string.Equals(candidate.Id, serviceNode.Id, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-                    if (seen.Add(candidate.Id))
-                    {
-                        yield return candidate;
-                    }
+                    segment = segment[..colonIndex] + "}";
                 }
             }
 
-            if (NodesByName.TryGetValue(serviceNode.Name ?? string.Empty, out var nameMatches))
-            {
-                foreach (var candidate in nameMatches)
-                {
-                    if (string.Equals(candidate.Id, serviceNode.Id, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-                    if (seen.Add(candidate.Id))
-                    {
-                        yield return candidate;
-                    }
-                }
-            }
-        }
-
-        public IEnumerable<GraphNode> FindHeuristicImplementations(GraphNode serviceNode)
-        {
-            var yielded = new HashSet<string>(StringComparer.Ordinal);
-            var name = serviceNode.Name ?? string.Empty;
-            if (name.StartsWith("I", StringComparison.Ordinal) && name.Length > 1)
-            {
-                var baseName = name[1..];
-                if (NodesByName.TryGetValue(baseName, out var impls))
-                {
-                    foreach (var impl in impls)
-                    {
-                        if (impl.Id == serviceNode.Id) continue;
-                        if (yielded.Add(impl.Id)) yield return impl;
-                    }
-                }
-            }
-
-            // Options generic parameter: IOptions<T>
-            var fqdn = serviceNode.Fqdn ?? string.Empty;
-            var optionsPrefix = "Microsoft.Extensions.Options.IOptions<";
-            if (fqdn.StartsWith(optionsPrefix, StringComparison.Ordinal) && fqdn.EndsWith('>'))
-            {
-                var inner = fqdn.Substring(optionsPrefix.Length, fqdn.Length - optionsPrefix.Length - 1);
-                var simpleInner = inner.Split('.').Last();
-                if (NodesByName.TryGetValue(simpleInner, out var optNodes))
-                {
-                    foreach (var opt in optNodes)
-                    {
-                        if (yielded.Add(opt.Id)) yield return opt;
-                    }
-                }
-            }
-
-            // Generic interface fallback: strip generic arity / args and leading I
-            var genericIndex = name.IndexOf('<');
-            if (genericIndex > 0)
-            {
-                var genericBase = name[..genericIndex];
-                if (genericBase.StartsWith("I", StringComparison.Ordinal) && genericBase.Length > 1)
-                {
-                    genericBase = genericBase[1..];
-                }
-                if (NodesByName.TryGetValue(genericBase, out var genericCandidates))
-                {
-                    foreach (var g in genericCandidates)
-                    {
-                        if (g.Id == serviceNode.Id) continue;
-                        if (yielded.Add(g.Id)) yield return g;
-                    }
-                }
-            }
-
-            // Suffix normalization (Service/Provider)
-            string Normalize(string s)
-            {
-                if (s.EndsWith("Service", StringComparison.Ordinal)) return s[..^7];
-                if (s.EndsWith("Provider", StringComparison.Ordinal)) return s[..^8];
-                return s;
-            }
-            var normalized = Normalize(name.TrimStart('I'));
-            if (NodesByName.TryGetValue(normalized + "Service", out var serviceSuffixImpls))
-            {
-                foreach (var impl in serviceSuffixImpls)
-                {
-                    if (impl.Id == serviceNode.Id) continue;
-                    if (yielded.Add(impl.Id)) yield return impl;
-                }
-            }
-        }
-    }
-
-    private static string BuildAuthorizationAnnotation(GraphNode endpoint)
-    {
-        if (endpoint.Props is not { } props)
-        {
-            return string.Empty;
-        }
-
-        var parts = new List<string>();
-        if (props.TryGetValue("authorization", out var authObj) && authObj is IEnumerable<object> authList)
-        {
-            var policies = new List<string>();
-            foreach (var a in authList)
-            {
-                if (a is IDictionary<string, object> dict && dict.TryGetValue("policy", out var policyVal))
-                {
-                    var policy = policyVal?.ToString();
-                    if (!string.IsNullOrWhiteSpace(policy))
-                    {
-                        policies.Add(policy!);
-                    }
-                }
-            }
-            if (policies.Count > 0)
-            {
-                parts.Add($"auth={string.Join(',', policies)}");
-            }
-        }
-
-        if (props.TryGetValue("allow_anonymous", out var anonObj) && anonObj is bool anon && anon)
-        {
-            parts.Add("AllowAnonymous");
-        }
-
-        return parts.Count > 0 ? " [" + string.Join(' ', parts) + "]" : string.Empty;
-    }
-
-    private static string? GetNodeProp(GraphNode node, string key)
-        => node.Props is { } props && props.TryGetValue(key, out var value) ? value?.ToString() : null;
-
-    private static string GetSimpleType(string? type)
-    {
-        if (string.IsNullOrWhiteSpace(type))
-        {
-            return string.Empty;
-        }
-
-        var simple = type.Replace("?", string.Empty, StringComparison.Ordinal);
-        var genericIndex = simple.IndexOf('<');
-        if (genericIndex >= 0)
-        {
-            simple = simple[..genericIndex];
-        }
-
-        var lastDot = simple.LastIndexOf('.');
-        if (lastDot >= 0)
-        {
-            return simple[(lastDot + 1)..];
-        }
-
-        return simple;
-    }
-
-    private static void AppendIndented(StringBuilder builder, int indent, string text)
-    {
-        builder.Append(' ', indent * 2);
-        builder.AppendLine($"└─ {text}");
-    }
-
-    private static void AppendNotificationFlow(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphNode notification,
-        int indent)
-    {
-        if (!state.NotificationStack.Add(notification.Id))
-        {
-            return;
-        }
-
-        try
-        {
-            if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
-            {
-                AppendIndented(builder, indent, "... (max depth reached)");
-                return;
-            }
-
-            if (!state.EdgesByFrom.TryGetValue(notification.Id, out var edges))
-            {
-                return;
-            }
-
-            foreach (var handlerEdge in edges.Where(e => e.Kind == "handled_by"))
-            {
-                if (!state.NodesById.TryGetValue(handlerEdge.To, out var handlerNode))
-                {
-                    continue;
-                }
-
-                var span = handlerNode.Span;
-                AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
-                AppendNotificationHandlerFlow(builder, state, handlerNode, indent + 1);
-            }
-        }
-        finally
-        {
-            state.NotificationStack.Remove(notification.Id);
-        }
-    }
-
-    private static void AppendNotificationHandlerFlow(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphNode handler,
-        int indent)
-    {
-        if (!state.HandlerStack.Add(handler.Id))
-        {
-            return;
-        }
-
-        try
-        {
-            if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
-            {
-                AppendIndented(builder, indent, "... (max depth reached)");
-                return;
-            }
-
-            if (!state.EdgesByFrom.TryGetValue(handler.Id, out var edges))
-            {
-                return;
-            }
-
-            // Group repository calls in notification handler
-            var notifCallEdges = edges.Where(e => e.Kind == "calls").ToList();
-            for (int i = 0; i < notifCallEdges.Count; i++)
-            {
-                var call = notifCallEdges[i];
-                if (!state.NodesById.TryGetValue(call.To, out var target)) continue;
-                var isRepo = target.Type == "app.repository" || target.Type == "repository";
-                if (!isRepo)
-                {
-                    var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
-                    var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
-                    var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                    AppendIndented(builder, indent, $"calls {target.Name}{serviceMethodText}{lineText}");
-                    continue;
-                }
-                var methods = new List<string>();
-                int? firstLine = call.Transform?.Location?.Line;
-                int j = i;
-                while (j < notifCallEdges.Count)
-                {
-                    var ej = notifCallEdges[j];
-                    if (ej.To != call.To) break;
-                    var m = ej.Props is { } p && p.TryGetValue("method", out var mv) ? mv?.ToString() : null;
-                    if (!string.IsNullOrWhiteSpace(m)) methods.Add(m!);
-                    if (!firstLine.HasValue && ej.Transform?.Location?.Line is int ln) firstLine = ln;
-                    j++;
-                }
-                i = j - 1;
-                var uniqueMethods = methods.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList();
-                if (uniqueMethods.Count <= 1)
-                {
-                    var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
-                    var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
-                    var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                    AppendIndented(builder, indent, $"calls {target.Name}{serviceMethodText}{lineText}");
-                }
-                else
-                {
-                    var methodsPart = $" (methods: {string.Join(",", uniqueMethods)})";
-                    var lineTextGroup = firstLine.HasValue ? $" [L{firstLine}]" : string.Empty;
-                    AppendIndented(builder, indent, $"calls {target.Name}{methodsPart}{lineTextGroup}");
-                }
-                AppendRepositoryFlow(builder, state, target, indent + 1);
-            }
-
-            foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
-            {
-                AppendMappingEdge(builder, state, mapping, indent);
-            }
-
-            foreach (var service in edges.Where(e => e.Kind == "uses_service"))
-            {
-                if (!state.NodesById.TryGetValue(service.To, out var serviceNode))
-                {
-                    continue;
-                }
-
-                var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
-                    ? lifetimeValue?.ToString()
-                    : null;
-                var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
-                var serviceMethodName = service.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
-                    ? methodValue?.ToString()
-                    : null;
-                var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
-                AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
-
-                var nextIndent = indent + 1;
-                if (!string.IsNullOrWhiteSpace(serviceMethodName))
-                {
-                    AppendIndented(builder, indent + 1, $"method {serviceMethodName}{lineText}");
-                    nextIndent = indent + 2;
-                }
-
-                AppendServiceContractFlow(builder, state, handler, serviceNode, serviceMethodName, nextIndent);
-            }
-
-            foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
-            {
-                if (!state.NodesById.TryGetValue(requestEdge.To, out var requestNode))
-                {
-                    continue;
-                }
-
-                var lineText = requestEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                AppendIndented(builder, indent, $"sends_request {requestNode.Name}{lineText}");
-                AppendCommandFlow(builder, state, requestNode, indent + 1);
-            }
-
-            foreach (var publish in edges.Where(e => e.Kind == "publishes_notification"))
-            {
-                if (!state.NodesById.TryGetValue(publish.To, out var notificationNode))
-                {
-                    continue;
-                }
-
-                var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
-                AppendNotificationFlow(builder, state, notificationNode, indent + 1);
-            }
-        }
-        finally
-        {
-            state.HandlerStack.Remove(handler.Id);
-        }
-    }
-
-    private static void AppendPublisherFlow(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphNode publisher,
-        int indent)
-    {
-        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
-        {
-            AppendIndented(builder, indent, "... (max depth reached)");
-            return;
-        }
-        if (!state.EdgesByFrom.TryGetValue(publisher.Id, out var edges))
-        {
-            return;
-        }
-
-        foreach (var produced in edges.Where(e => e.Kind == "produces_event"))
-        {
-            if (!state.NodesById.TryGetValue(produced.To, out var contract))
+            var lowered = segment.ToLowerInvariant();
+            if (IsVersionSegment(lowered) && (cleaned.Count == 0 || (cleaned.Count == 1 && cleaned[0] == "api")))
             {
                 continue;
             }
 
-            var lineText = produced.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"produces_event {contract.Name}{lineText}");
+            cleaned.Add(lowered);
         }
+
+        if (cleaned.Count == 0)
+        {
+            return "/";
+        }
+
+        return "/" + string.Join('/', cleaned);
     }
 
-    private static string BuildPublisherDetails(GraphNode publisher)
+    private static bool IsVersionSegment(string segment)
     {
-        if (publisher.Props is not { Count: > 0 })
+        if (string.IsNullOrWhiteSpace(segment))
         {
-            return string.Empty;
+            return false;
         }
 
-        var details = new List<string>();
-
-        if (publisher.Props.TryGetValue("queue", out var queueValue) &&
-            queueValue is string { Length: > 0 } queue)
+        if (!segment.StartsWith('v'))
         {
-            details.Add($"queue={queue}");
+            return false;
         }
 
-        if (publisher.Props.TryGetValue("subject", out var subjectValue) &&
-            subjectValue is string { Length: > 0 } subject)
+        var payload = segment[1..];
+        if (payload.StartsWith("{", StringComparison.Ordinal))
         {
-            details.Add($"subject={subject}");
+            return true;
         }
 
-        return details.Count > 0
-            ? $" ({string.Join(", ", details)})"
-            : string.Empty;
-    }
-
-    private static string ExtractOperationLabel(GraphEdge edge)
-    {
-        if (edge.Props is { } props && props.TryGetValue("operation", out var value) && value is not null)
+        var hasDigit = false;
+        foreach (var ch in payload)
         {
-            var text = value.ToString();
-            if (!string.IsNullOrWhiteSpace(text))
+            if (char.IsDigit(ch))
             {
-                return text!;
+                hasDigit = true;
+                continue;
             }
+
+            if (ch is '.' or '_' or '-')
+            {
+                continue;
+            }
+
+            return false;
         }
 
-        return edge.Kind switch
-        {
-            "inserts_into" => "insert",
-            "updates" => "update",
-            "deletes_from" => "delete",
-            "upserts" => "upsert",
-            "writes_to" => "writes_to",
-            "queries" => "queries",
-            "reads_from" => "reads_from",
-            _ => edge.Kind
-        };
+        return hasDigit;
     }
+
+
 }
-
-
-
-
-
-
-
-
