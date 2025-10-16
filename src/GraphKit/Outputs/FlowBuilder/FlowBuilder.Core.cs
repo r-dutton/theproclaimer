@@ -577,10 +577,10 @@ public static partial class FlowBuilder
                     ? methodValue?.ToString()
                     : null;
                 var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
-                // Attempt collapse: single concrete implementation for interface service with invoked method
+                // Attempt collapse: single concrete implementation for interface service
                 GraphNode? collapseImpl = null;
                 bool collapse = false;
-                if (!string.IsNullOrWhiteSpace(serviceMethodName) && serviceNode.Name is { } sname && sname.StartsWith("I", StringComparison.Ordinal) && serviceNode.Type == "app.service")
+                if (serviceNode.Name is { } sname && sname.StartsWith("I", StringComparison.Ordinal) && serviceNode.Type == "app.service")
                 {
                     var single = TryResolveSingleImplementation(state, endpoint, serviceNode);
                     if (single != null && single.Type == "app.service")
@@ -616,16 +616,6 @@ public static partial class FlowBuilder
                 }
                 state.CurrentImpact?.RecordServiceUsage(printedName ?? GetDisplayName(serviceNode));
                 AppendIndented(builder, childIndent, $"uses_service {printedName}{suffix}{serviceLineText}");
-                // Ensure test expectations: if collapsing interface to single implementation, explicitly emit implementation header even if already printed elsewhere
-                if (collapse && collapseImpl != null && collapseImpl.Name != serviceNode.Name)
-                {
-                    // Provide explicit implementation line if it will not otherwise appear (dedup handled downstream)
-                    // Only emit when method provided so we reflect invocation context.
-                    if (!string.IsNullOrWhiteSpace(serviceMethodName))
-                    {
-                        AppendIndented(builder, childIndent + 1, $"implementation {collapseImpl.Fqdn}.{serviceMethodName}");
-                    }
-                }
 
                 var nextIndent = childIndent + 1;
                 if (!string.IsNullOrWhiteSpace(serviceMethodName))
@@ -636,7 +626,7 @@ public static partial class FlowBuilder
                 if (collapse && collapseImpl != null)
                 {
                     // Expand implementation (show header for clarity now that collapsed uses_service line renamed)
-                    AppendServiceImplementationFlow(builder, state, endpoint, collapseImpl, serviceMethodName, nextIndent, heuristic: !state.EdgesByFrom.ContainsKey(collapseImpl.Id), suppressHeader: false);
+                    AppendServiceImplementationFlow(builder, state, endpoint, collapseImpl, serviceMethodName, nextIndent, heuristic: !state.EdgesByFrom.ContainsKey(collapseImpl.Id), suppressHeader: true);
                 }
                 else
                 {
@@ -1859,6 +1849,10 @@ public static partial class FlowBuilder
                 .Where(n => n.Type is "app.repository" or "repository")
                 .ToList();
 
+            repositories = repositories
+                .Where(r => IsWithinCallerSolution(caller, r))
+                .ToList();
+
             if (repositories.Count == 0)
             {
                 continue;
@@ -2326,6 +2320,38 @@ public static partial class FlowBuilder
         }
     }
 
+    private static string GetSolutionRoot(string? project)
+    {
+        if (string.IsNullOrWhiteSpace(project))
+        {
+            return string.Empty;
+        }
+
+        var normalized = project.Replace('\\', '/');
+        var separatorIndex = normalized.IndexOf('/');
+        return separatorIndex > 0 ? normalized[..separatorIndex] : normalized;
+    }
+
+    private static bool IsWithinCallerSolution(GraphNode caller, GraphNode candidate)
+    {
+        var callerSolution = GetSolutionRoot(caller.Project);
+        var candidateSolution = GetSolutionRoot(candidate.Project);
+
+        if (!string.IsNullOrWhiteSpace(callerSolution) && !string.IsNullOrWhiteSpace(candidateSolution))
+        {
+            return string.Equals(callerSolution, candidateSolution, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var callerRoot = GetAssemblyRoot(caller.Assembly);
+        var candidateRoot = GetAssemblyRoot(candidate.Assembly);
+        if (!string.IsNullOrWhiteSpace(callerRoot) && !string.IsNullOrWhiteSpace(candidateRoot))
+        {
+            return string.Equals(callerRoot, candidateRoot, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return true;
+    }
+
     private static bool ShouldIncludeImplementation(GraphNode caller, GraphNode implementation)
     {
         if (string.Equals(caller.Id, implementation.Id, StringComparison.Ordinal))
@@ -2343,8 +2369,13 @@ public static partial class FlowBuilder
             return false;
         }
 
-        // Heuristic inclusion rules:
-        // 1. Always include if the implementation has a concrete source file (internal code) – even if assembly root differs (cross-solution first-party like AtoService).
+        if (!IsWithinCallerSolution(caller, implementation))
+        {
+            return false;
+        }
+
+        // Heuristic inclusion rules (after solution filtering):
+        // 1. Always include if the implementation has a concrete source file (internal code).
         // 2. Include if assembly roots match (likely same bounded context / solution segment).
         // 3. Exclude otherwise (likely external / framework / heuristic duplicate) to avoid noisy expansions.
 

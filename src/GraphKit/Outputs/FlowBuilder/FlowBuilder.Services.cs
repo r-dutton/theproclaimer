@@ -214,6 +214,7 @@ public static partial class FlowBuilder
     {
         static void AddMatches(
             FlowRenderState state,
+            GraphNode caller,
             string? key,
             HashSet<string> seen,
             List<GraphNode> candidates)
@@ -228,6 +229,11 @@ public static partial class FlowBuilder
                 foreach (var candidate in nameMatches)
                 {
                     if (!string.Equals(candidate.Type, "cqrs.request", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!IsWithinCallerSolution(caller, candidate))
                     {
                         continue;
                     }
@@ -248,6 +254,11 @@ public static partial class FlowBuilder
                         continue;
                     }
 
+                    if (!IsWithinCallerSolution(caller, candidate))
+                    {
+                        continue;
+                    }
+
                     if (seen.Add(candidate.Id))
                     {
                         candidates.Add(candidate);
@@ -259,24 +270,24 @@ public static partial class FlowBuilder
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var candidates = new List<GraphNode>();
 
-        AddMatches(state, serviceNode.Name, seen, candidates);
+        AddMatches(state, caller, serviceNode.Name, seen, candidates);
 
         if (!string.IsNullOrWhiteSpace(serviceNode.Name))
         {
             var genericIndex = serviceNode.Name.IndexOf('<');
             if (genericIndex > 0)
             {
-                AddMatches(state, serviceNode.Name[..genericIndex], seen, candidates);
+                AddMatches(state, caller, serviceNode.Name[..genericIndex], seen, candidates);
             }
         }
 
         if (!string.IsNullOrWhiteSpace(serviceNode.Fqdn))
         {
-            AddMatches(state, serviceNode.Fqdn, seen, candidates);
+            AddMatches(state, caller, serviceNode.Fqdn, seen, candidates);
             var simple = serviceNode.Fqdn.Split('.').Last();
             if (!string.Equals(simple, serviceNode.Name, StringComparison.Ordinal))
             {
-                AddMatches(state, simple, seen, candidates);
+                AddMatches(state, caller, simple, seen, candidates);
             }
         }
 
@@ -363,12 +374,18 @@ public static partial class FlowBuilder
                 AppendIndented(builder, indent, $"implementation {implementation.Fqdn}{methodSuffix}{spanText}{heuristicSuffix}");
             }
         }
+        else if (alreadyExpanded)
+        {
+            AppendIndented(builder, indent, $"implementation {implementation.Fqdn}{methodSuffix} (see previous expansion){heuristicSuffix}");
+        }
 
         if (alreadyExpanded)
         {
             return; // Do not re-expand internals to save memory and avoid recursion loops
         }
         state.ExpandedImplementations.Add(expansionKey);
+
+        var childIndent = suppressHeader ? indent : indent + 1;
 
         // If a specific method was invoked on an interface/service, attempt to expand only edges whose method prop matches invokedMethod
         if (!string.IsNullOrWhiteSpace(invokedMethod) && state.EdgesByFrom.TryGetValue(implementation.Id, out var methodImplEdges))
@@ -377,13 +394,13 @@ public static partial class FlowBuilder
             if (filtered.Count > 0)
             {
                 // Narrow expansion strictly to edges tagged with the invoked method
-                AppendGenericServiceNode(builder, state, implementation, invokedMethod, indent + 1, suppressSelfHeuristic: true);
+                AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
                 return; // Avoid double-expansion via switch below
             }
             else
             {
                 // Fallback: no tagged edges for the method; allow a broader expansion (untagged internal edges) so we don't show an empty block
-                AppendGenericServiceNode(builder, state, implementation, null, indent + 1, suppressSelfHeuristic: true);
+                AppendGenericServiceNode(builder, state, implementation, null, childIndent, suppressSelfHeuristic: true);
                 return;
             }
         }
@@ -393,21 +410,21 @@ public static partial class FlowBuilder
             (implementation.Fqdn.EndsWith(".RequestProcessor", StringComparison.Ordinal) ||
              implementation.Fqdn.EndsWith(".SimpleRequestProcessor", StringComparison.Ordinal)))
         {
-            AppendRequestProcessorFlow(builder, state, caller, indent + 1);
+            AppendRequestProcessorFlow(builder, state, caller, childIndent);
             return;
         }
 
         switch (implementation.Type)
         {
             case "cqrs.handler":
-                AppendHandlerFlow(builder, state, implementation, indent + 1);
+                AppendHandlerFlow(builder, state, implementation, childIndent);
                 break;
             case "cqrs.request":
-                AppendCommandFlow(builder, state, implementation, indent + 1);
+                AppendCommandFlow(builder, state, implementation, childIndent);
                 break;
             case "app.repository":
             case "repository":
-                AppendRepositoryFlow(builder, state, implementation, indent + 1);
+                AppendRepositoryFlow(builder, state, implementation, childIndent);
                 break;
             case "app.service":
                 // Special handling: treat pipeline behaviors as transparent wrappers that dispatch the same request chain
@@ -420,15 +437,15 @@ public static partial class FlowBuilder
                         {
                             if (!state.NodesById.TryGetValue(innerService.To, out var innerNode)) continue;
                             if (IsInfrastructureNoiseService(innerNode)) continue;
-                            AppendIndented(builder, indent + 1, $"uses_service {innerNode.Name}");
-                            AppendServiceContractFlow(builder, state, implementation, innerNode, innerService.Props is { } sp && sp.TryGetValue("method", out var mv) ? mv?.ToString() : null, indent + 2);
+                            AppendIndented(builder, childIndent, $"uses_service {innerNode.Name}");
+                            AppendServiceContractFlow(builder, state, implementation, innerNode, innerService.Props is { } sp && sp.TryGetValue("method", out var mv) ? mv?.ToString() : null, childIndent + 1);
                         }
                     }
                     break;
                 }
                 goto default;
             default:
-                AppendGenericServiceNode(builder, state, implementation, invokedMethod, indent + 1, suppressSelfHeuristic: true);
+                AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
                 break;
         }
     }
