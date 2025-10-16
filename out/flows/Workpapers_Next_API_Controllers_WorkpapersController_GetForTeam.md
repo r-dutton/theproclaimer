@@ -1,2 +1,2 @@
-[web] GET /api/workpapers/byteam  (Workpapers.Next.API.Controllers.WorkpapersController.GetForTeam)  [L69–L73]
+[web] GET /api/workpapers/byteam  (Workpapers.Next.API.Controllers.WorkpapersController.GetForTeam)  [L69–L73] status=200
 

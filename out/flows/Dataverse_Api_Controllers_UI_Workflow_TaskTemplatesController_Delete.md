@@ -1,10 +1,11 @@
-[web] DELETE /api/ui/workflow/task-templates/{id:Guid}  (Dataverse.Api.Controllers.UI.Workflow.TaskTemplatesController.Delete)  [L101–L111] [auth=Authentication.UserPolicy,Authentication.AdminPolicy]
+[web] DELETE /api/ui/workflow/task-templates/{id:Guid}  (Dataverse.Api.Controllers.UI.Workflow.TaskTemplatesController.Delete)  [L101–L111] status=200 [auth=Authentication.UserPolicy,Authentication.AdminPolicy]
   └─ calls TaskTemplateRepository.Remove [L108]
   └─ calls TaskTemplateRepository.WriteQuery [L104]
-  └─ writes_to TaskTemplate [L108]
+  └─ delete TaskTemplate [L108]
     └─ reads_from TaskTemplates
-  └─ writes_to TaskTemplate [L104]
+  └─ write TaskTemplate [L104]
     └─ reads_from TaskTemplates
   └─ uses_service IControlledRepository<TaskTemplate>
     └─ method WriteQuery [L104]
+      └─ ... (no implementation details available)
 

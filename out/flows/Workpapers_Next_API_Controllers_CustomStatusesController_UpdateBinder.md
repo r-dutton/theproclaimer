@@ -1,6 +1,7 @@
-[web] PUT /api/custom-statuses/binder/{id:Guid}  (Workpapers.Next.API.Controllers.CustomStatusesController.UpdateBinder)  [L127–L135] [auth=AuthorizationPolicies.Administrator]
-  └─ writes_to BinderStatus [L131]
+[web] PUT /api/custom-statuses/binder/{id:Guid}  (Workpapers.Next.API.Controllers.CustomStatusesController.UpdateBinder)  [L131–L139] status=200 [auth=AuthorizationPolicies.Administrator]
+  └─ write BinderStatus [L135]
     └─ reads_from BinderStatuss
   └─ uses_service IControlledRepository<BinderStatus> (AddScoped)
-    └─ method WriteQuery [L131]
+    └─ method WriteQuery [L135]
+      └─ ... (no implementation details available)
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
@@ -19,6 +20,35 @@ public sealed partial class ProjectAnalyzer
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var repository = new RepositoryInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, fieldLookup);
+
+        if (classDeclaration.BaseList is { Types.Count: > 0 })
+        {
+            foreach (var baseType in classDeclaration.BaseList.Types)
+            {
+                var baseTypeName = baseType.Type.ToString();
+                if (string.IsNullOrWhiteSpace(baseTypeName))
+                {
+                    continue;
+                }
+
+                if (baseTypeName.StartsWith("IControlledRepository<", StringComparison.Ordinal))
+                {
+                    var serviceType = QualifyTypeName(baseTypeName);
+                    if (string.IsNullOrWhiteSpace(serviceType))
+                    {
+                        serviceType = baseTypeName;
+                    }
+
+                    RegisterServiceRegistration(
+                        serviceType,
+                        fqdn,
+                        "Scoped (inferred)",
+                        filePath,
+                        span,
+                        project);
+                }
+            }
+        }
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {

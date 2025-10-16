@@ -1,8 +1,5 @@
-[web] GET /api/accounting/reports/templates/{id}  (Cirrus.Api.Controllers.Accounting.Reports.ReportTemplatesController.Get)  [L70–L74] [auth=user]
+[web] GET /api/accounting/reports/templates/{id}  (Cirrus.Api.Controllers.Accounting.Reports.ReportTemplatesController.Get)  [L70–L74] status=200 [auth=user]
   └─ sends_request GetReportTemplateQuery [L73]
-    └─ generic_pipeline_behaviors 2
-      └─ DatagetTokenSyncBehaviour
-      └─ DatagetTokenSyncBehaviour
     └─ handled_by Cirrus.ApplicationService.Accounting.Queries.Reports.GetReportTemplateQueryHandler.Handle [L39–L150]
       └─ calls ReportContentRepository.LoadReadProperties [L126]
       └─ maps_to ReportElementDto [L135]
@@ -20,8 +17,12 @@
         └─ converts_to ReportTemplatePageCreateUpdateModel [L557]
       └─ uses_service IControlledRepository<ReportTemplate>
         └─ method ReadQuery [L60]
+          └─ ... (no implementation details available)
       └─ uses_service IMapper
         └─ method ConfigurationProvider [L70]
+          └─ ... (no implementation details available)
       └─ uses_service IRequestProcessor (InstancePerDependency)
         └─ method ProcessAsync [L64]
+          └─ implementation IRequestProcessor.ProcessAsync [L9-L9]
+          └─ ... (no implementation details available)
 

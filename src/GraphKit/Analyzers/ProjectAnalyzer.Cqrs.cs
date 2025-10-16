@@ -200,12 +200,12 @@ public sealed partial class ProjectAnalyzer
 
                         if (!recordedUsage)
                         {
-                            var serviceType = resolvedType ?? typeName;
+                            var serviceType = NormalizeServiceType(resolvedType ?? typeName);
                             handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                         }
                         else if (!resolvedType.EndsWith("Repository", StringComparison.Ordinal))
                         {
-                            var serviceType = resolvedType ?? typeName;
+                            var serviceType = NormalizeServiceType(resolvedType ?? typeName);
                             handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
                         }
                     }

@@ -1,2 +1,2 @@
-[web] GET /health/api  (Workpapers.Next.API.Controllers.HealthController.Health)  [L16–L20] [AllowAnonymous]
+[web] GET /health/api  (Workpapers.Next.API.Controllers.HealthController.Health)  [L16–L20] status=200 [AllowAnonymous]
 

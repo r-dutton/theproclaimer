@@ -1,4 +1,5 @@
-[web] DELETE /api/custom-statuses/record/{id:Guid}  (Workpapers.Next.API.Controllers.CustomStatusesController.DeleteRecord)  [L145–L153] [auth=AuthorizationPolicies.Administrator]
+[web] DELETE /api/custom-statuses/record/{id:Guid}  (Workpapers.Next.API.Controllers.CustomStatusesController.DeleteRecord)  [L149–L157] status=200 [auth=AuthorizationPolicies.Administrator]
   └─ uses_service IControlledRepository<RecordStatus> (AddScoped)
-    └─ method WriteQuery [L149]
+    └─ method WriteQuery [L153]
+      └─ ... (no implementation details available)
 

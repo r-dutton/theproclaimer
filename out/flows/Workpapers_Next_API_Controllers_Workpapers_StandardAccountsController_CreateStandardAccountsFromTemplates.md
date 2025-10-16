@@ -1,11 +1,10 @@
-[web] POST /api/standard-accounts/create-from-template  (Workpapers.Next.API.Controllers.Workpapers.StandardAccountsController.CreateStandardAccountsFromTemplates)  [L132–L141] [auth=AuthorizationPolicies.Administrator]
+[web] POST /api/standard-accounts/create-from-template  (Workpapers.Next.API.Controllers.Workpapers.StandardAccountsController.CreateStandardAccountsFromTemplates)  [L132–L141] status=200 [auth=AuthorizationPolicies.Administrator]
   └─ sends_request BulkCreateStandardAccountsCommand [L138]
-    └─ generic_pipeline_behaviors 2
-      └─ DatagetTokenSyncBehaviour
-      └─ DatagetTokenSyncBehaviour
     └─ handled_by Workpapers.Next.ApplicationService.Commands.Workpapers.SourceData.StandardAccounts.BulkCreateStandardAccountsCommandHandler.Handle [L27–L105]
       └─ uses_service IControlledRepository<MasterAccount>
         └─ method WriteQuery [L53]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<StandardAccount>
         └─ method WriteQuery [L41]
+          └─ ... (no implementation details available)
 

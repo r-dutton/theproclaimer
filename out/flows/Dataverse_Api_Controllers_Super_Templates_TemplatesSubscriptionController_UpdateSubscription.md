@@ -1,12 +1,14 @@
-[web] PUT /api/super/templates/{tenantId}/subscription  (Dataverse.Api.Controllers.Super.Templates.TemplatesSubscriptionController.UpdateSubscription)  [L76–L84] [auth=Authentication.MasterPolicy,Authentication.RequireTenantIdPolicy]
+[web] PUT /api/super/templates/{tenantId}/subscription  (Dataverse.Api.Controllers.Super.Templates.TemplatesSubscriptionController.UpdateSubscription)  [L76–L84] status=200 [auth=Authentication.MasterPolicy,Authentication.RequireTenantIdPolicy]
   └─ sends_request CreateOrUpdateSubscriptionCommand [L83]
-    └─ generic_pipeline_behaviors 2
-      └─ DatagetTokenSyncBehaviour
-      └─ DatagetTokenSyncBehaviour
     └─ handled_by Dataverse.ApplicationService.Commands.Subscriptions.CreateOrUpdateSubscriptionCommandHandler.Handle [L40–L86]
       └─ calls TenantRepository.WriteTable [L55]
       └─ uses_service IControlledRepository<DocumentStore>
         └─ method ReadQuery [L79]
+          └─ ... (no implementation details available)
       └─ uses_service RequestProcessor
         └─ method ProcessAsync [L74]
+          └─ implementation Dataverse.Services.Features.Requests.RequestProcessor.ProcessAsync [L8-L45]
+            └─ constructs RequestProcessorWrapper<TRequest,TResult>
+            └─ resolves IPipelineBehavior<TRequest,TResult> chain
+            └─ invokes IAsyncRequestHandler<TRequest,TResult>.Handle
 

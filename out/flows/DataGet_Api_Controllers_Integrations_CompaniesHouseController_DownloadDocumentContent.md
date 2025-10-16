@@ -1,7 +1,4 @@
-[web] GET /api/companies-house/document/{documentId}/download  (DataGet.Api.Controllers.Integrations.CompaniesHouseController.DownloadDocumentContent)  [L418–L430] [auth=Authentication.MachineToMachinePolicy]
+[web] GET /api/companies-house/document/{documentId}/download  (DataGet.Api.Controllers.Integrations.CompaniesHouseController.DownloadDocumentContent)  [L418–L430] status=200 [auth=Authentication.MachineToMachinePolicy]
   └─ sends_request GetDocumentContentQuery [L423]
-    └─ generic_pipeline_behaviors 2
-      └─ DatagetTokenSyncBehaviour
-      └─ DatagetTokenSyncBehaviour
     └─ handled_by DataGet.Integrations.CompaniesHouse.Api.Queries.GetDocumentContentQueryHandler.Handle [L15–L31]
 

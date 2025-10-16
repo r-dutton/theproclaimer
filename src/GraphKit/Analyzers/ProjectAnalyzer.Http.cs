@@ -33,6 +33,8 @@ public sealed partial class ProjectAnalyzer
         {
             var routeHints = CollectRouteHints(tree, method);
 
+            var declaringMethod = method.Identifier.Text;
+
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 if (httpClientField is not null &&
@@ -43,11 +45,11 @@ public sealed partial class ProjectAnalyzer
                     var httpMethod = InferHttpVerb(methodIdentifier);
                     var route = ExtractRouteLiteral(tree, invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression);
                     var line = GetLineNumber(tree, invocation);
-                    info.OutboundCalls.Add(new HttpClientCall(httpMethod, route, line, Array.Empty<string>()));
+                    info.OutboundCalls.Add(new HttpClientCall(declaringMethod, httpMethod, route, line, Array.Empty<string>()));
                     continue;
                 }
 
-                if (TryCaptureWrapperHttpCall(tree, invocation, routeHints, out var wrapperCall))
+                if (TryCaptureWrapperHttpCall(tree, invocation, routeHints, declaringMethod, out var wrapperCall))
                 {
                     info.OutboundCalls.Add(wrapperCall);
                 }
@@ -220,6 +222,11 @@ public sealed partial class ProjectAnalyzer
             ["route"] = route
         };
 
+        if (!string.IsNullOrWhiteSpace(call.Call.DeclaringMethod))
+        {
+            props["client_method"] = call.Call.DeclaringMethod;
+        }
+
         if (call.Call.QueryParameters is { Count: > 0 })
         {
             props["query_params"] = call.Call.QueryParameters
@@ -284,7 +291,12 @@ public sealed partial class ProjectAnalyzer
         return hints;
     }
 
-    private static bool TryCaptureWrapperHttpCall(SyntaxTree tree, InvocationExpressionSyntax invocation, IReadOnlyDictionary<string, RouteHint> routeHints, out HttpClientCall call)
+    private static bool TryCaptureWrapperHttpCall(
+        SyntaxTree tree,
+        InvocationExpressionSyntax invocation,
+        IReadOnlyDictionary<string, RouteHint> routeHints,
+        string declaringMethod,
+        out HttpClientCall call)
     {
         call = null!;
         if (!IsRequestInvocation(invocation.Expression))
@@ -309,7 +321,7 @@ public sealed partial class ProjectAnalyzer
 
         var route = FormatRoute(hint);
         var line = GetLineNumber(tree, invocation);
-        call = new HttpClientCall(httpMethod, route, line, hint.QueryParameters.ToArray());
+        call = new HttpClientCall(declaringMethod, httpMethod, route, line, hint.QueryParameters.ToArray());
         return true;
     }
 

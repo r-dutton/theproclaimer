@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "FlowGrep": {
+      "commandName": "Project",
+      "commandLineArgs": "--workspace D:/ --write-out D:/out --solution D:/Dataverse/src/BusinessFitness.Dataverse.sln  --solution D:/Cirrus/src/Cirrus.sln --solution D:/Data.Get/Data.Get.sln --solution D:/Workpapers/Workpapers.Next.sln"
+    }
+  }
+}

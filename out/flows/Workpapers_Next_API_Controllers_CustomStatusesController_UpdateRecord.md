@@ -1,4 +1,5 @@
-[web] PUT /api/custom-statuses/record/{id:Guid}  (Workpapers.Next.API.Controllers.CustomStatusesController.UpdateRecord)  [L107–L115] [auth=AuthorizationPolicies.Administrator]
+[web] PUT /api/custom-statuses/record/{id:Guid}  (Workpapers.Next.API.Controllers.CustomStatusesController.UpdateRecord)  [L111–L119] status=200 [auth=AuthorizationPolicies.Administrator]
   └─ uses_service IControlledRepository<RecordStatus> (AddScoped)
-    └─ method WriteQuery [L111]
+    └─ method WriteQuery [L115]
+      └─ ... (no implementation details available)
 

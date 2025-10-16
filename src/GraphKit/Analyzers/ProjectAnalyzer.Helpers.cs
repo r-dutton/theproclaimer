@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using GraphKit.Graph;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -155,6 +156,22 @@ public sealed partial class ProjectAnalyzer
         {
             var id = StableId.For("cqrs.pipeline_behavior", pipelineFallback.Fqdn, pipelineFallback.Assembly, pipelineFallback.SymbolId);
             reference = new NodeReference(id, pipelineFallback.FilePath, pipelineFallback.Span);
+            return true;
+        }
+
+        if (_services.TryGetValue(typeName, out var service))
+        {
+            var id = StableId.For("app.service", service.Fqdn, service.Assembly, service.SymbolId);
+            reference = new NodeReference(id, service.FilePath, service.Span);
+            return true;
+        }
+
+        if (_services.Values.FirstOrDefault(s =>
+                s.Fqdn.Equals(typeName, StringComparison.OrdinalIgnoreCase) ||
+                s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)) is { } serviceFallback)
+        {
+            var id = StableId.For("app.service", serviceFallback.Fqdn, serviceFallback.Assembly, serviceFallback.SymbolId);
+            reference = new NodeReference(id, serviceFallback.FilePath, serviceFallback.Span);
             return true;
         }
 
@@ -339,8 +356,144 @@ public sealed partial class ProjectAnalyzer
 
     private string? ResolveImplementationType(string typeName)
     {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
         var registration = FindServiceRegistration(typeName);
-        return registration?.ImplementationType;
+        if (registration is not null && !string.IsNullOrWhiteSpace(registration.ImplementationType))
+        {
+            return registration.ImplementationType;
+        }
+
+        if (TryResolveGenericImplementation(typeName, out var implementationType))
+        {
+            return implementationType;
+        }
+
+        return null;
+    }
+
+    private bool TryResolveGenericImplementation(string typeName, out string? implementationType)
+    {
+        implementationType = null;
+        if (!TryMakeOpenGenericType(typeName, out var openServiceType, out var typeArguments) || typeArguments.Count == 0)
+        {
+            return false;
+        }
+
+        var registration = FindServiceRegistration(openServiceType);
+        if (registration is null)
+        {
+            var simpleOpen = openServiceType.Split('.').Last();
+            registration = FindServiceRegistration(simpleOpen);
+        }
+
+        if (registration is null || string.IsNullOrWhiteSpace(registration.ImplementationType))
+        {
+            return false;
+        }
+
+        var implementationOpenType = registration.ImplementationType;
+        if (!TryMakeOpenGenericType(implementationOpenType, out var implementationOpen, out _))
+        {
+            implementationType = registration.ImplementationType;
+            return true;
+        }
+
+        implementationType = CloseGenericType(implementationOpen, typeArguments);
+        return true;
+    }
+
+    private static bool TryMakeOpenGenericType(string typeName, out string openType, out IReadOnlyList<string> typeArguments)
+    {
+        typeArguments = SplitGenericArguments(typeName);
+        if (typeArguments.Count == 0)
+        {
+            openType = typeName;
+            return false;
+        }
+
+        var genericStart = typeName.IndexOf('<');
+        var genericEnd = typeName.LastIndexOf('>');
+        if (genericStart < 0 || genericEnd <= genericStart)
+        {
+            openType = typeName;
+            return false;
+        }
+
+        var builder = new StringBuilder();
+        builder.Append(typeName[..genericStart]);
+        builder.Append('<');
+        for (var i = 0; i < typeArguments.Count; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(',');
+            }
+        }
+        builder.Append('>');
+        openType = builder.ToString();
+        return true;
+    }
+
+    private static string CloseGenericType(string openType, IReadOnlyList<string> typeArguments)
+    {
+        if (!openType.Contains('<') || typeArguments.Count == 0)
+        {
+            return openType;
+        }
+
+        var prefix = openType[..openType.IndexOf('<')];
+        var builder = new StringBuilder(prefix);
+        builder.Append('<');
+        for (var i = 0; i < typeArguments.Count; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder.Append(typeArguments[i]);
+        }
+        builder.Append('>');
+        return builder.ToString();
+    }
+
+    private string NormalizeServiceType(string serviceType)
+    {
+        if (string.IsNullOrWhiteSpace(serviceType))
+        {
+            return serviceType;
+        }
+
+        if (_services.TryGetValue(serviceType, out var serviceInfo))
+        {
+            return serviceInfo.Fqdn;
+        }
+
+        var simple = serviceType.Split('.').Last();
+        var match = _services.Values.FirstOrDefault(s =>
+            s.Fqdn.Equals(serviceType, StringComparison.OrdinalIgnoreCase) ||
+            s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+        {
+            return match.Fqdn;
+        }
+
+        var registration = FindServiceRegistration(serviceType) ?? FindServiceRegistration(simple);
+        if (registration is not null)
+        {
+            var implementation = registration.ImplementationType;
+            if (!string.IsNullOrWhiteSpace(implementation) &&
+                !string.Equals(implementation, serviceType, StringComparison.OrdinalIgnoreCase))
+            {
+                return NormalizeServiceType(implementation);
+            }
+        }
+
+        return serviceType;
     }
 
     private string? TryResolveProjectionSource(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables, IReadOnlyDictionary<string, FieldDescriptor> fieldLookup)

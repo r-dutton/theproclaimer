@@ -1,4 +1,6 @@
-[web] PUT /api/internal/sharepoint-security/client/{id:guid}  (Dataverse.Api.Controllers.Internal.SharePointSecurityController.UpdateClient)  [L105–L124] [auth=Authentication.MachineToMachinePolicy,Authentication.RequireTenantIdPolicy]
+[web] PUT /api/internal/sharepoint-security/client/{id:guid}  (Dataverse.Api.Controllers.Internal.SharePointSecurityController.UpdateClient)  [L105–L124] status=200 [auth=Authentication.MachineToMachinePolicy,Authentication.RequireTenantIdPolicy]
   └─ uses_service IDocumentStoreService (AddScoped)
     └─ method GetReadOnlyDocumentStoresWithCredentials [L111]
+      └─ implementation Dataverse.ApplicationService.Services.DocumentStoreService.GetReadOnlyDocumentStoresWithCredentials [L17-L89]
+  └─ uses_storage IDocumentStoreService.GetReadOnlyDocumentStoresWithCredentials [L111]
 

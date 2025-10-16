@@ -1,4 +1,5 @@
-[web] DELETE /webhooks/v1/webhooks/{id:Guid}  (Dataverse.Api.External.Controllers.v1.Core.WebhooksController.Delete)  [L138–L142] [auth=Authentication.CoreRead,Authentication.CoreWrite]
+[web] DELETE /webhooks/v1/webhooks/{id:Guid}  (Dataverse.Api.External.Controllers.v1.Core.WebhooksController.Delete)  [L138–L142] status=200 [auth=Authentication.CoreRead,Authentication.CoreWrite]
   └─ uses_service IDataverseProxyService (AddScoped)
     └─ method Delete [L141]
+      └─ implementation Dataverse.Api.External.Features.DataverseProxy.DataverseProxyService.Delete [L12-L74]
 

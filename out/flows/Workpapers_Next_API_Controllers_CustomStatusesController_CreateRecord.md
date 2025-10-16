@@ -1,4 +1,5 @@
-[web] POST /api/custom-statuses/record  (Workpapers.Next.API.Controllers.CustomStatusesController.CreateRecord)  [L68–L82] [auth=AuthorizationPolicies.Administrator]
+[web] POST /api/custom-statuses/record  (Workpapers.Next.API.Controllers.CustomStatusesController.CreateRecord)  [L72–L86] status=201 [auth=AuthorizationPolicies.Administrator]
   └─ uses_service IControlledRepository<RecordStatus> (AddScoped)
-    └─ method ReadQuery [L72]
+    └─ method ReadQuery [L76]
+      └─ ... (no implementation details available)
 

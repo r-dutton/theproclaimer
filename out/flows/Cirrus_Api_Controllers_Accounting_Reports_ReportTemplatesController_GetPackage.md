@@ -1,8 +1,5 @@
-[web] GET /api/accounting/reports/templates/package  (Cirrus.Api.Controllers.Accounting.Reports.ReportTemplatesController.GetPackage)  [L144–L148] [auth=user]
+[web] GET /api/accounting/reports/templates/package  (Cirrus.Api.Controllers.Accounting.Reports.ReportTemplatesController.GetPackage)  [L144–L148] status=200 [auth=user]
   └─ sends_request ReportTemplatePackageQuery [L147]
-    └─ generic_pipeline_behaviors 2
-      └─ DatagetTokenSyncBehaviour
-      └─ DatagetTokenSyncBehaviour
     └─ handled_by Cirrus.ApplicationService.Accounting.Queries.Reports.ReportTemplatePackageQueryHandler.Handle [L50–L129]
       └─ maps_to DatasetLightDto [L101]
         └─ automapper.registration CirrusMappingProfile (Dataset->DatasetLightDto) [L204]
@@ -25,24 +22,36 @@
         └─ automapper.registration CirrusMappingProfile (TradingAccount->TradingAccountLightDto) [L228]
       └─ uses_service IControlledRepository<Dataset>
         └─ method ReadQuery [L101]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<Division>
         └─ method ReadQuery [L105]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<FooterTemplate>
         └─ method ReadQuery [L116]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<HeaderTemplate>
         └─ method ReadQuery [L113]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<ReportingSuite>
         └─ method ReadQuery [L123]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<ReportPageLayout>
         └─ method ReadQuery [L119]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<ReportSettings>
         └─ method ReadQuery [L83]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<ReportWatermark>
         └─ method ReadQuery [L87]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<TradingAccount>
         └─ method ReadQuery [L109]
+          └─ ... (no implementation details available)
       └─ uses_service IJurisdictionService (AddScoped)
         └─ method GetUserJurisdictions [L97]
+          └─ implementation IJurisdictionService.GetUserJurisdictions [L17-L17]
+          └─ ... (no implementation details available)
       └─ uses_service IMapper
         └─ method ConfigurationProvider [L84]
+          └─ ... (no implementation details available)
 

@@ -1,2 +1,2 @@
-[web] GET /api/connections/reportance/creditors  (Workpapers.Next.API.Controllers.Connections.ReportanceController.GetCreditors)  [L100–L106]
+[web] GET /api/connections/reportance/creditors  (Workpapers.Next.API.Controllers.Connections.ReportanceController.GetCreditors)  [L100–L106] status=200
 

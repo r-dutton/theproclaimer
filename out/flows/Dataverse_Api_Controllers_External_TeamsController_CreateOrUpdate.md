@@ -1,14 +1,14 @@
-[web] POST /create-or-update  (Dataverse.Api.Controllers.External.TeamsController.CreateOrUpdate)  [L52–L59]
+[web] POST /create-or-update  (Dataverse.Api.Controllers.External.TeamsController.CreateOrUpdate)  [L52–L59] status=201
   └─ sends_request CreateOrUpdateTeamCommand [L55]
-    └─ generic_pipeline_behaviors 2
-      └─ DatagetTokenSyncBehaviour
-      └─ DatagetTokenSyncBehaviour
     └─ handled_by Dataverse.ApplicationService.Commands.Firms.CreateOrUpdateTeamCommandHandler.Handle [L38–L78]
       └─ maps_to TeamDto [L76]
       └─ uses_service FirmSettingsService
         └─ method GetCurrentSettingsAsync [L53]
+          └─ implementation Dataverse.ApplicationService.Services.FirmSettingsService.GetCurrentSettingsAsync [L18-L97]
       └─ uses_service IControlledRepository<Team>
         └─ method WriteQuery [L60]
+          └─ ... (no implementation details available)
       └─ uses_service IMapper
         └─ method Map [L76]
+          └─ ... (no implementation details available)
 

@@ -1,8 +1,5 @@
-[web] GET /api/accounting/ledger/auto-journals/primary-production/{datasetId}/{tradingAccountId}/account-balance/{sourceAccountId}  (Cirrus.Api.Controllers.Accounting.Ledger.AutoJournals.PrimaryProductionController.GetAccountBalance)  [L57–L62] [auth=user]
+[web] GET /api/accounting/ledger/auto-journals/primary-production/{datasetId}/{tradingAccountId}/account-balance/{sourceAccountId}  (Cirrus.Api.Controllers.Accounting.Ledger.AutoJournals.PrimaryProductionController.GetAccountBalance)  [L57–L62] status=200 [auth=user]
   └─ sends_request GetPrimaryProductionRowsDtoQuery [L60]
-    └─ generic_pipeline_behaviors 2
-      └─ DatagetTokenSyncBehaviour
-      └─ DatagetTokenSyncBehaviour
     └─ handled_by Cirrus.ApplicationService.Accounting.Queries.Ledger.GetPrimaryProductionRowsDtoQueryHandler.Handle [L47–L147]
       └─ maps_to PrimaryProductionConfigDto [L137]
         └─ automapper.registration CirrusMappingProfile (PrimaryProductionConfig->PrimaryProductionConfigDto) [L501]
@@ -11,14 +8,21 @@
         └─ converts_to SourceAccountInJournalModel [L280]
       └─ uses_service GetTrialBalanceForDatesQuery
         └─ method Execute [L88]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<Dataset>
         └─ method ReadQuery [L126]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<PrimaryProductionConfig>
         └─ method ReadQuery [L137]
+          └─ ... (no implementation details available)
       └─ uses_service IControlledRepository<SourceAccount>
         └─ method ReadQuery [L79]
+          └─ ... (no implementation details available)
       └─ uses_service IMapper
         └─ method ConfigurationProvider [L83]
+          └─ ... (no implementation details available)
       └─ uses_service IRequestProcessor (InstancePerDependency)
         └─ method ProcessAsync [L131]
+          └─ implementation IRequestProcessor.ProcessAsync [L9-L9]
+          └─ ... (no implementation details available)
 

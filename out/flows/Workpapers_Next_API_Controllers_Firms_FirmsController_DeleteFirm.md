@@ -1,8 +1,10 @@
-[web] DELETE /api/firms/{id:Guid}  (Workpapers.Next.API.Controllers.Firms.FirmsController.DeleteFirm)  [L177–L187] [auth=AuthorizationPolicies.SuperUser]
-  └─ maps_to FirmDto [L186]
+[web] DELETE /api/firms/{id:Guid}  (Workpapers.Next.API.Controllers.Firms.FirmsController.DeleteFirm)  [L185–L195] status=200 [auth=AuthorizationPolicies.SuperUser]
+  └─ maps_to FirmDto [L194]
     └─ converts_to FirmWithStatsDto [L162]
   └─ uses_service IMapper
-    └─ method Map [L186]
+    └─ method Map [L194]
+      └─ ... (no implementation details available)
   └─ uses_service UnitOfWork
-    └─ method Table [L181]
+    └─ method Table [L189]
+      └─ ... (no implementation details available)
 

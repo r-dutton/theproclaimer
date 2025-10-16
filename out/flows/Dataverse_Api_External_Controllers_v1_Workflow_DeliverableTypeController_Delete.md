@@ -1,4 +1,5 @@
-[web] DELETE /workflow/v1/deliverable-types/{id:Guid}  (Dataverse.Api.External.Controllers.v1.Workflow.DeliverableTypeController.Delete)  [L164–L168] [auth=Authentication.WorkflowWrite]
+[web] DELETE /workflow/v1/deliverable-types/{id:Guid}  (Dataverse.Api.External.Controllers.v1.Workflow.DeliverableTypeController.Delete)  [L164–L168] status=200 [auth=Authentication.WorkflowWrite]
   └─ uses_service IDataverseProxyService (AddScoped)
     └─ method Delete [L167]
+      └─ implementation Dataverse.Api.External.Features.DataverseProxy.DataverseProxyService.Delete [L12-L74]
 

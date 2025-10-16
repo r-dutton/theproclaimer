@@ -68,6 +68,19 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerLogInvocation> LogInvocations { get; } = new();
     }
 
+    private sealed record ServiceInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
+    {
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<HandlerRepositoryCall> RepositoryCalls { get; } = new();
+        public List<HandlerMapperCall> MapperCalls { get; } = new();
+        public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+        public List<HandlerValidationCall> ValidationCalls { get; } = new();
+        public List<HandlerLogInvocation> LogInvocations { get; } = new();
+    }
+
     private sealed record PipelineBehaviorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType)
     {
         public List<ServiceUsage> ServiceUsages { get; } = new();
@@ -123,7 +136,7 @@ public sealed partial class ProjectAnalyzer
         public List<HttpClientCall> OutboundCalls { get; } = new();
     }
 
-    private sealed record HttpClientCall(string HttpMethod, string? Route, int Line, IReadOnlyCollection<string> QueryParameters)
+    private sealed record HttpClientCall(string DeclaringMethod, string HttpMethod, string? Route, int Line, IReadOnlyCollection<string> QueryParameters)
     {
         public string? CanonicalRoute
         {
@@ -173,7 +186,14 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record NodeReference(string Id, string FilePath, GraphSpan Span);
 
-    private sealed record ServiceUsage(string ServiceType, int Line, string? Method = null);
+    private sealed record ServiceUsage(
+        string ServiceType,
+        int Line,
+        string? Method = null,
+        string? InvocationMethod = null,
+        string? RequestType = null,
+        string? ResponseType = null,
+        string? DispatchKind = null);
 
     private sealed record FieldDescriptor(string Type, int Line);
 
