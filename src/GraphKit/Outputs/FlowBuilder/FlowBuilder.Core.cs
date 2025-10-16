@@ -979,6 +979,31 @@ public static partial class FlowBuilder
                 AppendRepositoryFlow(builder, state, target, indent + 1);
             }
 
+            foreach (var dataEdge in edges.Where(e => e.Kind is "queries" or "writes_to" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
+            {
+                if (!state.NodesById.TryGetValue(dataEdge.To, out var entityNode))
+                {
+                    continue;
+                }
+                if (state.AllowedIds is { } allow && !allow.Contains(entityNode.Id))
+                {
+                    continue;
+                }
+
+                var lineText = dataEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var label = ExtractOperationLabel(dataEdge);
+                var dedupKey = $"{handler.Id}::{dataEdge.To}::{label}::{lineText}";
+                state.DedupHandlers ??= new HashSet<string>(StringComparer.Ordinal);
+                if (!state.DedupHandlers.Add("DB::" + dedupKey))
+                {
+                    continue;
+                }
+
+                AppendIndented(builder, indent, $"{label} {entityNode.Name}{lineText}");
+                state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
+                AppendEntityFlow(builder, state, entityNode, indent + 1);
+            }
+
             foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
             {
                 AppendMappingEdge(builder, state, mapping, indent);
