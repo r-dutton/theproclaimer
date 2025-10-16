@@ -147,25 +147,48 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
                 }
-
-                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax inner, Name.Identifier.Text: var methodName } &&
-                    inner.Expression is IdentifierNameSyntax dbIdentifier &&
-                    fieldLookup.TryGetValue(dbIdentifier.Identifier.Text.TrimStart('_'), out var dbType) &&
-                    dbType.Type.Contains("DbContext", StringComparison.Ordinal))
+                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax innerAccess, Name.Identifier.Text: var methodName } &&
+                    innerAccess.Expression is IdentifierNameSyntax dbIdentifier &&
+                    TryResolveDbContextType(dbIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
                 {
-                    var dbSet = inner.Name.Identifier.Text;
+                    var dbSet = innerAccess.Name.Identifier.Text;
                     var line = GetLineNumber(tree, invocation);
                     var operation = DetermineRepositoryOperation(methodName);
                     repository.DbAccesses.Add(new RepositoryDbAccess(dbSet, methodName, line, operation));
                 }
-
                 if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax contextIdentifier, Name.Identifier.Text: var contextMethod } &&
-                    fieldLookup.TryGetValue(contextIdentifier.Identifier.Text.TrimStart('_'), out var dbContextType) &&
-                    dbContextType.Type.Contains("DbContext", StringComparison.Ordinal))
+                    TryResolveDbContextType(contextIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
                 {
                     var line = GetLineNumber(tree, invocation);
                     var operation = DetermineRepositoryOperation(contextMethod);
                     repository.DbAccesses.Add(new RepositoryDbAccess(contextIdentifier.Identifier.Text, contextMethod, line, operation));
+                }
+                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: InvocationExpressionSyntax innerInvocation, Name.Identifier.Text: var setMethod })
+                {
+                    var currentInvocation = innerInvocation;
+                    while (currentInvocation.Expression is MemberAccessExpressionSyntax access)
+                    {
+                        if (access.Expression is IdentifierNameSyntax contextIdentifier &&
+                            TryResolveDbContextType(contextIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
+                        {
+                            if (access.Name is GenericNameSyntax { Identifier.Text: "Set", TypeArgumentList.Arguments.Count: > 0 } generic)
+                            {
+                                var entityType = generic.TypeArgumentList.Arguments[0].ToString();
+                                var line = GetLineNumber(tree, invocation);
+                                var operation = DetermineRepositoryOperation(setMethod);
+                                repository.DbAccesses.Add(new RepositoryDbAccess(entityType, setMethod, line, operation));
+                            }
+                            break;
+                        }
+
+                        if (access.Expression is InvocationExpressionSyntax nextInvocation)
+                        {
+                            currentInvocation = nextInvocation;
+                            continue;
+                        }
+
+                        break;
+                    }
                 }
             }
 
@@ -196,6 +219,54 @@ public sealed partial class ProjectAnalyzer
         }
 
         _repositories[fqdn] = repository;
+    }
+
+    private static bool TryResolveDbContextType(
+        string identifier,
+        IReadOnlyDictionary<string, FieldDescriptor> fieldLookup,
+        IReadOnlyDictionary<string, string?> parameterTypes,
+        IReadOnlyDictionary<string, string> localVariables,
+        out string? contextType)
+    {
+        static bool ContainsDbContext(string? type)
+            => !string.IsNullOrWhiteSpace(type) && type!.Contains("DbContext", StringComparison.OrdinalIgnoreCase);
+
+        var normalized = identifier.TrimStart('_');
+
+        if (fieldLookup.TryGetValue(normalized, out var descriptor) && ContainsDbContext(descriptor.Type))
+        {
+            contextType = descriptor.Type;
+            return true;
+        }
+
+        if (parameterTypes.TryGetValue(identifier, out var parameterType) && ContainsDbContext(parameterType))
+        {
+            contextType = parameterType;
+            return true;
+        }
+
+        if (!string.Equals(identifier, normalized, StringComparison.Ordinal) &&
+            parameterTypes.TryGetValue(normalized, out var trimmedParameterType) && ContainsDbContext(trimmedParameterType))
+        {
+            contextType = trimmedParameterType;
+            return true;
+        }
+
+        if (localVariables.TryGetValue(identifier, out var localType) && ContainsDbContext(localType))
+        {
+            contextType = localType;
+            return true;
+        }
+
+        if (!string.Equals(identifier, normalized, StringComparison.Ordinal) &&
+            localVariables.TryGetValue(normalized, out var trimmedLocalType) && ContainsDbContext(trimmedLocalType))
+        {
+            contextType = trimmedLocalType;
+            return true;
+        }
+
+        contextType = null;
+        return false;
     }
 
     private void EmitRepositories()

@@ -551,7 +551,7 @@ public static partial class FlowBuilder
 
                 if (entityNode.Type == "ef.entity")
                 {
-                    AppendEntityFlow(builder, state, entityNode, childIndent + 1);
+                    AppendEntityFlow(builder, state, entityNode, childIndent + 1, dataEdge.Kind);
                 }
             }
 
@@ -626,7 +626,7 @@ public static partial class FlowBuilder
                 if (collapse && collapseImpl != null)
                 {
                     // Expand implementation (show header for clarity now that collapsed uses_service line renamed)
-                    AppendServiceImplementationFlow(builder, state, endpoint, collapseImpl, serviceMethodName, nextIndent, heuristic: !state.EdgesByFrom.ContainsKey(collapseImpl.Id), suppressHeader: true);
+                    AppendServiceImplementationFlow(builder, state, endpoint, collapseImpl, serviceMethodName, nextIndent, heuristic: !state.EdgesByFrom.ContainsKey(collapseImpl.Id), suppressHeader: false);
                 }
                 else
                 {
@@ -1009,6 +1009,29 @@ public static partial class FlowBuilder
                 AppendMappingEdge(builder, state, mapping, indent);
             }
 
+            foreach (var dataEdge in edges.Where(e => e.Kind is "queries" or "writes_to" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
+            {
+                if (!state.NodesById.TryGetValue(dataEdge.To, out var entityNode))
+                {
+                    continue;
+                }
+
+                if (state.AllowedIds is { } allow && !allow.Contains(entityNode.Id))
+                {
+                    continue;
+                }
+
+                var lineText = dataEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+                var label = ExtractOperationLabel(dataEdge);
+                AppendIndented(builder, indent, $"{label} {entityNode.Name}{lineText}");
+                state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
+
+                if (entityNode.Type == "ef.entity")
+                {
+                    AppendEntityFlow(builder, state, entityNode, indent + 1, dataEdge.Kind);
+                }
+            }
+
             foreach (var clientEdge in edges.Where(e => e.Kind == "uses_client"))
             {
                 if (!state.NodesById.TryGetValue(clientEdge.To, out var clientNode))
@@ -1210,7 +1233,7 @@ public static partial class FlowBuilder
             var operation = ExtractOperationLabel(write);
             AppendIndented(builder, indent, $"{operation} {entityNode.Name}{lineText}");
             state.CurrentImpact?.RecordRepositoryOperation(GetDisplayName(repository), write.Kind, GetDisplayName(entityNode));
-            AppendEntityFlow(builder, state, entityNode, indent + 1);
+            AppendEntityFlow(builder, state, entityNode, indent + 1, write.Kind);
         }
 
         foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
@@ -1259,7 +1282,8 @@ public static partial class FlowBuilder
         StringBuilder builder,
         FlowRenderState state,
         GraphNode entity,
-        int indent)
+        int indent,
+        string? operationFilter = null)
     {
         if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
         {
@@ -1271,7 +1295,22 @@ public static partial class FlowBuilder
             return;
         }
 
-        foreach (var tableEdge in edges.Where(e => e.Kind is "writes_to" or "reads_from" or "queries" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
+        var candidateEdges = edges
+            .Where(e => e.Kind is "writes_to" or "reads_from" or "queries" or "inserts_into" or "updates" or "deletes_from" or "upserts")
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(operationFilter))
+        {
+            var filtered = candidateEdges
+                .Where(e => string.Equals(e.Kind, operationFilter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (filtered.Count > 0)
+            {
+                candidateEdges = filtered;
+            }
+        }
+
+        foreach (var tableEdge in candidateEdges)
         {
             if (!state.NodesById.TryGetValue(tableEdge.To, out var tableNode))
             {
@@ -1874,13 +1913,18 @@ public static partial class FlowBuilder
                 .Where(n => n.Type is "app.repository" or "repository")
                 .ToList();
 
-            repositories = repositories
-                .Where(r => IsWithinCallerSolution(caller, r))
-                .ToList();
-
             if (repositories.Count == 0)
             {
                 continue;
+            }
+
+            var sameSolution = repositories
+                .Where(r => IsWithinCallerSolution(caller, r))
+                .ToList();
+
+            if (sameSolution.Count > 0)
+            {
+                repositories = sameSolution;
             }
 
             if (repositories.Count == 1)
@@ -2379,6 +2423,11 @@ public static partial class FlowBuilder
 
     private static bool ShouldIncludeImplementation(GraphNode caller, GraphNode implementation)
     {
+        if (string.Equals(implementation.Type, "cqrs.request", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         if (string.Equals(caller.Id, implementation.Id, StringComparison.Ordinal))
         {
             return true;
@@ -2394,11 +2443,6 @@ public static partial class FlowBuilder
             return false;
         }
 
-        if (!IsWithinCallerSolution(caller, implementation))
-        {
-            return false;
-        }
-
         // Heuristic inclusion rules (after solution filtering):
         // 1. Always include if the implementation has a concrete source file (internal code).
         // 2. Include if assembly roots match (likely same bounded context / solution segment).
@@ -2410,6 +2454,11 @@ public static partial class FlowBuilder
         if (hasFile)
         {
             return true; // Internal source present
+        }
+
+        if (!IsWithinCallerSolution(caller, implementation))
+        {
+            return false;
         }
 
         if (string.Equals(callerRoot, implRoot, StringComparison.OrdinalIgnoreCase))
