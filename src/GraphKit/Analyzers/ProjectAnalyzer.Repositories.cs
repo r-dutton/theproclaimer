@@ -124,7 +124,7 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
                 }
-                else if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
+                if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
                 {
                     if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
                     {
@@ -147,7 +147,7 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
                 }
-                else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax inner, Name.Identifier.Text: var methodName } &&
+                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax inner, Name.Identifier.Text: var methodName } &&
                     inner.Expression is IdentifierNameSyntax dbIdentifier &&
                     fieldLookup.TryGetValue(dbIdentifier.Identifier.Text.TrimStart('_'), out var dbType) &&
                     dbType.Type.Contains("DbContext", StringComparison.Ordinal))
@@ -157,7 +157,7 @@ public sealed partial class ProjectAnalyzer
                     var operation = DetermineRepositoryOperation(methodName);
                     repository.DbAccesses.Add(new RepositoryDbAccess(dbSet, methodName, line, operation));
                 }
-                else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax contextIdentifier, Name.Identifier.Text: var contextMethod } &&
+                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax contextIdentifier, Name.Identifier.Text: var contextMethod } &&
                     fieldLookup.TryGetValue(contextIdentifier.Identifier.Text.TrimStart('_'), out var dbContextType) &&
                     dbContextType.Type.Contains("DbContext", StringComparison.Ordinal))
                 {

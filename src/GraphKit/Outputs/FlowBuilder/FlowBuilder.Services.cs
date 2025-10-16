@@ -167,6 +167,14 @@ public static partial class FlowBuilder
                 candidateList.Add(single);
             }
 
+            if (candidateList.Count == 1 && string.Equals(candidateList[0].Id, serviceNode.Id, StringComparison.Ordinal))
+            {
+                if (TryResolveServiceContractAsRequest(builder, state, caller, serviceNode, methodName, indent))
+                {
+                    return;
+                }
+            }
+
             // Collapse interface -> single implementation: replace service header with concrete name and suppress explicit implementation node
             if (!string.IsNullOrWhiteSpace(methodName) && serviceNode.Name is { } serviceName && serviceName.StartsWith("I", StringComparison.Ordinal) && candidateList.Count == 1 && candidateList[0].Type == "app.service")
             {
@@ -233,11 +241,6 @@ public static partial class FlowBuilder
                         continue;
                     }
 
-                    if (!IsWithinCallerSolution(caller, candidate))
-                    {
-                        continue;
-                    }
-
                     if (seen.Add(candidate.Id))
                     {
                         candidates.Add(candidate);
@@ -250,11 +253,6 @@ public static partial class FlowBuilder
                 foreach (var candidate in fqdnMatches)
                 {
                     if (!string.Equals(candidate.Type, "cqrs.request", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (!IsWithinCallerSolution(caller, candidate))
                     {
                         continue;
                     }
