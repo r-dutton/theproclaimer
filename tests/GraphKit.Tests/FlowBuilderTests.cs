@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using GraphKit.Graph;
 using GraphKit.Outputs;
 using GraphKit.Workspace;
@@ -73,6 +75,258 @@ public class FlowBuilderTests
     }
 
     [Fact]
+    public void BuildFlows_AppendsImpactSummary()
+    {
+        var controller = new GraphNode
+        {
+            Id = "Controller",
+            Type = "endpoint.controller",
+            Name = "Get",
+            Fqdn = "Sample.Web.Controllers.ThingController.Get",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controller.cs",
+            SymbolId = "Controller",
+            Span = new GraphSpan { StartLine = 10, EndLine = 40 },
+            Props = new Dictionary<string, object>
+            {
+                ["route"] = "/api/thing",
+                ["http_method"] = "GET"
+            }
+        };
+
+        var repository = new GraphNode
+        {
+            Id = "Repository",
+            Type = "app.repository",
+            Name = "ThingRepository",
+            Fqdn = "Sample.Data.ThingRepository",
+            Assembly = "Sample.Data",
+            Project = "Sample.Data",
+            FilePath = "ThingRepository.cs",
+            SymbolId = "Repository"
+        };
+
+        var entity = new GraphNode
+        {
+            Id = "Entity",
+            Type = "ef.entity",
+            Name = "ThingEntity",
+            Fqdn = "Sample.Data.Entities.ThingEntity",
+            Assembly = "Sample.Data",
+            Project = "Sample.Data",
+            FilePath = "ThingEntity.cs",
+            SymbolId = "Entity"
+        };
+
+        var table = new GraphNode
+        {
+            Id = "Table",
+            Type = "sql.table",
+            Name = "dbo.Thing",
+            Fqdn = "Sample.Data.Tables.dbo.Thing",
+            Assembly = "Sample.Data",
+            Project = "Sample.Data",
+            FilePath = "ThingEntity.cs",
+            SymbolId = "Table"
+        };
+
+        var client = new GraphNode
+        {
+            Id = "Client",
+            Type = "app.client",
+            Name = "DataGetClient",
+            Fqdn = "Sample.App.DataGetClient",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "DataGetClient.cs",
+            SymbolId = "Client"
+        };
+
+        var remoteEndpoint = new GraphNode
+        {
+            Id = "Remote",
+            Type = "endpoint.api",
+            Name = "DataGet.Api.Accounts",
+            Fqdn = "DataGet.Api.Controllers.AccountsController.Get",
+            Assembly = "Sample.Remote",
+            Project = "Sample.Remote",
+            FilePath = "AccountsController.cs",
+            SymbolId = "Remote"
+        };
+
+        var request = new GraphNode
+        {
+            Id = "Request",
+            Type = "cqrs.request",
+            Name = "CreateThing",
+            Fqdn = "Sample.App.CreateThing",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "CreateThing.cs",
+            SymbolId = "Request"
+        };
+
+        var handler = new GraphNode
+        {
+            Id = "Handler",
+            Type = "cqrs.handler",
+            Name = "CreateThingHandler",
+            Fqdn = "Sample.App.CreateThingHandler",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "CreateThingHandler.cs",
+            SymbolId = "Handler",
+            Span = new GraphSpan { StartLine = 50, EndLine = 80 }
+        };
+
+        var pipeline = new GraphNode
+        {
+            Id = "Pipeline",
+            Type = "cqrs.pipeline_behavior",
+            Name = "ValidationBehavior",
+            Fqdn = "Sample.App.ValidationBehavior",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "ValidationBehavior.cs",
+            SymbolId = "Pipeline"
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1",
+            Nodes = new[]
+            {
+                controller,
+                repository,
+                entity,
+                table,
+                client,
+                remoteEndpoint,
+                request,
+                handler,
+                pipeline
+            },
+            Edges = new[]
+            {
+                new GraphEdge
+                {
+                    From = controller.Id,
+                    To = repository.Id,
+                    Kind = "calls",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        Location = new GraphLocation { File = controller.FilePath, Line = 20 }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["method"] = "SaveAsync"
+                    }
+                },
+                new GraphEdge
+                {
+                    From = repository.Id,
+                    To = entity.Id,
+                    Kind = "writes_to",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        Location = new GraphLocation { File = repository.FilePath!, Line = 30 }
+                    }
+                },
+                new GraphEdge
+                {
+                    From = entity.Id,
+                    To = table.Id,
+                    Kind = "writes_to",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        Location = new GraphLocation { File = entity.FilePath!, Line = 35 }
+                    }
+                },
+                new GraphEdge
+                {
+                    From = controller.Id,
+                    To = client.Id,
+                    Kind = "uses_client",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        Location = new GraphLocation { File = controller.FilePath!, Line = 25 }
+                    }
+                },
+                new GraphEdge
+                {
+                    From = client.Id,
+                    To = remoteEndpoint.Id,
+                    Kind = "calls",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        Location = new GraphLocation { File = controller.FilePath!, Line = 25 }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["client_method"] = "GetAccounts",
+                        ["verb"] = "GET",
+                        ["route"] = "/api/v1/accounts/{id:int}",
+                        ["base_url"] = "https://dataget.example.com/api/v1",
+                        ["target_service"] = "DataGet.Api"
+                    }
+                },
+                new GraphEdge
+                {
+                    From = controller.Id,
+                    To = request.Id,
+                    Kind = "sends_request",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        Location = new GraphLocation { File = controller.FilePath!, Line = 30 }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["response_type"] = "CreateThingResponse"
+                    }
+                },
+                new GraphEdge
+                {
+                    From = request.Id,
+                    To = handler.Id,
+                    Kind = "handled_by",
+                    Source = "analysis"
+                },
+                new GraphEdge
+                {
+                    From = request.Id,
+                    To = pipeline.Id,
+                    Kind = "processed_by",
+                    Source = "analysis",
+                    Props = new Dictionary<string, object>
+                    {
+                        ["stage"] = "Pre",
+                        ["response_type"] = "CreateThingResponse"
+                    }
+                }
+            }
+        };
+
+        var flows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "Sample.Web.Controllers.*" }));
+        Assert.Contains("impact_summary", flows);
+        Assert.Contains("remote_endpoints 1 (calls=1)", flows);
+        Assert.Contains("GET /api/accounts/{id} -> DataGet.Api via DataGetClient", flows);
+        Assert.Contains("repositories 1 (writes=1, reads=0)", flows);
+        Assert.Contains("ThingRepository writes=1 reads=0", flows);
+        Assert.Contains("entities 1 (writes=1, reads=0)", flows);
+        Assert.Contains("clients 1", flows);
+        Assert.Contains("pipeline_behaviors 1", flows);
+        Assert.Contains("requests 1", flows);
+        Assert.Contains("handlers 1", flows);
+    }
+
+    [Fact]
     public void BuildFlows_HeaderIncludesMultipleStatusCodes()
     {
         var controller = new GraphNode
@@ -104,6 +358,105 @@ public class FlowBuilderTests
         var flows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "Sample.Web.Controllers.*" }));
 
         Assert.Contains("status=200,404", flows);
+    }
+
+    [Fact]
+    public void BuildFlows_ResolvesServiceContractsViaRequestsWhenNoImplementation()
+    {
+        var controller = new GraphNode
+        {
+            Id = "Sample.Web.Controllers.LedgerReportController.Get",
+            Type = "endpoint.controller",
+            Name = "Get",
+            Fqdn = "Sample.Web.Controllers.LedgerReportController.Get",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controllers/LedgerReportController.cs",
+            SymbolId = "Sample.Web.Controllers.LedgerReportController.Get",
+            Span = new GraphSpan { StartLine = 10, EndLine = 40 },
+            Props = new Dictionary<string, object>
+            {
+                ["route"] = "/api/ledger/report",
+                ["http_method"] = "GET"
+            }
+        };
+
+        var service = new GraphNode
+        {
+            Id = "Service",
+            Type = "app.service_contract",
+            Name = "GetTrialBalanceForDatesQuery",
+            Fqdn = "Sample.App.Queries.GetTrialBalanceForDatesQuery",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = string.Empty,
+            SymbolId = "Service"
+        };
+
+        var request = new GraphNode
+        {
+            Id = "Request",
+            Type = "cqrs.request",
+            Name = "GetTrialBalanceForDatesQuery",
+            Fqdn = "Sample.App.Queries.GetTrialBalanceForDatesQuery",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Queries/GetTrialBalanceForDatesQuery.cs",
+            SymbolId = "Request"
+        };
+
+        var handler = new GraphNode
+        {
+            Id = "Handler",
+            Type = "cqrs.handler",
+            Name = "GetTrialBalanceForDatesQueryHandler",
+            Fqdn = "Sample.App.Queries.GetTrialBalanceForDatesQueryHandler",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Queries/GetTrialBalanceForDatesQuery.cs",
+            SymbolId = "Handler",
+            Span = new GraphSpan { StartLine = 50, EndLine = 150 }
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1",
+            Nodes = new[] { controller, service, request, handler },
+            Edges = new[]
+            {
+                new GraphEdge
+                {
+                    From = controller.Id,
+                    To = service.Id,
+                    Kind = "uses_service",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        Location = new GraphLocation { File = controller.FilePath!, Line = 25 }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["method"] = "Execute"
+                    }
+                },
+                new GraphEdge
+                {
+                    From = request.Id,
+                    To = handler.Id,
+                    Kind = "handled_by",
+                    Source = "analysis",
+                    Transform = new GraphTransform
+                    {
+                        MethodSpan = handler.Span
+                    }
+                }
+            }
+        };
+
+        var flows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "Sample.Web.Controllers.*" }));
+        Assert.Contains("resolves_request Sample.App.Queries.GetTrialBalanceForDatesQuery.Execute", flows);
+        Assert.Contains("handled_by Sample.App.Queries.GetTrialBalanceForDatesQueryHandler.Handle", flows);
+        Assert.DoesNotContain("... (no implementation details available)", flows);
     }
 
     [Fact]
@@ -1138,5 +1491,74 @@ public class FlowBuilderTests
         Assert.Contains("target_service TargetService", flows);
         Assert.Contains("Target.Service.Controllers.TargetController.Get", flows);
         Assert.Contains("handled_by Target.Handlers.GetTargetHandler.Handle", flows);
+    }
+
+    [Fact]
+    public void BuildFlows_DeduplicatesRepeatedCallLines()
+    {
+        var controller = new GraphNode
+        {
+            Id = "Sample.Web.Controllers.VatController.Get",
+            Type = "endpoint.controller",
+            Name = "Get",
+            Fqdn = "Sample.Web.Controllers.VatController.Get",
+            Assembly = "Sample.Web",
+            Project = "Sample.Web",
+            FilePath = "Controllers/VatController.cs",
+            SymbolId = "Sample.Web.Controllers.VatController.Get",
+            Span = new GraphSpan { StartLine = 10, EndLine = 40 },
+            Props = new Dictionary<string, object>
+            {
+                ["route"] = "/api/vat",
+                ["http_method"] = "GET"
+            }
+        };
+
+        var client = new GraphNode
+        {
+            Id = "Sample.App.Services.VatClient",
+            Type = "app.service",
+            Name = "VatClient",
+            Fqdn = "Sample.App.Services.VatClient",
+            Assembly = "Sample.App",
+            Project = "Sample.App",
+            FilePath = "Services/VatClient.cs",
+            SymbolId = "Sample.App.Services.VatClient"
+        };
+
+        GraphEdge CreateCallEdge() => new()
+        {
+            From = controller.Id,
+            To = client.Id,
+            Kind = "calls",
+            Source = "analysis",
+            Transform = new GraphTransform
+            {
+                Location = new GraphLocation { File = controller.FilePath, Line = 25 },
+                IlRange = new GraphIlRange { StartOffset = 10, EndOffset = 30 }
+            },
+            Props = new Dictionary<string, object>
+            {
+                ["method"] = "GetVatObligations"
+            }
+        };
+
+        var document = new GraphDocument
+        {
+            Version = "1",
+            Nodes = new[] { controller, client },
+            Edges = new[]
+            {
+                CreateCallEdge(),
+                CreateCallEdge()
+            }
+        };
+
+        var flows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "Sample.Web.Controllers.*" }));
+        var occurrences = flows
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Count(line => line.Contains("calls VatClient.GetVatObligations", StringComparison.Ordinal));
+
+        Assert.Equal(1, occurrences);
     }
 }
