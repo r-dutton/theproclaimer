@@ -1,0 +1,11 @@
+[web] GET /api/wholesalers  (Workpapers.Next.API.Controllers.WholesalerController.GetWholesalers)  [L31–L38] status=200 [auth=AuthorizationPolicies.SuperUser]
+  └─ maps_to WholesalerDto [L34]
+  └─ uses_service UnitOfWork
+    └─ method Table [L34]
+      └─ implementation UnitOfWork.Table
+  └─ impact_summary
+    └─ services 1
+      └─ UnitOfWork
+    └─ mappings 1
+      └─ WholesalerDto
+

@@ -81,10 +81,20 @@ public sealed partial class ProjectAnalyzer
 
                 var typeName = descriptor.Type;
                 var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                var invocation = memberAccess.Parent as InvocationExpressionSyntax;
+                if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
+                {
+                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
+                    {
+                        handler.ConfigurationUsages.Add(configurationUsage);
+                    }
+
+                    continue;
+                }
                 if (IsCacheService(resolvedType) || IsCacheService(typeName))
                 {
                     var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
-                    if (TryCaptureCacheInvocation(memberAccess, memberAccess.Parent as InvocationExpressionSyntax, cacheType, tree) is { } cacheInvocation)
+                    if (TryCaptureCacheInvocation(memberAccess, invocation, cacheType, tree) is { } cacheInvocation)
                     {
                         handler.CacheInvocations.Add(cacheInvocation);
                     }
@@ -92,7 +102,6 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                 var invocationNode = (SyntaxNode?)invocation ?? memberAccess;
                 var line = GetLineNumber(tree, invocationNode);
                 var methodName = GetMemberName(memberAccess.Name);
@@ -111,7 +120,8 @@ public sealed partial class ProjectAnalyzer
 
                 if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
                 {
-                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line));
+                    var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
+                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
                     continue;
                 }
 
@@ -174,6 +184,31 @@ public sealed partial class ProjectAnalyzer
                 {
                     var serviceType = resolvedType ?? typeName;
                     handler.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
+                }
+            }
+
+            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            {
+                if (elementAccess.Expression is not IdentifierNameSyntax identifier)
+                {
+                    continue;
+                }
+
+                var fieldName = identifier.Identifier.Text.TrimStart('_');
+                if (!fieldLookup.TryGetValue(fieldName, out var descriptor))
+                {
+                    continue;
+                }
+
+                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
+                {
+                    continue;
+                }
+
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                {
+                    handler.ConfigurationUsages.Add(configurationUsage);
                 }
             }
 
@@ -294,7 +329,8 @@ public sealed partial class ProjectAnalyzer
                     },
                     Props = new Dictionary<string, object>
                     {
-                        ["method"] = repositoryCall.Method
+                        ["method"] = repositoryCall.Method,
+                        ["operation"] = repositoryCall.Operation
                     },
                     Evidence = CreateEvidence(handler.FilePath, repositoryCall.Line)
                 });
@@ -440,6 +476,8 @@ public sealed partial class ProjectAnalyzer
                     Evidence = CreateEvidence(handler.FilePath, optionsUsage.Line)
                 });
             }
+
+            EmitConfigurationEdges(id, handler.ConfigurationUsages);
 
             foreach (var request in handler.RequestInvocations)
             {

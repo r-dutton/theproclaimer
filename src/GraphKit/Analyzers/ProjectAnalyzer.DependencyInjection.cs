@@ -88,7 +88,7 @@ public sealed partial class ProjectAnalyzer
             try
             {
                 using var stream = File.OpenRead(file);
-                using var document = JsonDocument.Parse(stream);
+                using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip});
                 var relative = GetRelativePath(file);
                 var lines = File.ReadAllLines(file);
 
@@ -225,6 +225,7 @@ public sealed partial class ProjectAnalyzer
                 project.RelativeDirectory);
 
             AddServiceRegistration(serviceType!, registration);
+            CaptureMediatorRegistration(serviceType!, implementationType!);
 
             var simple = serviceType!.Split('.').Last();
             if (!string.Equals(simple, serviceType, StringComparison.Ordinal))
@@ -234,10 +235,125 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
+    private void CaptureMediatorRegistration(string serviceType, string implementationType)
+    {
+        var serviceBase = GetTypeNameWithoutGenerics(serviceType);
+        if (serviceBase.EndsWith("IPipelineBehavior", StringComparison.Ordinal))
+        {
+            var arguments = SplitGenericArguments(serviceType);
+            if (arguments.Count == 0)
+            {
+                return;
+            }
+
+            var requestType = QualifyTypeName(arguments[0]);
+            RegisterPipelineRequest(requestType, implementationType);
+            return;
+        }
+
+        if (serviceBase.EndsWith("IRequestPreProcessor", StringComparison.Ordinal) ||
+            serviceBase.EndsWith("IRequestPostProcessor", StringComparison.Ordinal) ||
+            serviceBase.EndsWith("IRequestProcessor", StringComparison.Ordinal))
+        {
+            var arguments = SplitGenericArguments(serviceType);
+            if (arguments.Count == 0)
+            {
+                return;
+            }
+
+            var requestType = QualifyTypeName(arguments[0]);
+            RegisterProcessorRequest(requestType, implementationType);
+        }
+    }
+
+    private void RegisterPipelineRequest(string requestType, string behaviorType)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return;
+        }
+
+        var bag = _requestPipelineRegistrations.GetOrAdd(requestType, _ => new ConcurrentBag<string>());
+        bag.Add(behaviorType);
+
+        if (FindPipelineBehavior(behaviorType) is { } behavior)
+        {
+            behavior.RegisteredRequestTypes.Add(requestType);
+        }
+        else
+        {
+            var baseType = GetTypeNameWithoutGenerics(behaviorType);
+            if (FindPipelineBehavior(baseType) is { } baseBehavior)
+            {
+                baseBehavior.RegisteredRequestTypes.Add(requestType);
+            }
+        }
+    }
+
+    private void RegisterProcessorRequest(string requestType, string processorType)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return;
+        }
+
+        var bag = _requestProcessorRegistrations.GetOrAdd(requestType, _ => new ConcurrentBag<string>());
+        bag.Add(processorType);
+
+        if (FindRequestProcessor(processorType) is { } processor)
+        {
+            processor.RegisteredRequestTypes.Add(requestType);
+        }
+        else
+        {
+            var baseType = GetTypeNameWithoutGenerics(processorType);
+            if (FindRequestProcessor(baseType) is { } baseProcessor)
+            {
+                baseProcessor.RegisteredRequestTypes.Add(requestType);
+            }
+        }
+    }
+
     private void AnalyzeHttpClientRegistrations(ProjectInfo project, SyntaxTree tree)
     {
         foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
+            // IServiceProvider.GetRequiredService<T>() or GetService<T>() detection (service locator usage)
+            if (invocation.Expression is MemberAccessExpressionSyntax mas)
+            {
+                if (mas.Name is GenericNameSyntax gname &&
+                    (gname.Identifier.Text == "GetRequiredService" || gname.Identifier.Text == "GetService") &&
+                    gname.TypeArgumentList.Arguments.Count == 1)
+                {
+                    var contractType = gname.TypeArgumentList.Arguments[0].ToString();
+                    if (!string.IsNullOrWhiteSpace(contractType))
+                    {
+                        if (TryEnsureServiceNode(contractType, out var serviceId, out _))
+                        {
+                            var span = ToGraphSpan(tree, invocation);
+                            _edges.Add(new GraphEdge
+                            {
+                                From = serviceId!,
+                                To = serviceId!,
+                                Kind = "service_located",
+                                Source = "static",
+                                Confidence = 0.7,
+                                Transform = new GraphTransform
+                                {
+                                    Type = "ioc.locator",
+                                    Location = new GraphLocation { File = GetRelativePath(tree.FilePath), Line = span.StartLine }
+                                },
+                                Props = new Dictionary<string, object>
+                                {
+                                    ["method"] = gname.Identifier.Text,
+                                    ["service_type"] = contractType
+                                },
+                                Evidence = CreateEvidence(GetRelativePath(tree.FilePath), span)
+                            });
+                        }
+                    }
+                }
+            }
             if (invocation.Expression is not MemberAccessExpressionSyntax { Name: GenericNameSyntax generic } memberAccess)
             {
                 continue;
@@ -593,17 +709,165 @@ public sealed partial class ProjectAnalyzer
                 });
             }
         }
+
+        // Open generic closure synthesis & options expansion
+        SynthesizeGenericClosuresAndOptions();
+    }
+
+    private void SynthesizeGenericClosuresAndOptions()
+    {
+        // Build lookup of open generic simple name -> open service node ids
+        var openGenericServiceNodes = _nodes.Values
+            .Where(n => n.Type == "app.service_contract" && n.Fqdn is { } f && f.Contains("<", StringComparison.Ordinal) && f.Contains(">", StringComparison.Ordinal))
+            .GroupBy(n => n.Name.Split('<')[0], StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        // Map open generic service node -> its implemented_by targets
+        var implementedByLookup = _edges
+            .Where(e => e.Kind == "implemented_by")
+            .GroupBy(e => e.From)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        foreach (var service in _nodes.Values.Where(n => n.Type == "app.service_contract"))
+        {
+            if (string.IsNullOrWhiteSpace(service.Fqdn)) continue;
+
+            // Options expansion: IOptions<T> / IOptionsSnapshot<T>
+            if (service.Fqdn.StartsWith("Microsoft.Extensions.Options.IOptions<", StringComparison.Ordinal) ||
+                service.Fqdn.StartsWith("Microsoft.Extensions.Options.IOptionsSnapshot<", StringComparison.Ordinal))
+            {
+                var innerStart = service.Fqdn.IndexOf('<');
+                var innerEnd = service.Fqdn.LastIndexOf('>');
+                if (innerStart > 0 && innerEnd > innerStart)
+                {
+                    var inner = service.Fqdn.Substring(innerStart + 1, innerEnd - innerStart - 1).Trim();
+                    if (!_nodes.Values.Any(n => string.Equals(n.Fqdn, inner, StringComparison.Ordinal)))
+                    {
+                        // Create a node representing the options POCO if not present
+                        var symbolId = $"T:{inner}";
+                        var id = StableId.For("config.options_poco", inner, GuessAssemblyName(inner), symbolId);
+                        if (!_nodes.ContainsKey(id))
+                        {
+                            _nodes[id] = new GraphNode
+                            {
+                                Id = id,
+                                Type = "config.options_poco",
+                                Name = inner.Split('.').Last(),
+                                Fqdn = inner,
+                                Assembly = GuessAssemblyName(inner),
+                                Project = string.Empty,
+                                FilePath = string.Empty,
+                                SymbolId = symbolId,
+                                Tags = new[] { "config" }
+                            };
+                        }
+                        // Edge from IOptions<T> contract to inner POCO implementation
+                        _edges.Add(new GraphEdge
+                        {
+                            From = service.Id,
+                            To = id,
+                            Kind = "implemented_by",
+                            Source = "synthetic",
+                            Confidence = 0.6,
+                            Transform = new GraphTransform { Type = "options.expansion" },
+                            Props = new Dictionary<string, object> { ["options_type"] = inner }
+                        });
+                    }
+                    else
+                    {
+                        var existing = _nodes.Values.First(n => string.Equals(n.Fqdn, inner, StringComparison.Ordinal));
+                        if (!_edges.Any(e => e.From == service.Id && e.To == existing.Id && e.Kind == "implemented_by"))
+                        {
+                            _edges.Add(new GraphEdge
+                            {
+                                From = service.Id,
+                                To = existing.Id,
+                                Kind = "implemented_by",
+                                Source = "synthetic",
+                                Confidence = 0.6,
+                                Transform = new GraphTransform { Type = "options.expansion" },
+                                Props = new Dictionary<string, object> { ["options_type"] = inner }
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Open generic closure mapping
+            if (service.Fqdn.Contains('<', StringComparison.Ordinal) && service.Fqdn.Contains('>', StringComparison.Ordinal))
+            {
+                // Skip open generic definitions (contain `T` or other single-letter parameters) and focus on closed (contains '.') arguments
+                var genericArgsSegment = service.Fqdn[(service.Fqdn.IndexOf('<') + 1)..service.Fqdn.LastIndexOf('>')];
+                if (genericArgsSegment.Contains('.', StringComparison.Ordinal))
+                {
+                    var baseName = service.Name.Split('<')[0];
+                    if (openGenericServiceNodes.TryGetValue(baseName, out var openNodes))
+                    {
+                        foreach (var openNode in openNodes)
+                        {
+                            if (implementedByLookup.TryGetValue(openNode.Id, out var implEdges))
+                            {
+                                foreach (var implEdge in implEdges)
+                                {
+                                    // Synthesize edge if absent
+                                    if (!_edges.Any(e => e.From == service.Id && e.To == implEdge.To && e.Kind == "implemented_by"))
+                                    {
+                                        _edges.Add(new GraphEdge
+                                        {
+                                            From = service.Id,
+                                            To = implEdge.To,
+                                            Kind = "implemented_by",
+                                            Source = "synthetic",
+                                            Confidence = implEdge.Confidence * 0.9,
+                                            Transform = new GraphTransform { Type = "generic.closure" },
+                                            Props = new Dictionary<string, object>
+                                            {
+                                                ["closure_of"] = openNode.Fqdn ?? openNode.Name,
+                                                ["closed_args"] = genericArgsSegment
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private bool TryEnsureServiceNode(string serviceType, out string? nodeId, out ServiceRegistrationInfo? registration)
     {
         registration = FindServiceRegistration(serviceType);
         var effectiveServiceType = registration?.ServiceType ?? serviceType;
-        var symbolId = $"T:{effectiveServiceType}";
         var assembly = registration?.Assembly ?? GuessAssemblyName(effectiveServiceType);
         var project = registration?.Project ?? string.Empty;
         var filePath = registration?.FilePath ?? string.Empty;
-        var span = registration?.Span;
+        GraphSpan? span = registration?.Span;
+
+        if (_services.TryGetValue(effectiveServiceType, out var serviceInfo))
+        {
+            effectiveServiceType = serviceInfo.Fqdn;
+            assembly = serviceInfo.Assembly;
+            project = serviceInfo.Project;
+            filePath = serviceInfo.FilePath;
+            span = serviceInfo.Span;
+        }
+        else
+        {
+            var simple = effectiveServiceType.Split('.').Last();
+            var match = _services.Values.FirstOrDefault(s => s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                effectiveServiceType = match.Fqdn;
+                assembly = match.Assembly;
+                project = match.Project;
+                filePath = match.FilePath;
+                span = match.Span;
+            }
+        }
+
+        var symbolId = $"T:{effectiveServiceType}";
 
         var id = StableId.For("app.service_contract", effectiveServiceType, assembly, symbolId);
         if (!_nodes.ContainsKey(id))
@@ -646,6 +910,26 @@ public sealed partial class ProjectAnalyzer
                 .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => r.Span.StartLine)
                 .FirstOrDefault();
+        }
+
+        if (TryMakeOpenGenericType(serviceType, out var openServiceType, out _))
+        {
+            if (_serviceRegistrations.TryGetValue(openServiceType, out var openRegistrations) && !openRegistrations.IsEmpty)
+            {
+                return openRegistrations
+                    .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(r => r.Span.StartLine)
+                    .FirstOrDefault();
+            }
+
+            var openSimple = openServiceType.Split('.').Last();
+            if (_serviceRegistrations.TryGetValue(openSimple, out var openSimpleRegistrations) && !openSimpleRegistrations.IsEmpty)
+            {
+                return openSimpleRegistrations
+                    .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(r => r.Span.StartLine)
+                    .FirstOrDefault();
+            }
         }
 
         var simple = serviceType.Split('.').Last();

@@ -1,0 +1,85 @@
+[web] POST /api/source-accounts/standard-chart/for-binder/{binderId:guid}  (Workpapers.Next.API.Controllers.SourceAccountsController.BuildStandardChartForBinder)  [L231–L245] status=201 [auth=AuthorizationPolicies.User]
+  └─ calls BinderRepository.ReadQuery [L236]
+  └─ query Binder [L236]
+    └─ reads_from Binders
+  └─ sends_request CreateHeaderSourceAccountsCommand -> CreateHeaderSourceAccountsCommandHandler [L244]
+    └─ handled_by Workpapers.Next.Connections.Common.Commands.SourceAccounts.CreateHeaderSourceAccountsCommandHandler.Handle [L32–L256]
+      └─ calls MasterAccountRepository.ReadQuery [L245]
+      └─ calls StandardAccountRepository.ReadQuery [L226]
+      └─ calls MasterAccountRepository.ReadQuery [L213]
+      └─ calls StandardAccountRepository.ReadQuery [L186]
+      └─ calls SourceAccountRepository (methods: WriteQuery,Add) [L177]
+      └─ calls ClientRepository.ReadQuery [L72]
+      └─ calls SourceRepository.ReadQuery [L67]
+      └─ calls SourceAccountRepository.WriteQuery [L59]
+      └─ uses_client ClientRepository [L72]
+      └─ uses_service IControlledRepository<Binder> (Scoped (inferred))
+        └─ method ReadQuery [L77]
+          └─ implementation Workpapers.Next.Data.Repository.BinderRepository.ReadQuery
+  └─ sends_request CanIAccessBinderQuery -> CanIAccessBinderQueryHandler [L234]
+    └─ handled_by Workpapers.Next.ApplicationService.Queries.Binders.CanIAccessBinderQueryHandler.Handle [L60–L126]
+      └─ uses_service RequestProcessor
+        └─ method ProcessAsync [L117]
+          └─ resolves_request Workpapers.Next.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ resolves_request Cirrus.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ resolves_request DataGet.Services.Features.Requests.RequestProcessor.ProcessAsync
+          └─ +1 additional_requests elided
+      └─ uses_service IControlledRepository<Binder> (Scoped (inferred))
+        └─ method ReadQuery [L101]
+          └─ implementation Workpapers.Next.Data.Repository.BinderRepository.ReadQuery
+      └─ uses_service TenantService
+        └─ method GetCurrentTenant [L92]
+          └─ implementation Workpapers.Next.Services.Features.Tenants.TenantService.GetCurrentTenant [L5-L22]
+            └─ uses_service TenantIdentificationService
+              └─ method GetCurrentTenant [L20]
+                └─ implementation Workpapers.Next.ApplicationService.Services.TenantIdentificationService.GetCurrentTenant [L15-L131]
+                  └─ uses_service RequestProcessor
+                    └─ method GetCatalogByFirmId [L104]
+                      └─ resolves_request Workpapers.Next.Services.Features.Requests.RequestProcessor.GetCatalogByFirmId
+                      └─ resolves_request Cirrus.Services.Features.Requests.RequestProcessor.GetCatalogByFirmId
+                      └─ resolves_request DataGet.Services.Features.Requests.RequestProcessor.GetCatalogByFirmId
+                      └─ +1 additional_requests elided
+                  └─ uses_service FirmLightDto
+                    └─ method AssignActiveTenant [L77]
+                      └─ implementation Workpapers.Next.DTOs.FirmLightDto.AssignActiveTenant [L8-L17]
+                  └─ uses_cache IMemoryCache.GetOrCreate [read] [L116]
+      └─ uses_service UserService
+        └─ method GetUserId [L91]
+          └─ implementation Workpapers.Next.ApplicationService.Services.UserService.GetUserId [L20-L295]
+            └─ uses_service User
+              └─ method GetUserId [L67]
+                └─ implementation Workpapers.Next.DomainModel.Model.Firms.User.GetUserId [L18-L368]
+            └─ uses_service Guid?
+              └─ method GetUserId [L64]
+                └─ ... (no implementation details available)
+            └─ uses_cache IMemoryCache.GetOrCreate [read] [L280]
+      └─ uses_service RequestInfoService
+        └─ method IsValidServiceAccountRequest [L89]
+          └─ implementation Workpapers.Next.Services.Features.RequestInfoService.IsValidServiceAccountRequest [L11-L84]
+            └─ uses_service RequestInfo
+              └─ method IsValidServiceAccountRequest [L71]
+                └─ implementation Cirrus.Services.Features.RequestInfoService.IsValidServiceAccountRequest [L11-L84]
+                └─ implementation Dataverse.Services.Features.RequestInfoService.IsValidServiceAccountRequest [L11-L92]
+                  └─ uses_service RequestInfo
+                    └─ method IsValidServiceAccountRequest [L82]
+                      └─ ... (service recursion detected)
+                  └─ logs ILogger<IRequestInfoService> [Warning] [L89]
+                └─ implementation Workpapers.Next.Services.Features.RequestInfoService.IsValidServiceAccountRequest (see previous expansion)
+            └─ logs ILogger<IRequestInfoService> [Warning] [L81]
+      └─ uses_cache IDistributedCache.SetRecordAsync [write] [L121]
+      └─ uses_cache IDistributedCache.DoesRecordExistAsync [access] [L109]
+      └─ uses_cache IDistributedCache.CreateAccessKey [write] [L92]
+  └─ impact_summary
+    └─ entities 1 (writes=0, reads=1)
+      └─ Binder writes=0 reads=1
+    └─ clients 1
+      └─ ClientRepository
+    └─ requests 2
+      └─ CanIAccessBinderQuery
+      └─ CreateHeaderSourceAccountsCommand
+    └─ handlers 2
+      └─ CanIAccessBinderQueryHandler
+      └─ CreateHeaderSourceAccountsCommandHandler
+    └─ caches 1
+      └─ IMemoryCache
+

@@ -14,6 +14,7 @@ HashSet<string>? tagFilter = null;
 string format = "md";
 var flowPatterns = new List<string>();
 var solutions = new List<string>();
+int? maxDepth = null;
 
 for (int i = 0; i < argsList.Count; i++)
 {
@@ -44,6 +45,12 @@ for (int i = 0; i < argsList.Count; i++)
         case "--solutions":
             solutions.AddRange(argsList[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             break;
+        case "--max-depth":
+            if (int.TryParse(argsList[++i], out var md) && md >= 0)
+            {
+                maxDepth = md;
+            }
+            break;
     }
 }
 
@@ -57,7 +64,7 @@ var workspaceIndex = FlowWorkspaceIndex.Load(workspace);
 if (flowPatterns.Count > 0)
 {
     var predicate = FlowFilter.BuildPredicate(flowPatterns);
-    var flow = FlowBuilder.BuildFlows(document, predicate, workspaceIndex);
+    var flow = FlowBuilder.BuildFlows(document, predicate, workspaceIndex, maxDepth);
 
     if (string.IsNullOrWhiteSpace(flow))
     {

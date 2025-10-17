@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -27,6 +30,9 @@ public sealed partial class ProjectAnalyzer
                 break;
             case ClassDeclarationSyntax classDeclaration:
                 AnalyzeClass(project, tree, classDeclaration, currentNamespace);
+                break;
+            case InterfaceDeclarationSyntax interfaceDeclaration:
+                AnalyzeInterface(project, tree, interfaceDeclaration, currentNamespace);
                 break;
             case RecordDeclarationSyntax recordDeclaration:
                 AnalyzeRecord(project, tree, recordDeclaration, currentNamespace);
@@ -119,6 +125,16 @@ public sealed partial class ProjectAnalyzer
             AnalyzeHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
         }
 
+        if (ImplementsInterface(classDeclaration, "IPipelineBehavior"))
+        {
+            AnalyzePipelineBehavior(project, tree, classDeclaration, namespaceName, fieldTypes);
+        }
+
+        if (ImplementsInterface(classDeclaration, "IRequestPreProcessor") || ImplementsInterface(classDeclaration, "IRequestPostProcessor"))
+        {
+            AnalyzeRequestProcessor(project, tree, classDeclaration, namespaceName, fieldTypes);
+        }
+
         if (ImplementsInterface(classDeclaration, "INotificationHandler"))
         {
             AnalyzeNotificationHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
@@ -149,6 +165,11 @@ public sealed partial class ProjectAnalyzer
             AnalyzeEntity(project, tree, classDeclaration, namespaceName);
         }
 
+        if (IsServiceClass(classDeclaration, tree.FilePath, fieldTypes))
+        {
+            AnalyzeService(project, tree, classDeclaration, namespaceName, fieldTypes);
+        }
+
         if (IsBackgroundService(classDeclaration))
         {
             AnalyzeBackgroundService(project, tree, classDeclaration, namespaceName, fieldTypes);
@@ -165,6 +186,77 @@ public sealed partial class ProjectAnalyzer
              className.Contains(".Dtos.", StringComparison.Ordinal)))
         {
             _dtos[fqdn] = new DtoInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
+        }
+    }
+
+    private void AnalyzeInterface(ProjectInfo project, SyntaxTree tree, InterfaceDeclarationSyntax interfaceDeclaration, string? currentNamespace)
+    {
+        var namespaceName = currentNamespace ?? project.RootNamespace;
+        var interfaceName = interfaceDeclaration.Identifier.Text;
+        var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? interfaceName : $"{namespaceName}.{interfaceName}";
+
+        var methodMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var method in interfaceDeclaration.Members.OfType<MethodDeclarationSyntax>())
+        {
+            var methodName = method.Identifier.Text;
+            if (string.IsNullOrWhiteSpace(methodName))
+            {
+                continue;
+            }
+
+            var returnType = method.ReturnType.ToString();
+            if (string.IsNullOrWhiteSpace(returnType) || string.Equals(returnType, "void", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var qualifiedReturnType = QualifyTypeName(returnType);
+            if (string.IsNullOrWhiteSpace(qualifiedReturnType))
+            {
+                continue;
+            }
+
+            methodMap[methodName] = qualifiedReturnType;
+            if (methodName.EndsWith("Async", StringComparison.Ordinal))
+            {
+                var alternate = methodName[..^5];
+                if (!string.IsNullOrWhiteSpace(alternate))
+                {
+                    methodMap[alternate] = qualifiedReturnType;
+                }
+            }
+        }
+
+        if (methodMap.Count == 0)
+        {
+            return;
+        }
+
+        RegisterInterfaceMethodMap(fqdn, methodMap);
+        RegisterInterfaceMethodMap(interfaceName, methodMap);
+
+        if (interfaceName.StartsWith("I", StringComparison.Ordinal) && interfaceName.Length > 1)
+        {
+            var trimmed = interfaceName[1..];
+            RegisterInterfaceMethodMap(trimmed, methodMap);
+            if (!string.IsNullOrWhiteSpace(namespaceName))
+            {
+                RegisterInterfaceMethodMap($"{namespaceName}.{trimmed}", methodMap);
+            }
+        }
+    }
+
+    private void RegisterInterfaceMethodMap(string? key, IReadOnlyDictionary<string, string> methods)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        var methodLookup = _interfaceMethodReturnTypes.GetOrAdd(key, _ => new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        foreach (var pair in methods)
+        {
+            methodLookup[pair.Key] = pair.Value;
         }
     }
 
@@ -292,7 +384,21 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
-        return fieldTypes.Values.Any(v => v.Type.Contains("HttpClient", StringComparison.Ordinal));
+        if (fieldTypes.Values.Any(v => v.Type.Contains("HttpClient", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (fieldTypes.Values.Any(v =>
+                v.Type.Contains("IOAuthClient", StringComparison.Ordinal) ||
+                v.Type.Contains("IDataGetService", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        return typeDeclaration.DescendantNodes()
+            .OfType<ObjectCreationExpressionSyntax>()
+            .Any(creation => creation.Type.ToString().EndsWith("UrlBuilder", StringComparison.Ordinal));
     }
 
     private static bool IsEntity(ClassDeclarationSyntax classDeclaration)
