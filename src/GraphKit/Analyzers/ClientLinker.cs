@@ -51,7 +51,7 @@ internal static class ClientLinker
                 }
 
                 // Skip empty or root-only routes to prevent explosion
-                if (!string.IsNullOrWhiteSpace(route) && (route == "/" || route.Trim() == string.Empty))
+                if (string.IsNullOrWhiteSpace(route) && (route == "/" || route.Trim() == string.Empty))
                 {
                     continue;
                 }

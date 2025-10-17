@@ -5,11 +5,14 @@ using System.Linq;
 using System.Text;
 using GraphKit.Graph;
 
+using static GraphKit.Outputs.Utilities;
+using static GraphKit.Outputs.Utilities.Nodes;
+
 namespace GraphKit.Outputs;
 
 public static partial class FlowBuilder
 {
-    private static void AppendServiceContractFlow(
+    public static void AppendServiceContractFlow(
         StringBuilder builder,
         FlowRenderState state,
         GraphNode caller,
@@ -330,7 +333,7 @@ public static partial class FlowBuilder
         return true;
     }
 
-    private static void AppendServiceImplementationFlow(
+    public static void AppendServiceImplementationFlow(
         StringBuilder builder,
         FlowRenderState state,
         GraphNode caller,
@@ -415,7 +418,7 @@ public static partial class FlowBuilder
         switch (implementation.Type)
         {
             case "cqrs.handler":
-                AppendHandlerFlow(builder, state, implementation, childIndent);
+                FlowBuilder.AppendHandlerFlow(builder, state, implementation, childIndent);
                 break;
             case "cqrs.request":
                 AppendCommandFlow(builder, state, implementation, childIndent);
