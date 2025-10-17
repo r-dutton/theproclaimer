@@ -17,8 +17,11 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, MinimalEndpointInfo> _minimalEndpoints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RequestInfo> _requests = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HandlerInfo> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ServiceInfo> _services = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, PipelineBehaviorInfo> _pipelineBehaviors = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RequestProcessorInfo> _requestProcessors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _requestPipelineRegistrations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _requestProcessorRegistrations = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RepositoryInfo> _repositories = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DtoInfo> _dtos = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<ValidatorInfo> _validators = new();
@@ -42,12 +45,16 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, OptionsInfo> _options = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CacheInfo> _caches = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DbContextInfo> _dbContexts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _interfaceMethodReturnTypes = new(StringComparer.OrdinalIgnoreCase);
 
     public ProjectAnalyzer(string workspaceRoot)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         LoadFlowMap();
     }
+
+    public int NodeCount => _nodes.Count;
+    public int EdgeCount => _edges.Count;
 
     public async Task AnalyzeProjectAsync(ProjectInfo project, CancellationToken cancellationToken)
     {
@@ -97,19 +104,16 @@ public sealed partial class ProjectAnalyzer
         EmitMappings();
         EmitHttpClients();
         EmitPublishers();
+        EmitServices();
         EmitServiceRegistrations();
-        EmitHttpCalls();
+    EmitHttpCalls();
+    // Deferred synthetic call edges derived from uses_client edges (for cross-solution linking restoration)
+    ClientLinker.EmitClientUseCallEdges(_nodes, _edges, _clientTargetServices);
         EmitBackgroundServices();
 
-        var nodes = _nodes.Values
-            .OrderBy(node => node.Id, StringComparer.Ordinal)
-            .ToList();
 
-        var edges = _edges
-            .OrderBy(edge => edge.From, StringComparer.Ordinal)
-            .ThenBy(edge => edge.To, StringComparer.Ordinal)
-            .ThenBy(edge => edge.Kind, StringComparer.Ordinal)
-            .ToList();
+        var nodes = _nodes.Values.ToList();
+        var edges = _edges.ToList();
 
         return new GraphDocument
         {
@@ -118,6 +122,7 @@ public sealed partial class ProjectAnalyzer
             Edges = edges
         };
     }
+
 
     private string GetRelativePath(string filePath)
         => Path.GetRelativePath(_workspaceRoot, filePath).Replace('\\', '/');
@@ -165,4 +170,9 @@ public sealed partial class ProjectAnalyzer
                 }
             }
         };
+
+    // Synthetic linking moved to ClientLinker.EmitClientUseCallEdges
+
+    // Reuse existing route canonicalization logic defined elsewhere in analyzer (Controllers / Http). Provide fallback if not present.
+    // Use existing CanonicalizeRoute(string route) defined in Controllers partial.
 }

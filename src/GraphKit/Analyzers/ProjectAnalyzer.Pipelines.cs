@@ -153,6 +153,27 @@ public sealed partial class ProjectAnalyzer
         foreach (var behavior in _pipelineBehaviors.Values)
         {
             var id = StableId.For("cqrs.pipeline_behavior", behavior.Fqdn, behavior.Assembly, behavior.SymbolId);
+            var requestTypes = new HashSet<string>(behavior.RegisteredRequestTypes, StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(behavior.RequestType))
+            {
+                var candidate = QualifyTypeName(behavior.RequestType);
+                if (!IsGenericPlaceholder(candidate))
+                {
+                    requestTypes.Add(candidate);
+                }
+            }
+
+            var behaviorProps = new Dictionary<string, object>
+            {
+                ["generic_request"] = requestTypes.Count == 0
+            };
+
+            if (behavior.RegisteredRequestTypes.Count > 1)
+            {
+                behaviorProps["registered_requests"] = behavior.RegisteredRequestTypes.Count;
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -164,16 +185,23 @@ public sealed partial class ProjectAnalyzer
                 FilePath = behavior.FilePath,
                 Span = behavior.Span,
                 SymbolId = behavior.SymbolId,
-                Tags = new[] { "app" }
+                Tags = new[] { "app" },
+                Props = behaviorProps
             };
 
-            if (FindRequestByType(behavior.RequestType) is { } request)
+            foreach (var requestType in requestTypes)
             {
-                var requestId = StableId.For("cqrs.request", request.Fqdn, request.Assembly, request.SymbolId);
-                var props = new Dictionary<string, object>
+                if (FindRequestByType(requestType) is not { } request)
                 {
-                    ["response_type"] = behavior.ResponseType
-                };
+                    continue;
+                }
+
+                var requestId = StableId.For("cqrs.request", request.Fqdn, request.Assembly, request.SymbolId);
+                var props = new Dictionary<string, object>();
+                if (!string.IsNullOrWhiteSpace(behavior.ResponseType) && !IsGenericPlaceholder(behavior.ResponseType))
+                {
+                    props["response_type"] = behavior.ResponseType;
+                }
 
                 _edges.Add(new GraphEdge
                 {
@@ -203,6 +231,23 @@ public sealed partial class ProjectAnalyzer
         foreach (var processor in _requestProcessors.Values)
         {
             var id = StableId.For("cqrs.request_processor", processor.Fqdn, processor.Assembly, processor.SymbolId);
+            var requestTypes = new HashSet<string>(processor.RegisteredRequestTypes, StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(processor.RequestType) && !IsGenericPlaceholder(processor.RequestType))
+            {
+                requestTypes.Add(QualifyTypeName(processor.RequestType));
+            }
+
+            var props = new Dictionary<string, object>
+            {
+                ["stage"] = processor.Kind,
+                ["generic_request"] = requestTypes.Count == 0
+            };
+
+            if (processor.RegisteredRequestTypes.Count > 1)
+            {
+                props["registered_requests"] = processor.RegisteredRequestTypes.Count;
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -215,23 +260,26 @@ public sealed partial class ProjectAnalyzer
                 Span = processor.Span,
                 SymbolId = processor.SymbolId,
                 Tags = new[] { "app" },
-                Props = new Dictionary<string, object>
-                {
-                    ["stage"] = processor.Kind
-                }
+                Props = props
             };
 
-            if (FindRequestByType(processor.RequestType) is { } request)
+            foreach (var requestType in requestTypes)
             {
+                if (FindRequestByType(requestType) is not { } request)
+                {
+                    continue;
+                }
+
                 var requestId = StableId.For("cqrs.request", request.Fqdn, request.Assembly, request.SymbolId);
-                var props = new Dictionary<string, object>
+                var edgeProps = new Dictionary<string, object>
                 {
                     ["stage"] = processor.Kind
                 };
 
-                if (!string.IsNullOrWhiteSpace(processor.ResponseType) && !processor.ResponseType.Equals("void", StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(processor.ResponseType) && !IsGenericPlaceholder(processor.ResponseType) &&
+                    !processor.ResponseType.Equals("void", StringComparison.OrdinalIgnoreCase))
                 {
-                    props["response_type"] = processor.ResponseType;
+                    edgeProps["response_type"] = processor.ResponseType;
                 }
 
                 _edges.Add(new GraphEdge
@@ -246,7 +294,7 @@ public sealed partial class ProjectAnalyzer
                         Type = "mediatr.request_processor",
                         MethodSpan = processor.Span
                     },
-                    Props = props,
+                    Props = edgeProps,
                     Evidence = CreateEvidence(processor.FilePath, processor.Span)
                 });
             }
@@ -266,6 +314,35 @@ public sealed partial class ProjectAnalyzer
             if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration))
             {
                 continue;
+            }
+
+            if (IsStorageService(usage.ServiceType))
+            {
+                var storageProps = new Dictionary<string, object>
+                {
+                    ["service_type"] = usage.ServiceType
+                };
+
+                if (!string.IsNullOrWhiteSpace(usage.Method))
+                {
+                    storageProps["method"] = usage.Method!;
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = fromId,
+                    To = serviceId!,
+                    Kind = "uses_storage",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "storage.access",
+                        Location = new GraphLocation { File = sourceFile, Line = usage.Line }
+                    },
+                    Props = storageProps,
+                    Evidence = CreateEvidence(sourceFile, usage.Line)
+                });
             }
 
             var props = new Dictionary<string, object>
@@ -366,5 +443,28 @@ public sealed partial class ProjectAnalyzer
                 Evidence = CreateEvidence(sourceFile, cache.Line)
             });
         }
+    }
+
+    private static bool IsGenericPlaceholder(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return true;
+        }
+
+        if (!typeName.Contains('.', StringComparison.Ordinal))
+        {
+            if (typeName.Length == 1)
+            {
+                return true;
+            }
+
+            if (typeName.All(char.IsUpper))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

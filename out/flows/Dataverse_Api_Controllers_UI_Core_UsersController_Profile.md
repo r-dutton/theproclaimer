@@ -1,0 +1,107 @@
+[web] GET /api/ui/users/profile  (Dataverse.Api.Controllers.UI.Core.UsersController.Profile)  [L87–L93] status=200 [auth=Authentication.UserPolicy]
+  └─ sends_request GetUserProfileQuery -> GetUserProfileQueryHandler [L90]
+    └─ handled_by Dataverse.ApplicationService.Queries.Firms.Users.GetUserProfileQueryHandler.Handle [L34–L129]
+      └─ calls TenantRepository.ReadTable [L79]
+      └─ calls UserRepository.ReadQuery [L74]
+      └─ maps_to NotificationDto [L120]
+        └─ automapper.registration DataverseMappingProfile (Notification->NotificationDto) [L116]
+      └─ maps_to IntegrationSettingsDto [L104]
+        └─ automapper.registration DataverseMappingProfile (IntegrationSettings->IntegrationSettingsDto) [L294]
+      └─ maps_to FirmSettingsDto [L91]
+        └─ automapper.registration DataverseMappingProfile (FirmSettings->FirmSettingsDto) [L121]
+      └─ maps_to UserProfileDto [L74]
+        └─ automapper.registration DataverseMappingProfile (User->UserProfileDto) [L93]
+      └─ maps_to TenantLightDto [L118]
+      └─ maps_to TenantDto [L112]
+      └─ uses_service IControlledRepository<Notification> (Scoped (inferred))
+        └─ method ReadQuery [L120]
+          └─ implementation Dataverse.Data.Repository.Users.NotificationRepository.ReadQuery
+      └─ uses_service IControlledRepository<IntegrationSettings> (Scoped (inferred))
+        └─ method ReadQuery [L104]
+          └─ implementation Dataverse.Data.Repository.Firm.IntegrationSettingsRepository.ReadQuery
+      └─ uses_service FirmSettingsService
+        └─ method GetCurrentWorkpapersSettingsAsync [L101]
+          └─ implementation Dataverse.ApplicationService.Services.FirmSettingsService.GetCurrentWorkpapersSettingsAsync [L18-L97]
+            └─ uses_client WorkpapersClient [L78]
+            └─ uses_service WorkpapersClient
+              └─ method GetCurrentWorkpapersSettingsAsync [L78]
+                └─ ... (no implementation details available)
+            └─ maps_to FirmSettingsDto [L60]
+            └─ uses_cache IDistributedCache.GetRecordAsync [read] [L70]
+            └─ uses_cache IDistributedCache.RemoveAsync [write] [L46]
+      └─ uses_service FirmFeatureFlagService
+        └─ method GetAvailableFeaturesForFirm [L96]
+          └─ implementation Dataverse.ApplicationService.Features.FeatureFlags.FirmFeatureFlagService.GetAvailableFeaturesForFirm [L14-L91]
+            └─ uses_service IControlledRepository<FirmFeatureFlag> (Scoped (inferred))
+              └─ method IsFirmFlagSet [L88]
+                └─ implementation Dataverse.Data.Repository.Firm.FirmFeatureFlagRepository.IsFirmFlagSet
+            └─ uses_service FirmSettingsService
+              └─ method IsFirmPartOfControlledBeta [L76]
+                └─ implementation Dataverse.ApplicationService.Services.FirmSettingsService.IsFirmPartOfControlledBeta [L18-L97]
+                  └─ uses_client WorkpapersClient [L78]
+                  └─ uses_service WorkpapersClient
+                    └─ method GetCurrentWorkpapersSettingsAsync [L78]
+                      └─ ... (no implementation details available)
+                  └─ uses_service IControlledRepository<FirmSettings> (Scoped (inferred))
+                    └─ method GetCurrentSettingsAsync [L52]
+                      └─ implementation Dataverse.Data.Repository.Firm.FirmSettingsRepository.GetCurrentSettingsAsync
+                  └─ uses_service TenantService
+                    └─ method GetCurrentSettingsAsync [L44]
+                      └─ implementation Dataverse.Services.Features.Tenants.TenantService.GetCurrentSettingsAsync [L6-L27]
+                        └─ uses_service TenantIdentificationService
+                          └─ method GetCurrentTenant [L20]
+                            └─ implementation Dataverse.Tenants.Tenants.TenantIdentificationService.GetCurrentTenant [L27-L149]
+                              └─ uses_cache IMemoryCache.GetOrCreateAsync [read] [L117]
+                              └─ uses_cache IMemoryCache.GetOrCreate [read] [L96]
+                              └─ logs ILogger<ITenantIdentificationService> [Warning] [L53]
+            └─ uses_service FeatureFlagService
+              └─ method CanIUseFeature [L62]
+                └─ implementation Dataverse.ApplicationService.Features.FeatureFlags.FeatureFlagService.CanIUseFeature [L10-L34]
+                  └─ uses_service IControlledRepository<FeatureFlag> (Scoped (inferred))
+                    └─ method GetFeature [L30]
+                      └─ implementation Dataverse.Data.Repository.Firm.FeatureFlagRepository.GetFeature
+                  └─ uses_cache IMemoryCache.GetOrCreateAsync [read] [L25]
+            └─ uses_service TenantService
+              └─ method CanIUseFeature [L59]
+                └─ implementation Dataverse.Services.Features.Tenants.TenantService.CanIUseFeature [L6-L27]
+                  └─ uses_service TenantIdentificationService
+                    └─ method GetCurrentTenant [L20]
+                      └─ implementation Dataverse.Tenants.Tenants.TenantIdentificationService.GetCurrentTenant (see previous expansion)
+            └─ uses_cache IMemoryCache.GetOrCreateAsync [read] [L83]
+      └─ uses_service IControlledRepository<FirmSettings> (Scoped (inferred))
+        └─ method ReadQuery [L91]
+          └─ implementation Dataverse.Data.Repository.Firm.FirmSettingsRepository.ReadQuery
+      └─ uses_service TenantService
+        └─ method GetCurrentTenantAsync [L77]
+          └─ implementation Dataverse.Services.Features.Tenants.TenantService.GetCurrentTenantAsync [L6-L27]
+            └─ uses_service TenantIdentificationService
+              └─ method GetCurrentTenant [L20]
+                └─ implementation Dataverse.Tenants.Tenants.TenantIdentificationService.GetCurrentTenant (see previous expansion)
+      └─ uses_service UserService
+        └─ method GetUserId [L73]
+          └─ implementation Dataverse.ApplicationService.Services.UserService.GetUserId [L15-L185]
+            └─ uses_service User
+              └─ method GetUserId [L43]
+                └─ implementation Dataverse.DomainModel.Model.Users.User.GetUserId [L28-L619]
+                └─ implementation Dataverse.Dtos.IManage.User.GetUserId [L21-L27]
+            └─ uses_service Guid?
+              └─ method GetUserId [L40]
+                └─ ... (no implementation details available)
+  └─ impact_summary
+    └─ clients 1
+      └─ WorkpapersClient
+    └─ requests 1
+      └─ GetUserProfileQuery
+    └─ handlers 1
+      └─ GetUserProfileQueryHandler
+    └─ caches 2
+      └─ IDistributedCache
+      └─ IMemoryCache
+    └─ mappings 6
+      └─ FirmSettingsDto
+      └─ IntegrationSettingsDto
+      └─ NotificationDto
+      └─ TenantDto
+      └─ TenantLightDto
+      └─ +1 more
+

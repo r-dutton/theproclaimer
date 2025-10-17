@@ -36,12 +36,166 @@ public sealed class GraphOutputWriter
     private async Task WriteGraphJsonAsync(GraphDocument document, CancellationToken cancellationToken)
     {
         var jsonPath = Path.Combine(_outputDirectory, "graph.json");
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true
-        };
         await using var stream = File.Create(jsonPath);
-        await JsonSerializer.SerializeAsync(stream, document, options, cancellationToken);
+        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+        writer.WriteStartObject();
+        writer.WriteString("version", document.Version);
+        writer.WritePropertyName("nodes");
+        writer.WriteStartArray();
+        foreach (var node in document.Nodes)
+        {
+            WriteNode(writer, node);
+        }
+        writer.WriteEndArray();
+        writer.WritePropertyName("edges");
+        writer.WriteStartArray();
+        foreach (var edge in document.Edges)
+        {
+            WriteEdge(writer, edge);
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        await writer.FlushAsync(cancellationToken);
+    }
+
+    private static void WriteNode(Utf8JsonWriter w, GraphNode n)
+    {
+        w.WriteStartObject();
+        w.WriteString("id", n.Id);
+        w.WriteString("type", n.Type);
+        if (!string.IsNullOrWhiteSpace(n.Name)) w.WriteString("name", n.Name);
+        if (!string.IsNullOrWhiteSpace(n.Fqdn)) w.WriteString("fqdn", n.Fqdn);
+        if (!string.IsNullOrWhiteSpace(n.Assembly)) w.WriteString("assembly", n.Assembly);
+        if (!string.IsNullOrWhiteSpace(n.Project)) w.WriteString("project", n.Project);
+        if (!string.IsNullOrWhiteSpace(n.FilePath)) w.WriteString("file_path", n.FilePath);
+        if (!string.IsNullOrWhiteSpace(n.SymbolId)) w.WriteString("symbol_id", n.SymbolId);
+        if (n.Tags is { Count: > 0 })
+        {
+            w.WritePropertyName("tags");
+            w.WriteStartArray();
+            foreach (var t in n.Tags) w.WriteStringValue(t);
+            w.WriteEndArray();
+        }
+        if (n.Span is { } span)
+        {
+            w.WritePropertyName("span");
+            w.WriteStartObject();
+            w.WriteNumber("start_line", span.StartLine);
+            w.WriteNumber("end_line", span.EndLine);
+            w.WriteEndObject();
+        }
+        if (n.Props is { Count: > 0 })
+        {
+            w.WritePropertyName("props");
+            w.WriteStartObject();
+            foreach (var kv in n.Props.OrderBy(k => k.Key, StringComparer.Ordinal))
+            {
+                WritePropValue(w, kv.Key, kv.Value);
+            }
+            w.WriteEndObject();
+        }
+        w.WriteEndObject();
+    }
+
+    private static void WriteEdge(Utf8JsonWriter w, GraphEdge e)
+    {
+        w.WriteStartObject();
+        w.WriteString("from", e.From);
+        w.WriteString("to", e.To);
+        w.WriteString("kind", e.Kind);
+        w.WriteString("source", e.Source);
+        w.WriteNumber("confidence", e.Confidence);
+        if (e.Transform is { } tr)
+        {
+            w.WritePropertyName("transform");
+            w.WriteStartObject();
+            if (!string.IsNullOrWhiteSpace(tr.Type)) w.WriteString("type", tr.Type);
+            if (!string.IsNullOrWhiteSpace(tr.Method)) w.WriteString("method", tr.Method);
+            if (tr.Location is { } loc)
+            {
+                w.WritePropertyName("location");
+                w.WriteStartObject();
+                if (!string.IsNullOrWhiteSpace(loc.File)) w.WriteString("file", loc.File);
+                w.WriteNumber("line", loc.Line);
+                w.WriteEndObject();
+            }
+            if (tr.MethodSpan is { } ms)
+            {
+                w.WritePropertyName("method_span");
+                w.WriteStartObject();
+                w.WriteNumber("start_line", ms.StartLine);
+                w.WriteNumber("end_line", ms.EndLine);
+                w.WriteEndObject();
+            }
+            if (tr.IlRange is { } il)
+            {
+                w.WritePropertyName("il_range");
+                w.WriteStartObject();
+                if (il.StartOffset is { } so) w.WriteNumber("start_offset", so);
+                if (il.EndOffset is { } eo) w.WriteNumber("end_offset", eo);
+                w.WriteEndObject();
+            }
+            w.WriteEndObject();
+        }
+        if (e.Props is { Count: > 0 })
+        {
+            w.WritePropertyName("props");
+            w.WriteStartObject();
+            foreach (var kv in e.Props.OrderBy(k => k.Key, StringComparer.Ordinal))
+            {
+                WritePropValue(w, kv.Key, kv.Value);
+            }
+            w.WriteEndObject();
+        }
+        if (e.Evidence?.Files is { Count: > 0 } files)
+        {
+            w.WritePropertyName("evidence");
+            w.WriteStartObject();
+            w.WritePropertyName("files");
+            w.WriteStartArray();
+            foreach (var f in files)
+            {
+                w.WriteStartObject();
+                if (!string.IsNullOrWhiteSpace(f.Path)) w.WriteString("path", f.Path);
+                w.WriteNumber("start_line", f.StartLine);
+                w.WriteNumber("end_line", f.EndLine);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+            w.WriteEndObject();
+        }
+        w.WriteEndObject();
+    }
+
+    private static void WritePropValue(Utf8JsonWriter w, string key, object? value)
+    {
+        if (value is null)
+        {
+            return; // omit nulls
+        }
+        switch (value)
+        {
+            case string s:
+                w.WriteString(key, s);
+                break;
+            case int i:
+                w.WriteNumber(key, i);
+                break;
+            case bool b:
+                w.WriteBoolean(key, b);
+                break;
+            case IEnumerable<string> strEnum:
+                w.WritePropertyName(key);
+                w.WriteStartArray(); foreach (var sv in strEnum) w.WriteStringValue(sv); w.WriteEndArray();
+                break;
+            case IEnumerable<int> intEnum:
+                w.WritePropertyName(key);
+                w.WriteStartArray(); foreach (var iv in intEnum) w.WriteNumberValue(iv); w.WriteEndArray();
+                break;
+            default:
+                w.WriteString(key, value.ToString());
+                break;
+        }
     }
 
     private async Task WriteGraphCypherAsync(GraphDocument document, CancellationToken cancellationToken)
@@ -101,23 +255,25 @@ public sealed class GraphOutputWriter
         {
             return;
         }
-
-        var allFlows = FlowBuilder.BuildFlows(document, FlowFilter.BuildPredicate(new[] { "*" }), _workspaceIndex);
-        if (!string.IsNullOrWhiteSpace(allFlows))
+        // Stream controllers.all.md file incrementally instead of building a massive string in memory
+        var allPath = Path.Combine(flowDirectory, "controllers.all.md");
+        await using (var stream = new FileStream(allPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        await using (var writer = new StreamWriter(stream))
         {
-            await File.WriteAllTextAsync(Path.Combine(flowDirectory, "controllers.all.md"), allFlows, cancellationToken);
-        }
-
-        foreach (var controller in controllers)
-        {
-            var flow = FlowBuilder.BuildFlows(document, node => string.Equals(node.Id, controller.Id, StringComparison.Ordinal), _workspaceIndex);
-            if (string.IsNullOrWhiteSpace(flow))
+            foreach (var controller in controllers)
             {
-                continue;
+                var flow = FlowBuilder.BuildFlows(document, node => string.Equals(node.Id, controller.Id, StringComparison.Ordinal), _workspaceIndex);
+                if (string.IsNullOrWhiteSpace(flow)) continue;
+
+                await writer.WriteAsync(flow);
+                await writer.WriteLineAsync();
+
+                // Persist the per-controller flow for convenience without recomputing the narrative.
+                var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(controller.Fqdn) ? controller.Name : controller.Fqdn) + ".md";
+                await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
             }
 
-            var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(controller.Fqdn) ? controller.Name : controller.Fqdn) + ".md";
-            await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
+            await writer.FlushAsync();
         }
     }
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
@@ -19,6 +20,35 @@ public sealed partial class ProjectAnalyzer
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var repository = new RepositoryInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, fieldLookup);
+
+        if (classDeclaration.BaseList is { Types.Count: > 0 })
+        {
+            foreach (var baseType in classDeclaration.BaseList.Types)
+            {
+                var baseTypeName = baseType.Type.ToString();
+                if (string.IsNullOrWhiteSpace(baseTypeName))
+                {
+                    continue;
+                }
+
+                if (baseTypeName.StartsWith("IControlledRepository<", StringComparison.Ordinal))
+                {
+                    var serviceType = QualifyTypeName(baseTypeName);
+                    if (string.IsNullOrWhiteSpace(serviceType))
+                    {
+                        serviceType = baseTypeName;
+                    }
+
+                    RegisterServiceRegistration(
+                        serviceType,
+                        fqdn,
+                        "Scoped (inferred)",
+                        filePath,
+                        span,
+                        project);
+                }
+            }
+        }
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -94,7 +124,7 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
                 }
-                else if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
+                if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
                 {
                     if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
                     {
@@ -117,21 +147,48 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
                 }
-                else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax inner, Name.Identifier.Text: var methodName } &&
-                    inner.Expression is IdentifierNameSyntax dbIdentifier &&
-                    fieldLookup.TryGetValue(dbIdentifier.Identifier.Text.TrimStart('_'), out var dbType) &&
-                    dbType.Type.Contains("DbContext", StringComparison.Ordinal))
+                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax innerAccess, Name.Identifier.Text: var methodName } &&
+                    innerAccess.Expression is IdentifierNameSyntax dbIdentifier &&
+                    TryResolveDbContextType(dbIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
                 {
-                    var dbSet = inner.Name.Identifier.Text;
+                    var dbSet = innerAccess.Name.Identifier.Text;
                     var line = GetLineNumber(tree, invocation);
-                    repository.DbAccesses.Add(new RepositoryDbAccess(dbSet, methodName, line));
+                    var operation = DetermineRepositoryOperation(methodName);
+                    repository.DbAccesses.Add(new RepositoryDbAccess(dbSet, methodName, line, operation));
                 }
-                else if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax contextIdentifier, Name.Identifier.Text: var contextMethod } &&
-                    fieldLookup.TryGetValue(contextIdentifier.Identifier.Text.TrimStart('_'), out var dbContextType) &&
-                    dbContextType.Type.Contains("DbContext", StringComparison.Ordinal))
+                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax contextIdentifier, Name.Identifier.Text: var contextMethod } &&
+                    TryResolveDbContextType(contextIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
                 {
                     var line = GetLineNumber(tree, invocation);
-                    repository.DbAccesses.Add(new RepositoryDbAccess(contextIdentifier.Identifier.Text, contextMethod, line));
+                    var operation = DetermineRepositoryOperation(contextMethod);
+                    repository.DbAccesses.Add(new RepositoryDbAccess(contextIdentifier.Identifier.Text, contextMethod, line, operation));
+                }
+                if (invocation.Expression is MemberAccessExpressionSyntax { Expression: InvocationExpressionSyntax innerInvocation, Name.Identifier.Text: var setMethod })
+                {
+                    var currentInvocation = innerInvocation;
+                    while (currentInvocation.Expression is MemberAccessExpressionSyntax access)
+                    {
+                        if (access.Expression is IdentifierNameSyntax contextIdentifier &&
+                            TryResolveDbContextType(contextIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
+                        {
+                            if (access.Name is GenericNameSyntax { Identifier.Text: "Set", TypeArgumentList.Arguments.Count: > 0 } generic)
+                            {
+                                var entityType = generic.TypeArgumentList.Arguments[0].ToString();
+                                var line = GetLineNumber(tree, invocation);
+                                var operation = DetermineRepositoryOperation(setMethod);
+                                repository.DbAccesses.Add(new RepositoryDbAccess(entityType, setMethod, line, operation));
+                            }
+                            break;
+                        }
+
+                        if (access.Expression is InvocationExpressionSyntax nextInvocation)
+                        {
+                            currentInvocation = nextInvocation;
+                            continue;
+                        }
+
+                        break;
+                    }
                 }
             }
 
@@ -162,6 +219,54 @@ public sealed partial class ProjectAnalyzer
         }
 
         _repositories[fqdn] = repository;
+    }
+
+    private static bool TryResolveDbContextType(
+        string identifier,
+        IReadOnlyDictionary<string, FieldDescriptor> fieldLookup,
+        IReadOnlyDictionary<string, string?> parameterTypes,
+        IReadOnlyDictionary<string, string> localVariables,
+        out string? contextType)
+    {
+        static bool ContainsDbContext(string? type)
+            => !string.IsNullOrWhiteSpace(type) && type!.Contains("DbContext", StringComparison.OrdinalIgnoreCase);
+
+        var normalized = identifier.TrimStart('_');
+
+        if (fieldLookup.TryGetValue(normalized, out var descriptor) && ContainsDbContext(descriptor.Type))
+        {
+            contextType = descriptor.Type;
+            return true;
+        }
+
+        if (parameterTypes.TryGetValue(identifier, out var parameterType) && ContainsDbContext(parameterType))
+        {
+            contextType = parameterType;
+            return true;
+        }
+
+        if (!string.Equals(identifier, normalized, StringComparison.Ordinal) &&
+            parameterTypes.TryGetValue(normalized, out var trimmedParameterType) && ContainsDbContext(trimmedParameterType))
+        {
+            contextType = trimmedParameterType;
+            return true;
+        }
+
+        if (localVariables.TryGetValue(identifier, out var localType) && ContainsDbContext(localType))
+        {
+            contextType = localType;
+            return true;
+        }
+
+        if (!string.Equals(identifier, normalized, StringComparison.Ordinal) &&
+            localVariables.TryGetValue(normalized, out var trimmedLocalType) && ContainsDbContext(trimmedLocalType))
+        {
+            contextType = trimmedLocalType;
+            return true;
+        }
+
+        contextType = null;
+        return false;
     }
 
     private void EmitRepositories()
@@ -238,9 +343,24 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var entityId = StableId.For("ef.entity", entity.Fqdn, entity.Assembly, entity.SymbolId);
-                var isWrite = IsWriteOperation(access.Method);
-                var edgeKind = isWrite ? "writes_to" : "queries";
-                var transformType = isWrite ? "ef.write" : "ef.query";
+                var edgeKind = access.Operation switch
+                {
+                    "insert" => "inserts_into",
+                    "update" => "updates",
+                    "delete" => "deletes_from",
+                    "upsert" => "upserts",
+                    "write" => "writes_to",
+                    _ => "queries"
+                };
+                var transformType = edgeKind switch
+                {
+                    "inserts_into" => "ef.insert",
+                    "updates" => "ef.update",
+                    "deletes_from" => "ef.delete",
+                    "upserts" => "ef.upsert",
+                    "writes_to" => "ef.write",
+                    _ => "ef.query"
+                };
 
                 _edges.Add(new GraphEdge
                 {
@@ -253,6 +373,10 @@ public sealed partial class ProjectAnalyzer
                     {
                         Type = transformType,
                         Location = new GraphLocation { File = repository.FilePath, Line = access.Line }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["operation"] = access.Operation
                     },
                     Evidence = CreateEvidence(repository.FilePath, access.Line)
                 });
@@ -271,6 +395,10 @@ public sealed partial class ProjectAnalyzer
                         {
                             Type = transformType,
                             Location = new GraphLocation { File = repository.FilePath, Line = access.Line }
+                        },
+                        Props = new Dictionary<string, object>
+                        {
+                            ["operation"] = access.Operation
                         },
                         Evidence = CreateEvidence(repository.FilePath, access.Line)
                     });
@@ -342,10 +470,4 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
-    private static bool IsWriteOperation(string method)
-        => method.StartsWith("Add", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Create", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Update", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Save", StringComparison.OrdinalIgnoreCase)
-            || method.StartsWith("Insert", StringComparison.OrdinalIgnoreCase);
 }

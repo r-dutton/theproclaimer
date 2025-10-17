@@ -33,7 +33,10 @@ public sealed partial class ProjectAnalyzer
 
             var parameterTypes = method.ParameterList.Parameters
                 .Where(p => !string.IsNullOrWhiteSpace(p.Identifier.Text))
-                .ToDictionary(p => p.Identifier.Text, p => p.Type?.ToString(), StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(
+                    p => p.Identifier.Text,
+                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString()),
+                    StringComparer.OrdinalIgnoreCase);
 
             var methodName = method.Identifier.Text;
             var actionFqdn = $"{fqdn}.{methodName}";
@@ -78,18 +81,49 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
+            // Attribute-declared response status codes (ProducesResponseType)
+            foreach (var attr in method.AttributeLists.SelectMany(l => l.Attributes))
+            {
+                var attrName = attr.Name.ToString();
+                if (!attrName.Contains("ProducesResponseType", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                var args = attr.ArgumentList?.Arguments;
+                if (args is not { Count: > 0 }) continue;
+                foreach (var a in args)
+                {
+                    var code = TryParseStatusCodeExpression(a.Expression?.ToString());
+                    if (code.HasValue)
+                    {
+                        info.StatusCodes.Add(code.Value);
+                    }
+                }
+            }
+
             foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
                 {
                     var resolvedType = declaredType;
-                    if (string.Equals(resolvedType, "var", StringComparison.OrdinalIgnoreCase) &&
-                        variable.Initializer?.Value is ObjectCreationExpressionSyntax creation)
+                    if (string.Equals(resolvedType, "var", StringComparison.OrdinalIgnoreCase))
                     {
-                        resolvedType = creation.Type.ToString();
+                        if (variable.Initializer?.Value is ObjectCreationExpressionSyntax creation)
+                        {
+                            resolvedType = creation.Type.ToString();
+                        }
+                        else if (variable.Initializer?.Value is InvocationExpressionSyntax initInvocation)
+                        {
+                            var guessedType = GuessServiceTypeFromInitializer(initInvocation, fieldLookup, parameterTypes, info.LocalVariables);
+                            if (!string.IsNullOrWhiteSpace(guessedType))
+                            {
+                                resolvedType = guessedType;
+                            }
+                        }
                     }
 
+                    resolvedType = QualifyTypeName(resolvedType);
                     info.LocalVariables[variable.Identifier.Text] = resolvedType;
                 }
             }
@@ -97,6 +131,29 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
+                // Detect status code via common MVC helper methods inside return statements
+                if (invocation.Expression is MemberAccessExpressionSyntax statusAccess)
+                {
+                    var helperName = statusAccess.Name.Identifier.Text;
+                    var parentReturn = invocation.Parent as ReturnStatementSyntax ?? (invocation.Parent as AwaitExpressionSyntax)?.Parent as ReturnStatementSyntax;
+                    if (parentReturn is not null)
+                    {
+                        switch (helperName)
+                        {
+                            case "Ok": info.StatusCodes.Add(200); break;
+                            case "Created":
+                            case "CreatedAtAction":
+                            case "CreatedAtRoute": info.StatusCodes.Add(201); break;
+                            case "NoContent": info.StatusCodes.Add(204); break;
+                            case "BadRequest": info.StatusCodes.Add(400); break;
+                            case "Unauthorized": info.StatusCodes.Add(401); break;
+                            case "Forbidden": info.StatusCodes.Add(403); break;
+                            case "NotFound": info.StatusCodes.Add(404); break;
+                            case "Conflict": info.StatusCodes.Add(409); break;
+                            case "Problem": info.StatusCodes.Add(500); break; // generic problem response
+                        }
+                    }
+                }
                 if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
                 {
                     var methodIdentifier = memberAccess.Name.Identifier.Text;
@@ -163,7 +220,7 @@ public sealed partial class ProjectAnalyzer
                                 var responseType = handler.ResponseType;
                                 if (invocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax assignTarget })
                                 {
-                                    info.LocalVariables[assignTarget.Identifier.Text] = responseType;
+                                    info.LocalVariables[assignTarget.Identifier.Text] = QualifyTypeName(responseType);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, assignTarget.Identifier.Text, GetLineNumber(tree, invocation), false));
@@ -172,7 +229,7 @@ public sealed partial class ProjectAnalyzer
                                 else if (invocation.Parent is AwaitExpressionSyntax awaitedInvocation &&
                                          awaitedInvocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax awaitAssign })
                                 {
-                                    info.LocalVariables[awaitAssign.Identifier.Text] = responseType;
+                                    info.LocalVariables[awaitAssign.Identifier.Text] = QualifyTypeName(responseType);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, awaitAssign.Identifier.Text, GetLineNumber(tree, awaitedInvocation), false));
@@ -180,7 +237,7 @@ public sealed partial class ProjectAnalyzer
                                 }
                                 else if (invocation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
                                 {
-                                    info.LocalVariables[declarator.Identifier.Text] = responseType;
+                                    info.LocalVariables[declarator.Identifier.Text] = QualifyTypeName(responseType);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, declarator.Identifier.Text, GetLineNumber(tree, invocation), false));
@@ -208,137 +265,28 @@ public sealed partial class ProjectAnalyzer
 
                 if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax identifier } access)
                 {
-                    var fieldName = identifier.Identifier.Text.TrimStart('_');
-                    if (fieldLookup.TryGetValue(fieldName, out var descriptor))
+                    var resolvedTargetType = TryResolveExpressionType(access.Expression, parameterTypes, info.LocalVariables);
+                    if (!string.IsNullOrWhiteSpace(resolvedTargetType))
                     {
-                        var typeName = descriptor.Type;
-                        var baseTypeName = GetTypeNameWithoutGenerics(typeName);
-                        var resolvedType = ResolveImplementationType(typeName) ?? typeName;
-                        if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
-                        {
-                            if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
-                            {
-                                info.ConfigurationUsages.Add(configurationUsage);
-                            }
+                        HandleServiceInvocation(info, access, invocation, resolvedTargetType!, parameterTypes, tree);
+                        continue;
+                    }
 
-                            continue;
-                        }
-                        if (string.IsNullOrWhiteSpace(resolvedType))
-                        {
-                            continue;
-                        }
-                        var resolvedBaseType = GetTypeNameWithoutGenerics(resolvedType);
-                        SyntaxNode invocationNode = invocation;
-                        var serviceLine = GetLineNumber(tree, invocationNode);
-                        var serviceMethod = GetMemberName(access.Name);
-                        var serviceTypeName = resolvedType;
-                        var recordedServiceUsage = false;
-                        if (IsClientType(baseTypeName) || IsClientType(resolvedBaseType))
-                        {
-                            var callMethod = access.Name.Identifier.Text.ToUpperInvariant();
-                            var routeLiteral = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                            var relativePath = ExtractRouteLiteral(tree, routeLiteral);
-                            var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
-                                ? resolvedBaseType
-                                : baseTypeName;
-                            var line = GetLineNumber(tree, invocation);
-                            info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, callMethod, relativePath, line));
-                        }
-                        else if (typeName.Contains("IMapper", StringComparison.Ordinal) && access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
-                        {
-                            var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                            var sourceExpression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
-                            var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
-                                ? resolved
-                                : null;
-                            var line = GetLineNumber(tree, invocation);
-                            var assignedVariable = TryResolveAssignedVariable(invocation);
-                            if (!string.IsNullOrWhiteSpace(assignedVariable) && !string.IsNullOrWhiteSpace(destination))
-                            {
-                                info.LocalVariables[assignedVariable!] = destination!;
-                            }
+                    var identifierName = identifier.Identifier.Text;
+                    var normalizedName = identifierName.TrimStart('_');
 
-                            info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
-                            recordedServiceUsage = true;
-                        }
-                        else if (typeName.Contains("IMapper", StringComparison.Ordinal) && access.Name is IdentifierNameSyntax { Identifier.Text: "Map" })
-                        {
-                            var destination = invocation.ArgumentList.Arguments.Skip(1).FirstOrDefault()?.Expression?.ToString();
-                            var sourceExpression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
-                            var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
-                                ? resolved
-                                : null;
-                            var line = GetLineNumber(tree, invocation);
-                            var assignedVariable = TryResolveAssignedVariable(invocation);
-                            if (!string.IsNullOrWhiteSpace(assignedVariable) && !string.IsNullOrWhiteSpace(destination))
-                            {
-                                info.LocalVariables[assignedVariable!] = destination!;
-                            }
-
-                            info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
-                            recordedServiceUsage = true;
-                        }
-                        else if (typeName.StartsWith("IValidator", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var line = GetLineNumber(tree, invocation);
-                            var validatorType = ExtractGenericArgument(typeName) ?? string.Empty;
-                            if (!string.IsNullOrWhiteSpace(validatorType))
-                            {
-                                info.ValidatorInvocations.Add(new ControllerValidatorInvocation(validatorType, line));
-                            }
-                        }
-                        else if (IsCacheService(resolvedType) || IsCacheService(typeName))
-                        {
-                            var cacheType = IsCacheService(resolvedType) ? resolvedType : typeName;
-                            if (TryCaptureCacheInvocation(access, invocation, cacheType, tree) is { } cacheInvocation)
-                            {
-                                info.CacheInvocations.Add(cacheInvocation);
-                            }
-                        }
-                        else if (IsRepositoryType(resolvedType) || IsRepositoryType(typeName))
-                        {
-                            var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : typeName;
-                            if (TryCaptureRepositoryInvocation(access, invocation, repositoryType, typeName, tree) is { } repositoryInvocation)
-                            {
-                                info.RepositoryInvocations.Add(repositoryInvocation);
-                            }
-                            recordedServiceUsage = true;
-                        }
-                        else if (TryResolveOptionsType(resolvedType) is { } optionsType)
-                        {
-                            info.OptionsUsages.Add(new OptionsUsage(optionsType, serviceLine));
-                            recordedServiceUsage = true;
-                        }
-                        else if (IsServiceType(resolvedType) || IsServiceType(typeName))
-                        {
-                            recordedServiceUsage = true;
-                        }
-                        else if (typeName.Contains("IMediator", StringComparison.Ordinal) || typeName.Contains("IPublisher", StringComparison.Ordinal))
-                        {
-                            var methodIdentifier = access.Name.Identifier.Text;
-                            if (methodIdentifier.StartsWith("Publish", StringComparison.Ordinal))
-                            {
-                                var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                                var notificationType = argument switch
-                                {
-                                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, info.LocalVariables),
-                                    _ => null
-                                };
-
-                                if (!string.IsNullOrWhiteSpace(notificationType))
-                                {
-                                    info.NotificationInvocations.Add(new ControllerNotificationInvocation(notificationType!, serviceLine));
-                                }
-
-                                recordedServiceUsage = true;
-                            }
-                        }
-
-                        if (recordedServiceUsage)
-                        {
-                            info.ServiceUsages.Add(new ServiceUsage(serviceTypeName, serviceLine, serviceMethod));
-                        }
+                    if (fieldLookup.TryGetValue(normalizedName, out var descriptor))
+                    {
+                        HandleServiceInvocation(info, access, invocation, descriptor.Type, parameterTypes, tree);
+                    }
+                    else if (info.LocalVariables.TryGetValue(identifierName, out var localType) && !string.IsNullOrWhiteSpace(localType))
+                    {
+                        HandleServiceInvocation(info, access, invocation, localType, parameterTypes, tree);
+                    }
+                    else if (!string.Equals(identifierName, normalizedName, StringComparison.Ordinal) &&
+                             info.LocalVariables.TryGetValue(normalizedName, out var trimmedLocalType) && !string.IsNullOrWhiteSpace(trimmedLocalType))
+                    {
+                        HandleServiceInvocation(info, access, invocation, trimmedLocalType, parameterTypes, tree);
                     }
                 }
                 else if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess)
@@ -467,7 +415,510 @@ public sealed partial class ProjectAnalyzer
             var routeKey = $"{info.HttpMethod}:{CanonicalizeRoute(info.Route)}";
             var routeBag = _controllerRoutes.GetOrAdd(routeKey, _ => new ConcurrentBag<ControllerActionInfo>());
             routeBag.Add(info);
+
+            // Fallback inference: if no explicit status codes captured, infer a typical default.
+            if (info.StatusCodes.Count == 0)
+            {
+                if (string.Equals(info.HttpMethod, "POST", StringComparison.Ordinal))
+                {
+                    info.StatusCodes.Add(201); // Created endpoints usually return 201
+                }
+                else
+                {
+                    info.StatusCodes.Add(200); // Default success
+                }
+            }
         }
+    }
+
+    private void HandleServiceInvocation(
+        ControllerActionInfo info,
+        MemberAccessExpressionSyntax access,
+        InvocationExpressionSyntax invocation,
+        string typeName,
+        IReadOnlyDictionary<string, string?> parameterTypes,
+        SyntaxTree tree)
+    {
+        if (string.IsNullOrWhiteSpace(typeName) || string.Equals(typeName, "var", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var qualifiedType = QualifyTypeName(typeName);
+        if (string.IsNullOrWhiteSpace(qualifiedType) || string.Equals(qualifiedType, "var", StringComparison.OrdinalIgnoreCase))
+        {
+            qualifiedType = typeName;
+        }
+
+        var baseTypeName = GetTypeNameWithoutGenerics(qualifiedType);
+        var resolvedType = ResolveImplementationType(qualifiedType) ?? qualifiedType;
+        if (IsConfigurationType(resolvedType) || IsConfigurationType(qualifiedType))
+        {
+            if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? qualifiedType, tree) is { } configurationUsage)
+            {
+                info.ConfigurationUsages.Add(configurationUsage);
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(resolvedType))
+        {
+            return;
+        }
+
+        var resolvedBaseType = GetTypeNameWithoutGenerics(resolvedType);
+        var serviceLine = GetLineNumber(tree, invocation);
+        var serviceMethod = GetMemberName(access.Name);
+        var serviceTypeName = resolvedType;
+        var recordedServiceUsage = false;
+
+        if (IsClientType(baseTypeName) || IsClientType(resolvedBaseType))
+        {
+            var callMethod = access.Name.Identifier.Text.ToUpperInvariant();
+            var routeLiteral = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+            var relativePath = ExtractRouteLiteral(tree, routeLiteral);
+            var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
+                ? resolvedBaseType
+                : baseTypeName;
+            var line = GetLineNumber(tree, invocation);
+            info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, callMethod, relativePath, line));
+        }
+        else if (qualifiedType.Contains("IMapper", StringComparison.Ordinal) && access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
+        {
+            var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
+            var sourceExpression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
+            var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
+                ? resolved
+                : null;
+            var line = GetLineNumber(tree, invocation);
+            var assignedVariable = TryResolveAssignedVariable(invocation);
+            if (!string.IsNullOrWhiteSpace(assignedVariable) && !string.IsNullOrWhiteSpace(destination))
+            {
+                info.LocalVariables[assignedVariable!] = destination!;
+            }
+
+            info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
+            recordedServiceUsage = true;
+        }
+        else if (qualifiedType.Contains("IMapper", StringComparison.Ordinal) && access.Name is IdentifierNameSyntax { Identifier.Text: "Map" })
+        {
+            var destination = invocation.ArgumentList.Arguments.Skip(1).FirstOrDefault()?.Expression?.ToString();
+            var sourceExpression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression?.ToString();
+            var sourceType = sourceExpression is not null && parameterTypes.TryGetValue(sourceExpression, out var resolved)
+                ? resolved
+                : null;
+            var line = GetLineNumber(tree, invocation);
+            var assignedVariable = TryResolveAssignedVariable(invocation);
+            if (!string.IsNullOrWhiteSpace(assignedVariable) && !string.IsNullOrWhiteSpace(destination))
+            {
+                info.LocalVariables[assignedVariable!] = destination!;
+            }
+
+            info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
+            recordedServiceUsage = true;
+        }
+        else if (qualifiedType.StartsWith("IValidator", StringComparison.OrdinalIgnoreCase))
+        {
+            var line = GetLineNumber(tree, invocation);
+            var validatorType = ExtractGenericArgument(qualifiedType) ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(validatorType))
+            {
+                info.ValidatorInvocations.Add(new ControllerValidatorInvocation(validatorType, line));
+            }
+        }
+        else if (IsCacheService(resolvedType) || IsCacheService(qualifiedType))
+        {
+            var cacheType = IsCacheService(resolvedType) ? resolvedType : qualifiedType;
+            if (TryCaptureCacheInvocation(access, invocation, cacheType, tree) is { } cacheInvocation)
+            {
+                info.CacheInvocations.Add(cacheInvocation);
+            }
+        }
+        else if (IsRepositoryType(resolvedType) || IsRepositoryType(qualifiedType))
+        {
+            var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : qualifiedType;
+            if (TryCaptureRepositoryInvocation(access, invocation, repositoryType, qualifiedType, tree) is { } repositoryInvocation)
+            {
+                info.RepositoryInvocations.Add(repositoryInvocation);
+            }
+            recordedServiceUsage = true;
+        }
+        else if (TryResolveOptionsType(resolvedType) is { } optionsType)
+        {
+            info.OptionsUsages.Add(new OptionsUsage(optionsType, serviceLine));
+            recordedServiceUsage = true;
+        }
+        else if (IsServiceType(resolvedType) || IsServiceType(qualifiedType))
+        {
+            recordedServiceUsage = true;
+        }
+        else if (qualifiedType.Contains("IMediator", StringComparison.Ordinal) || qualifiedType.Contains("IPublisher", StringComparison.Ordinal))
+        {
+            var methodIdentifier = access.Name.Identifier.Text;
+            if (methodIdentifier.StartsWith("Publish", StringComparison.Ordinal))
+            {
+                var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                var notificationType = argument switch
+                {
+                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, info.LocalVariables),
+                    _ => null
+                };
+
+                if (!string.IsNullOrWhiteSpace(notificationType))
+                {
+                    info.NotificationInvocations.Add(new ControllerNotificationInvocation(notificationType!, serviceLine));
+                }
+
+                recordedServiceUsage = true;
+            }
+        }
+
+        if (recordedServiceUsage)
+        {
+            string? requestType = null;
+            string? responseType = null;
+            string? dispatchKind = null;
+
+            // IRequestProcessor dynamic dispatch capture
+            if ((qualifiedType.Contains("IRequestProcessor", StringComparison.Ordinal) || resolvedType.Contains("RequestProcessor", StringComparison.Ordinal)) &&
+                (string.Equals(serviceMethod, "Process", StringComparison.OrdinalIgnoreCase) || string.Equals(serviceMethod, "ProcessAsync", StringComparison.OrdinalIgnoreCase)))
+            {
+                // Generic TResult (ProcessAsync<TResult>/Process<TResult>)
+                if (access.Name is GenericNameSyntax g && g.TypeArgumentList.Arguments.Count > 0)
+                {
+                    responseType = QualifyTypeName(g.TypeArgumentList.Arguments[0].ToString());
+                }
+
+                // First argument is the request instance
+                var argExpr = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                if (argExpr is ObjectCreationExpressionSyntax creation)
+                {
+                    requestType = QualifyTypeName(creation.Type.ToString());
+                }
+                else if (argExpr is IdentifierNameSyntax idArg)
+                {
+                    // Try resolve via parameters or locals
+                    requestType = TryResolveExpressionType(idArg, parameterTypes, info.LocalVariables);
+                }
+                else if (argExpr is MemberAccessExpressionSyntax memberAccessExpr)
+                {
+                    // Heuristic: attempt to resolve base expression type
+                    if (memberAccessExpr.Expression is IdentifierNameSyntax memberRoot)
+                    {
+                        requestType = TryResolveExpressionType(memberRoot, parameterTypes, info.LocalVariables);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(requestType))
+                {
+                    requestType = QualifyTypeName(requestType!);
+                }
+                if (!string.IsNullOrWhiteSpace(responseType))
+                {
+                    responseType = QualifyTypeName(responseType!);
+                }
+
+                if (!string.IsNullOrWhiteSpace(requestType))
+                {
+                    dispatchKind = "requestprocessor.dispatch";
+                }
+            }
+
+            info.ServiceUsages.Add(new ServiceUsage(serviceTypeName, serviceLine, serviceMethod, serviceMethod, requestType, responseType, dispatchKind));
+        }
+
+        if (!string.IsNullOrWhiteSpace(serviceMethod))
+        {
+            var guessedProduct = GuessServiceTypeFromFactory(qualifiedType, serviceMethod);
+            if (!string.IsNullOrWhiteSpace(guessedProduct))
+            {
+                var qualifiedProduct = QualifyTypeName(guessedProduct);
+                if (invocation.Parent is EqualsValueClauseSyntax equalsClause && equalsClause.Parent is VariableDeclaratorSyntax declarator)
+                {
+                    info.LocalVariables[declarator.Identifier.Text] = qualifiedProduct;
+                }
+                else if (invocation.Parent is AssignmentExpressionSyntax assignExpression && assignExpression.Left is IdentifierNameSyntax assignIdentifier)
+                {
+                    info.LocalVariables[assignIdentifier.Identifier.Text] = qualifiedProduct;
+                }
+                else if (invocation.Parent is AwaitExpressionSyntax awaited && awaited.Parent is EqualsValueClauseSyntax awaitedEquals && awaitedEquals.Parent is VariableDeclaratorSyntax awaitedDeclarator)
+                {
+                    info.LocalVariables[awaitedDeclarator.Identifier.Text] = qualifiedProduct;
+                }
+                else if (invocation.Parent is AwaitExpressionSyntax awaitedAssign && awaitedAssign.Parent is AssignmentExpressionSyntax awaitedAssignExpression && awaitedAssignExpression.Left is IdentifierNameSyntax awaitedIdentifier)
+                {
+                    info.LocalVariables[awaitedIdentifier.Identifier.Text] = qualifiedProduct;
+                }
+            }
+        }
+    }
+
+    private string? GuessServiceTypeFromInitializer(
+        InvocationExpressionSyntax invocation,
+        IReadOnlyDictionary<string, FieldDescriptor> fieldLookup,
+        IReadOnlyDictionary<string, string?> parameterTypes,
+        Dictionary<string, string> localVariables)
+    {
+        if (invocation.Expression is not MemberAccessExpressionSyntax access)
+        {
+            return null;
+        }
+
+        var factoryType = TryResolveExpressionType(access.Expression, parameterTypes, localVariables);
+        if (factoryType is null)
+        {
+            if (access.Expression is IdentifierNameSyntax identifier &&
+                fieldLookup.TryGetValue(identifier.Identifier.Text.TrimStart('_'), out var descriptor))
+            {
+                factoryType = descriptor.Type;
+            }
+            else if (access.Expression is MemberAccessExpressionSyntax nestedAccess &&
+                     nestedAccess.Expression is IdentifierNameSyntax nestedIdentifier &&
+                     fieldLookup.TryGetValue(nestedIdentifier.Identifier.Text.TrimStart('_'), out var nestedDescriptor))
+            {
+                factoryType = nestedDescriptor.Type;
+            }
+        }
+
+        var methodName = GetMemberName(access.Name);
+        if (string.IsNullOrWhiteSpace(methodName))
+        {
+            return null;
+        }
+
+        return GuessServiceTypeFromFactory(factoryType, methodName);
+    }
+
+    private string? GuessServiceTypeFromFactory(string? factoryType, string? methodName)
+    {
+        if (string.IsNullOrWhiteSpace(methodName))
+        {
+            return null;
+        }
+
+        var lookupMethods = new List<string> { methodName! };
+        if (methodName.EndsWith("Async", StringComparison.Ordinal))
+        {
+            var alternate = methodName[..^5];
+            if (!string.IsNullOrWhiteSpace(alternate))
+            {
+                lookupMethods.Add(alternate);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(factoryType))
+        {
+            foreach (var key in GetFactoryLookupKeys(factoryType!))
+            {
+                if (_interfaceMethodReturnTypes.TryGetValue(key, out var interfaceMethods))
+                {
+                    foreach (var candidateMethod in lookupMethods)
+                    {
+                        if (interfaceMethods.TryGetValue(candidateMethod, out var returnType) && !string.IsNullOrWhiteSpace(returnType))
+                        {
+                            return QualifyTypeName(returnType);
+                        }
+                    }
+                }
+            }
+        }
+
+        var productName = StripFactoryMethodPrefixes(methodName!);
+        if (string.IsNullOrWhiteSpace(productName))
+        {
+            return null;
+        }
+
+        var candidates = new List<string>();
+        var candidateSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void AddCandidate(string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value) && candidateSet.Add(value))
+            {
+                candidates.Add(value);
+            }
+        }
+
+        AddCandidate(productName);
+        if (!productName.StartsWith("I", StringComparison.Ordinal))
+        {
+            AddCandidate($"I{productName}");
+        }
+
+        if (!productName.EndsWith("Service", StringComparison.OrdinalIgnoreCase))
+        {
+            var serviceName = $"{productName}Service";
+            AddCandidate(serviceName);
+            if (!serviceName.StartsWith("I", StringComparison.Ordinal))
+            {
+                AddCandidate($"I{serviceName}");
+            }
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (FindServiceRegistration(candidate) is { } registration)
+            {
+                return registration.ServiceType;
+            }
+
+            var match = _services.Values.FirstOrDefault(s =>
+                s.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                s.Fqdn.Equals(candidate, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                return match.Fqdn;
+            }
+        }
+
+        var factoryNamespace = ExtractNamespace(factoryType);
+        if (!string.IsNullOrWhiteSpace(factoryNamespace))
+        {
+            foreach (var candidate in candidates)
+            {
+                var qualified = $"{factoryNamespace}.{candidate}";
+                if (FindServiceRegistration(qualified) is { } registration)
+                {
+                    return registration.ServiceType;
+                }
+
+                if (_services.TryGetValue(qualified, out var serviceInfo))
+                {
+                    return serviceInfo.Fqdn;
+                }
+            }
+        }
+
+        return candidates.FirstOrDefault();
+    }
+
+    private IEnumerable<string> GetFactoryLookupKeys(string factoryType)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                keys.Add(value);
+            }
+        }
+
+        var qualifiedFactory = QualifyTypeName(factoryType);
+        Add(factoryType);
+        Add(qualifiedFactory);
+
+        foreach (var typeName in new[] { factoryType, qualifiedFactory })
+        {
+            if (string.IsNullOrWhiteSpace(typeName))
+            {
+                continue;
+            }
+
+            var simple = typeName.Split('.').Last();
+            Add(simple);
+            if (simple.StartsWith("I", StringComparison.Ordinal) && simple.Length > 1)
+            {
+                Add(simple[1..]);
+            }
+        }
+
+        var factoryNamespace = ExtractNamespace(factoryType);
+        if (!string.IsNullOrWhiteSpace(factoryNamespace))
+        {
+            var simpleKeys = keys.Where(k => !k.Contains('.')).ToList();
+            foreach (var simple in simpleKeys)
+            {
+                Add($"{factoryNamespace}.{simple}");
+                if (simple.StartsWith("I", StringComparison.Ordinal) && simple.Length > 1)
+                {
+                    Add($"{factoryNamespace}.{simple[1..]}");
+                }
+            }
+        }
+
+        return keys;
+    }
+
+    private static string StripFactoryMethodPrefixes(string methodName)
+    {
+        var value = methodName;
+        if (value.EndsWith("Async", StringComparison.Ordinal))
+        {
+            value = value[..^5];
+        }
+
+        var prefixes = new[]
+        {
+            "GetOrCreate",
+            "GetOrSet",
+            "Get",
+            "Create",
+            "Build",
+            "Resolve",
+            "Provide",
+            "Ensure",
+            "Fetch",
+            "Retrieve",
+            "Load",
+            "Make"
+        };
+
+        foreach (var prefix in prefixes)
+        {
+            if (value.StartsWith(prefix, StringComparison.Ordinal) && value.Length > prefix.Length)
+            {
+                return value[prefix.Length..];
+            }
+        }
+
+        return value;
+    }
+
+    private static string? ExtractNamespace(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        var sanitized = typeName;
+        var genericIndex = sanitized.IndexOf('<');
+        if (genericIndex >= 0)
+        {
+            sanitized = sanitized[..genericIndex];
+        }
+
+        var lastDot = sanitized.LastIndexOf('.');
+        if (lastDot <= 0)
+        {
+            return null;
+        }
+
+        return sanitized[..lastDot];
+    }
+
+    private static int? TryParseStatusCodeExpression(string? expr)
+    {
+        if (string.IsNullOrWhiteSpace(expr)) return null;
+        expr = expr.Trim();
+        if (int.TryParse(expr, out var numeric)) return numeric;
+        // Handle nameof(StatusCodes.Status201Created) style (rare) by ignoring nameof(
+        if (expr.StartsWith("nameof(", StringComparison.Ordinal) && expr.EndsWith(')'))
+        {
+            expr = expr.Substring(7, expr.Length - 8);
+        }
+        var segments = expr.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var candidate = segments.LastOrDefault();
+        if (candidate is not null)
+        {
+            // e.g. Status200OK, Status404NotFound
+            var digits = new string(candidate.Where(char.IsDigit).ToArray());
+            if (int.TryParse(digits, out var parsed)) return parsed;
+        }
+        return null;
     }
 
     private void EmitControllers()
@@ -480,6 +931,11 @@ public sealed partial class ProjectAnalyzer
                 ["route"] = action.Route,
                 ["http_method"] = action.HttpMethod
             };
+
+            if (action.StatusCodes.Count > 0)
+            {
+                nodeProps["status_codes"] = action.StatusCodes.OrderBy(c => c).ToArray();
+            }
 
             if (action.Authorizations.Count > 0)
             {
@@ -580,7 +1036,8 @@ public sealed partial class ProjectAnalyzer
                 {
                     var props = new Dictionary<string, object>
                     {
-                        ["method"] = repository.Method
+                        ["method"] = repository.Method,
+                        ["operation"] = repository.Operation
                     };
 
                     _edges.Add(new GraphEdge
@@ -603,7 +1060,24 @@ public sealed partial class ProjectAnalyzer
                 if (!string.IsNullOrWhiteSpace(repository.EntityType) &&
                     TryResolveNodeReference(repository.EntityType, out var entityReference))
                 {
-                    var kind = repository.Operation.Equals("write", StringComparison.OrdinalIgnoreCase) ? "writes_to" : "queries";
+                    var kind = repository.Operation switch
+                    {
+                        "insert" => "inserts_into",
+                        "update" => "updates",
+                        "delete" => "deletes_from",
+                        "upsert" => "upserts",
+                        "write" => "writes_to",
+                        _ => "queries"
+                    };
+                    var transformType = kind switch
+                    {
+                        "inserts_into" => "repository.insert",
+                        "updates" => "repository.update",
+                        "deletes_from" => "repository.delete",
+                        "upserts" => "repository.upsert",
+                        "writes_to" => "repository.write",
+                        _ => "repository.query"
+                    };
                     _edges.Add(new GraphEdge
                     {
                         From = id,
@@ -613,8 +1087,12 @@ public sealed partial class ProjectAnalyzer
                         Confidence = 1.0,
                         Transform = new GraphTransform
                         {
-                            Type = kind == "writes_to" ? "repository.write" : "repository.query",
+                            Type = transformType,
                             Location = new GraphLocation { File = action.FilePath, Line = repository.Line }
+                        },
+                        Props = new Dictionary<string, object>
+                        {
+                            ["operation"] = repository.Operation
                         },
                         Evidence = CreateEvidence(action.FilePath, repository.Line)
                     });
@@ -628,6 +1106,35 @@ public sealed partial class ProjectAnalyzer
                 if (!TryEnsureServiceNode(serviceUsage.ServiceType, out var serviceId, out var registration))
                 {
                     continue;
+                }
+
+                if (IsStorageService(serviceUsage.ServiceType))
+                {
+                    var storageProps = new Dictionary<string, object>
+                    {
+                        ["service_type"] = serviceUsage.ServiceType
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(serviceUsage.Method))
+                    {
+                        storageProps["method"] = serviceUsage.Method!;
+                    }
+
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = serviceId!,
+                        Kind = "uses_storage",
+                        Source = "static",
+                        Confidence = 1.0,
+                        Transform = new GraphTransform
+                        {
+                            Type = "storage.access",
+                            Location = new GraphLocation { File = action.FilePath, Line = serviceUsage.Line }
+                        },
+                        Props = storageProps,
+                        Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
+                    });
                 }
 
                 var props = new Dictionary<string, object>
@@ -660,6 +1167,65 @@ public sealed partial class ProjectAnalyzer
                     Props = props,
                     Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
                 });
+
+                // Dynamic IRequestProcessor dispatch expansion (synthetic)
+                if (!string.IsNullOrWhiteSpace(serviceUsage.DispatchKind) &&
+                    !string.IsNullOrWhiteSpace(serviceUsage.RequestType))
+                {
+                    var requestType = serviceUsage.RequestType!;
+                    var requestInfo = FindRequestByType(requestType);
+                    if (requestInfo is not null)
+                    {
+                        var requestNodeId = StableId.For("cqrs.request", requestInfo.Fqdn, requestInfo.Assembly, requestInfo.SymbolId);
+                        // Edge from action to request (sends_request)
+                        _edges.Add(new GraphEdge
+                        {
+                            From = id,
+                            To = requestNodeId,
+                            Kind = "sends_request",
+                            Source = "synthetic",
+                            Confidence = 0.9,
+                            Transform = new GraphTransform
+                            {
+                                Type = serviceUsage.DispatchKind!,
+                                Location = new GraphLocation { File = action.FilePath, Line = serviceUsage.Line }
+                            },
+                            Props = new Dictionary<string, object>
+                            {
+                                ["service"] = serviceUsage.ServiceType,
+                                ["invocation"] = serviceUsage.Method ?? string.Empty,
+                                ["request_type"] = requestType,
+                                ["response_type"] = serviceUsage.ResponseType ?? string.Empty
+                            },
+                            Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
+                        });
+
+                        if (FindHandlerForRequest(requestType) is { } handlerInfo)
+                        {
+                            var handlerId = StableId.For("cqrs.handler", handlerInfo.Fqdn, handlerInfo.Assembly, handlerInfo.SymbolId);
+                            _edges.Add(new GraphEdge
+                            {
+                                From = requestNodeId,
+                                To = handlerId,
+                                Kind = "handled_by",
+                                Source = "synthetic",
+                                Confidence = 0.85,
+                                Transform = new GraphTransform
+                                {
+                                    Type = serviceUsage.DispatchKind!,
+                                    Location = new GraphLocation { File = action.FilePath, Line = serviceUsage.Line }
+                                },
+                                Props = new Dictionary<string, object>
+                                {
+                                    ["request_type"] = requestType,
+                                    ["handler"] = handlerInfo.Fqdn,
+                                    ["response_type"] = serviceUsage.ResponseType ?? string.Empty
+                                },
+                                Evidence = CreateEvidence(action.FilePath, serviceUsage.Line)
+                            });
+                        }
+                    }
+                }
             }
 
             EmitConfigurationEdges(id, action.ConfigurationUsages);
@@ -988,16 +1554,33 @@ public sealed partial class ProjectAnalyzer
             return "query";
         }
 
-        if (methodName.StartsWith("Write", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Add", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Update", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Create", StringComparison.OrdinalIgnoreCase) ||
+        if (methodName.StartsWith("Add", StringComparison.OrdinalIgnoreCase) ||
             methodName.StartsWith("Insert", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Create", StringComparison.OrdinalIgnoreCase))
+        {
+            return "insert";
+        }
+
+        if (methodName.StartsWith("Update", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Set", StringComparison.OrdinalIgnoreCase) ||
             methodName.StartsWith("Save", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Commit", StringComparison.OrdinalIgnoreCase) ||
-            methodName.StartsWith("Upsert", StringComparison.OrdinalIgnoreCase))
+            methodName.StartsWith("Commit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "update";
+        }
+
+        if (methodName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase) ||
+            methodName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase))
+        {
+            return "delete";
+        }
+
+        if (methodName.StartsWith("Upsert", StringComparison.OrdinalIgnoreCase))
+        {
+            return "upsert";
+        }
+
+        if (methodName.StartsWith("Write", StringComparison.OrdinalIgnoreCase))
         {
             return "write";
         }
@@ -1240,6 +1823,20 @@ public sealed partial class ProjectAnalyzer
                 ["route"] = endpoint.Route,
                 ["http_method"] = endpoint.HttpMethod
             };
+
+            // Default inference for minimal endpoints (parity with controllers) so status codes appear in flows
+            // Only emit if not already provided (future explicit capture could populate)
+            if (!props.ContainsKey("status_codes"))
+            {
+                if (string.Equals(endpoint.HttpMethod, "POST", StringComparison.Ordinal))
+                {
+                    props["status_codes"] = new[] { 201 };
+                }
+                else
+                {
+                    props["status_codes"] = new[] { 200 };
+                }
+            }
 
             if (endpoint.Authorizations.Count > 0)
             {
@@ -1700,3 +2297,18 @@ public sealed partial class ProjectAnalyzer
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
