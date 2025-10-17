@@ -130,7 +130,10 @@ public static partial class FlowBuilder
 
 				AppendIndented(builder, indent, $"{label} {entityNode.Name}{lineText}");
 				state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
-				AppendEntityFlow(builder, state, entityNode, indent + 1);
+				if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
+				{
+					AppendEntityFlow(builder, state, entityNode, indent + 1);
+				}
 			}
 
 			foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
@@ -155,7 +158,7 @@ public static partial class FlowBuilder
 				AppendIndented(builder, indent, $"{label} {entityNode.Name}{lineText}");
 				state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
 
-				if (entityNode.Type == "ef.entity")
+				if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
 				{
 					AppendEntityFlow(builder, state, entityNode, indent + 1, dataEdge.Kind);
 				}

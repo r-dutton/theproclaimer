@@ -44,13 +44,17 @@ namespace GraphKit.Outputs
                 type.Equals("data.repository", StringComparison.OrdinalIgnoreCase) ||
                 type.Equals("dataaccess", StringComparison.OrdinalIgnoreCase) ||
                 type.Equals("data.access", StringComparison.OrdinalIgnoreCase) ||
-                type.Equals("app.unit_of_work", StringComparison.OrdinalIgnoreCase))
+                type.Equals("app.unit_of_work", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("infrastructure.repository", StringComparison.OrdinalIgnoreCase) ||
+                type.Equals("data.gateway", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
 
             if (node.Tags.Any(tag => tag.Equals("repository", StringComparison.OrdinalIgnoreCase) ||
-                                      tag.Equals("unit_of_work", StringComparison.OrdinalIgnoreCase)))
+                                      tag.Equals("unit_of_work", StringComparison.OrdinalIgnoreCase) ||
+                                      tag.Equals("data_access", StringComparison.OrdinalIgnoreCase) ||
+                                      tag.Equals("data_access_layer", StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }
@@ -66,10 +70,15 @@ namespace GraphKit.Outputs
                        value.Contains("ControlledRepository", StringComparison.OrdinalIgnoreCase) ||
                        value.Contains("RepositoryBase", StringComparison.OrdinalIgnoreCase) ||
                        value.Contains("RepoBase", StringComparison.OrdinalIgnoreCase) ||
+                       value.Contains("RepositoryImpl", StringComparison.OrdinalIgnoreCase) ||
+                       value.EndsWith("Repo", StringComparison.OrdinalIgnoreCase) ||
                        value.Contains("DataAccess", StringComparison.OrdinalIgnoreCase) ||
                        value.Contains("DataStore", StringComparison.OrdinalIgnoreCase) ||
+                       value.Contains("DataGateway", StringComparison.OrdinalIgnoreCase) ||
+                       value.EndsWith("Gateway", StringComparison.OrdinalIgnoreCase) ||
                        (value.EndsWith("Dal", StringComparison.OrdinalIgnoreCase) && value.Length > 3) ||
                        value.Contains("UnitOfWork", StringComparison.OrdinalIgnoreCase) ||
+                       value.Contains("Persistence", StringComparison.OrdinalIgnoreCase) ||
                        value.Contains("IRepository<", StringComparison.Ordinal) ||
                        value.Contains("Repository<", StringComparison.Ordinal);
             }
@@ -704,22 +713,22 @@ namespace GraphKit.Outputs
             var callerRoot = GetAssemblyRoot(caller.Assembly);
             var implRoot = GetAssemblyRoot(implementation.Assembly);
             var hasFile = !string.IsNullOrWhiteSpace(implementation.FilePath) && !implementation.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase);
-            if (hasFile)
-            {
-                return true; // Internal source present
-            }
-
             if (!IsWithinCallerSolution(caller, implementation))
             {
                 return false;
             }
 
-            if (string.Equals(callerRoot, implRoot, StringComparison.OrdinalIgnoreCase))
+            if (hasFile)
             {
-                return true; // Same root; treat as in-scope
+                return true;
             }
 
-            return false; // Different root & no file evidence => skip
+            if (string.Equals(callerRoot, implRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         public static string GetAssemblyRoot(string assembly)

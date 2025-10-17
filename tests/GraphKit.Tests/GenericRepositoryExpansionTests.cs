@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using GraphKit.Graph;
@@ -101,7 +102,7 @@ public class GenericRepositoryExpansionTests
             }
         };
 
-        var flow = FlowBuilder.BuildFlows(document, _ => true);
+    var flow = FlowBuilder.BuildFlows(document, _ => true);
 
         Assert.Contains("calls FirmRepository.WriteQuery", flow);
         Assert.DoesNotContain("uses_service IControlledRepository<Firm>", flow);
@@ -193,7 +194,7 @@ public class GenericRepositoryExpansionTests
             }
         };
 
-        var flow = FlowBuilder.BuildFlows(document, _ => true);
+    var flow = FlowBuilder.BuildFlows(document, _ => true);
 
         Assert.Contains("calls FirmRepository.WriteQuery [L40]", flow);
         Assert.DoesNotContain("uses_service IControlledRepository<Firm>", flow);

@@ -223,6 +223,16 @@ public static partial class FlowBuilder
     {
         if (candidates.Count == 1) return candidates[0];
 
+        var sameSolution = candidates.Where(c => Utilities.IsWithinCallerSolution(caller, c)).ToList();
+        if (sameSolution.Count == 1)
+        {
+            return sameSolution[0];
+        }
+        if (sameSolution.Count > 1)
+        {
+            candidates = sameSolution;
+        }
+
         // Prefer same solution / assembly root then concrete file presence then outgoing edges (more behavior).
         var callerRoot = Utilities.GetAssemblyRoot(caller.Assembly);
         var sameRoot = candidates.Where(c => string.Equals(Utilities.GetAssemblyRoot(c.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -354,7 +364,10 @@ public static partial class FlowBuilder
             var operation = ExtractOperationLabel(write);
             AppendIndented(builder, indent, $"{operation} {entityNode.Name}{lineText}");
             state.CurrentImpact?.RecordRepositoryOperation(GetDisplayName(repository), write.Kind, GetDisplayName(entityNode));
-            AppendEntityFlow(builder, state, entityNode, indent + 1, write.Kind);
+            if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
+            {
+                AppendEntityFlow(builder, state, entityNode, indent + 1, write.Kind);
+            }
         }
 
         foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
@@ -443,6 +456,11 @@ public static partial class FlowBuilder
                 : ExtractOperationLabel(tableEdge);
             var lineText = tableEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             AppendIndented(builder, indent, $"{transform} {tableNode.Name}{lineText}");
+        }
+
+        foreach (var mapEdge in edges.Where(e => e.Kind == "maps_to"))
+        {
+            AppendMappingEdge(builder, state, mapEdge, indent);
         }
     }
 
@@ -610,9 +628,16 @@ public static partial class FlowBuilder
         // Route/verb extracted regardless of target_service so we can attempt global matching.
         var route = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
         var verb = props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null;
+        var baseUrl = props.TryGetValue("base_url", out var baseValue) ? baseValue?.ToString() : null;
 
         // If target_service is present we use existing assembly mapping logic; otherwise attempt global match.
         var serviceName = props.TryGetValue("target_service", out var serviceValue) ? serviceValue?.ToString() : null;
+
+        var host = ExtractHost(baseUrl, route);
+        if (string.IsNullOrWhiteSpace(serviceName) && state.Workspace.TryResolveServiceByHost(host, out var hostService))
+        {
+            serviceName = hostService;
+        }
 
         if (string.IsNullOrWhiteSpace(serviceName))
         {
@@ -627,7 +652,8 @@ public static partial class FlowBuilder
             var lookupKey = $"lookup::{callEdge.From}::{verbText}::{routeText}";
             if (!state.RemoteLookupKeys.Add(lookupKey))
             {
-                AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText} (see previous lookup)");
+                var hostSuffix = string.IsNullOrWhiteSpace(host) ? string.Empty : $" host={host}";
+                AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}{hostSuffix} (see previous lookup)");
                 return;
             }
 
@@ -635,7 +661,8 @@ public static partial class FlowBuilder
                 .Where(n => n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api")
                 .ToList();
             var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
-            AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}");
+            var lookupHost = string.IsNullOrWhiteSpace(host) ? string.Empty : $" host={host}";
+            AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}{lookupHost}");
             if (globalMatched.Count == 0)
             {
                 AppendIndented(builder, indent + 1, $"unmatched_endpoint route={routeText} verb={verbText}");
@@ -691,7 +718,10 @@ public static partial class FlowBuilder
                         && assemblySet.Contains(n.Assembly))
             .ToList();
 
-        AppendIndented(builder, indent, $"target_service {serviceName}");
+        var targetHeader = string.IsNullOrWhiteSpace(host)
+            ? $"target_service {serviceName}"
+            : $"target_service {serviceName} (host={host})";
+        AppendIndented(builder, indent, targetHeader);
 
         if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
         {
@@ -843,35 +873,60 @@ public static partial class FlowBuilder
         // Try multiple repository patterns
         var patterns = new[]
         {
-        $"I{entityName}Repository",
-        $"{entityName}Repository",
-        $"I{entityName}Repo",
-        $"{entityName}Repo",
-        $"I{entityName}DataAccess",
-        $"{entityName}DataAccess",
-        $"I{entityName}Dal",
-        $"{entityName}Dal",
-        $"IRepository<{entityName}>",
-        $"Repository<{entityName}>",
-        $"IControlledRepository<{entityName}>",
-        $"ControlledRepository<{entityName}>"
-    };
+            $"I{entityName}Repository",
+            $"{entityName}Repository",
+            $"I{entityName}Repo",
+            $"{entityName}Repo",
+            $"I{entityName}DataAccess",
+            $"{entityName}DataAccess",
+            $"I{entityName}Dal",
+            $"{entityName}Dal",
+            $"IRepository<{entityName}>",
+            $"Repository<{entityName}>",
+            $"IControlledRepository<{entityName}>",
+            $"ControlledRepository<{entityName}>"
+        };
 
-        // Search across all assemblies, not just current
         foreach (var pattern in patterns)
         {
-            // Check FQDN matches across solution
-            var candidates = state.NodesByName
-                .Where(kvp => MatchesPattern(kvp.Key, pattern))
-                .SelectMany(kvp => kvp.Value)
-                .Where(n => IsRepositoryType(n))
+            var candidates = new List<GraphNode>();
+            if (state.NodesByName.TryGetValue(pattern, out var nameMatches))
+            {
+                candidates.AddRange(nameMatches);
+            }
+
+            if (state.NodesByFqdn.TryGetValue(pattern, out var fqdnMatches))
+            {
+                candidates.AddRange(fqdnMatches);
+            }
+
+            if (candidates.Count == 0 && pattern.Contains('<'))
+            {
+                // Attempt to match without generic adornment for interface names stored without generic metadata
+                var simplePattern = pattern[..pattern.IndexOf('<')];
+                if (state.NodesByName.TryGetValue(simplePattern, out var genericNameMatches))
+                {
+                    candidates.AddRange(genericNameMatches);
+                }
+            }
+
+            if (candidates.Count == 0)
+            {
+                continue;
+            }
+
+            candidates = candidates
+                .Where(IsRepositoryType)
+                .Where(candidate => Utilities.IsWithinCallerSolution(caller, candidate))
+                .DistinctBy(candidate => candidate.Id)
                 .ToList();
 
-            if (candidates.Any())
+            if (candidates.Count == 0)
             {
-                // Prefer same namespace/assembly, then closest match
-                return SelectBestMatch(candidates, caller);
+                continue;
             }
+
+            return SelectBestMatch(candidates, caller);
         }
 
         return null;
@@ -904,6 +959,12 @@ public static partial class FlowBuilder
         {
             simpleArg + "Repository",
             simpleArg + "ControlledRepository",
+            "I" + simpleArg + "Repository",
+            "I" + simpleArg + "ControlledRepository",
+            simpleArg + "Repo",
+            "I" + simpleArg + "Repo",
+            simpleArg + "DataAccess",
+            "I" + simpleArg + "DataAccess"
         };
 
         GraphNode? best = null;
@@ -918,6 +979,7 @@ public static partial class FlowBuilder
 
             var repositories = matches
                 .Where(n => n.Type is "app.repository" or "repository")
+                .DistinctBy(r => r.Id)
                 .ToList();
 
             if (repositories.Count == 0)

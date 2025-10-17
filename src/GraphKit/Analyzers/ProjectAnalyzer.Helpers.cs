@@ -571,7 +571,7 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private string QualifyTypeName(string typeName)
+    private string QualifyTypeName(string typeName, string? preferredAssembly = null, string? preferredProject = null)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
@@ -588,6 +588,71 @@ public sealed partial class ProjectAnalyzer
         var requestMatches = _requests.Values
             .Where(r => r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
             .ToList();
+        if (requestMatches.Count > 1)
+        {
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                var assemblyMatches = requestMatches
+                    .Where(r => string.Equals(r.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (assemblyMatches.Count == 1)
+                {
+                    return assemblyMatches[0].Fqdn;
+                }
+
+                if (assemblyMatches.Count > 1 && !string.IsNullOrWhiteSpace(preferredProject))
+                {
+                    var projectMatches = assemblyMatches
+                        .Where(r => string.Equals(r.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (projectMatches.Count == 1)
+                    {
+                        return projectMatches[0].Fqdn;
+                    }
+                }
+
+                if (assemblyMatches.Count == 0)
+                {
+                    var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                    if (!string.IsNullOrWhiteSpace(preferredRoot))
+                    {
+                        var rootMatches = requestMatches
+                            .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        if (rootMatches.Count == 1)
+                        {
+                            return rootMatches[0].Fqdn;
+                        }
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject))
+            {
+                var projectMatches = requestMatches
+                    .Where(r => string.Equals(r.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (projectMatches.Count == 1)
+                {
+                    return projectMatches[0].Fqdn;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                if (!string.IsNullOrWhiteSpace(preferredRoot))
+                {
+                    var rootMatches = requestMatches
+                        .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (rootMatches.Count == 1)
+                    {
+                        return rootMatches[0].Fqdn;
+                    }
+                }
+            }
+        }
         if (requestMatches.Count == 1)
         {
             return requestMatches[0].Fqdn;
@@ -596,6 +661,31 @@ public sealed partial class ProjectAnalyzer
         var handlerMatches = _handlers.Values
             .Where(h => h.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
             .ToList();
+        if (handlerMatches.Count > 1 && !string.IsNullOrWhiteSpace(preferredAssembly))
+        {
+            var assemblyMatches = handlerMatches
+                .Where(h => string.Equals(h.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (assemblyMatches.Count == 1)
+            {
+                return assemblyMatches[0].RequestType;
+            }
+
+            if (assemblyMatches.Count == 0)
+            {
+                var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                if (!string.IsNullOrWhiteSpace(preferredRoot))
+                {
+                    var rootMatches = handlerMatches
+                        .Where(h => string.Equals(GetAssemblyRoot(h.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (rootMatches.Count == 1)
+                    {
+                        return rootMatches[0].RequestType;
+                    }
+                }
+            }
+        }
         if (handlerMatches.Count == 1)
         {
             return handlerMatches[0].RequestType;
@@ -715,6 +805,17 @@ public sealed partial class ProjectAnalyzer
             if (a[i] != b[i]) break;
         }
         return i;
+    }
+
+    private static string GetAssemblyRoot(string? assembly)
+    {
+        if (string.IsNullOrWhiteSpace(assembly))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = assembly.IndexOf('.');
+        return separatorIndex > 0 ? assembly[..separatorIndex] : assembly;
     }
 
     private static bool IsLoggerType(string? typeName)

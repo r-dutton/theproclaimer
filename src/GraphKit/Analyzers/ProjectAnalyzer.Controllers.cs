@@ -35,7 +35,7 @@ public sealed partial class ProjectAnalyzer
                 .Where(p => !string.IsNullOrWhiteSpace(p.Identifier.Text))
                 .ToDictionary(
                     p => p.Identifier.Text,
-                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString()),
+                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString(), project.AssemblyName, project.RelativeDirectory),
                     StringComparer.OrdinalIgnoreCase);
 
             var methodName = method.Identifier.Text;
@@ -123,8 +123,13 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
 
-                    resolvedType = QualifyTypeName(resolvedType);
+                    resolvedType = QualifyTypeName(resolvedType, project.AssemblyName, project.RelativeDirectory);
                     info.LocalVariables[variable.Identifier.Text] = resolvedType;
+
+                    if (ResolveStringValue(variable.Initializer?.Value) is { } stringValue)
+                    {
+                        info.LocalStringValues[variable.Identifier.Text] = stringValue;
+                    }
                 }
             }
 
@@ -220,7 +225,7 @@ public sealed partial class ProjectAnalyzer
                                 var responseType = handler.ResponseType;
                                 if (invocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax assignTarget })
                                 {
-                                    info.LocalVariables[assignTarget.Identifier.Text] = QualifyTypeName(responseType);
+                                    info.LocalVariables[assignTarget.Identifier.Text] = QualifyTypeName(responseType, project.AssemblyName, project.RelativeDirectory);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, assignTarget.Identifier.Text, GetLineNumber(tree, invocation), false));
@@ -229,7 +234,7 @@ public sealed partial class ProjectAnalyzer
                                 else if (invocation.Parent is AwaitExpressionSyntax awaitedInvocation &&
                                          awaitedInvocation.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax awaitAssign })
                                 {
-                                    info.LocalVariables[awaitAssign.Identifier.Text] = QualifyTypeName(responseType);
+                                    info.LocalVariables[awaitAssign.Identifier.Text] = QualifyTypeName(responseType, project.AssemblyName, project.RelativeDirectory);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, awaitAssign.Identifier.Text, GetLineNumber(tree, awaitedInvocation), false));
@@ -237,7 +242,7 @@ public sealed partial class ProjectAnalyzer
                                 }
                                 else if (invocation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
                                 {
-                                    info.LocalVariables[declarator.Identifier.Text] = QualifyTypeName(responseType);
+                                    info.LocalVariables[declarator.Identifier.Text] = QualifyTypeName(responseType, project.AssemblyName, project.RelativeDirectory);
                                     if (IsMeaningfulResponseType(responseType))
                                     {
                                         info.ResponseUsages.Add(new ControllerResponseUsage(responseType, declarator.Identifier.Text, GetLineNumber(tree, invocation), false));
@@ -444,7 +449,7 @@ public sealed partial class ProjectAnalyzer
             return;
         }
 
-        var qualifiedType = QualifyTypeName(typeName);
+    var qualifiedType = QualifyTypeName(typeName, info.Assembly, info.Project);
         if (string.IsNullOrWhiteSpace(qualifiedType) || string.Equals(qualifiedType, "var", StringComparison.OrdinalIgnoreCase))
         {
             qualifiedType = typeName;
@@ -477,7 +482,7 @@ public sealed partial class ProjectAnalyzer
         {
             var callMethod = access.Name.Identifier.Text.ToUpperInvariant();
             var routeLiteral = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-            var relativePath = ExtractRouteLiteral(tree, routeLiteral);
+            var relativePath = ExtractRouteLiteral(tree, routeLiteral) ?? ResolveRouteFromExpression(routeLiteral, info.LocalStringValues);
             var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
                 ? resolvedBaseType
                 : baseTypeName;
@@ -574,6 +579,11 @@ public sealed partial class ProjectAnalyzer
                 recordedServiceUsage = true;
             }
         }
+        else if ((qualifiedType.Contains("IRequestProcessor", StringComparison.Ordinal) || qualifiedType.Contains("RequestProcessor", StringComparison.Ordinal)) &&
+                 (string.Equals(serviceMethod, "Process", StringComparison.OrdinalIgnoreCase) || string.Equals(serviceMethod, "ProcessAsync", StringComparison.OrdinalIgnoreCase)))
+        {
+            recordedServiceUsage = true;
+        }
 
         if (recordedServiceUsage)
         {
@@ -588,14 +598,14 @@ public sealed partial class ProjectAnalyzer
                 // Generic TResult (ProcessAsync<TResult>/Process<TResult>)
                 if (access.Name is GenericNameSyntax g && g.TypeArgumentList.Arguments.Count > 0)
                 {
-                    responseType = QualifyTypeName(g.TypeArgumentList.Arguments[0].ToString());
+                    responseType = QualifyTypeName(g.TypeArgumentList.Arguments[0].ToString(), info.Assembly, info.Project);
                 }
 
                 // First argument is the request instance
                 var argExpr = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
                 if (argExpr is ObjectCreationExpressionSyntax creation)
                 {
-                    requestType = QualifyTypeName(creation.Type.ToString());
+                    requestType = QualifyTypeName(creation.Type.ToString(), info.Assembly, info.Project);
                 }
                 else if (argExpr is IdentifierNameSyntax idArg)
                 {
@@ -613,11 +623,11 @@ public sealed partial class ProjectAnalyzer
 
                 if (!string.IsNullOrWhiteSpace(requestType))
                 {
-                    requestType = QualifyTypeName(requestType!);
+                    requestType = QualifyTypeName(requestType!, info.Assembly, info.Project);
                 }
                 if (!string.IsNullOrWhiteSpace(responseType))
                 {
-                    responseType = QualifyTypeName(responseType!);
+                    responseType = QualifyTypeName(responseType!, info.Assembly, info.Project);
                 }
 
                 if (!string.IsNullOrWhiteSpace(requestType))
@@ -634,7 +644,7 @@ public sealed partial class ProjectAnalyzer
             var guessedProduct = GuessServiceTypeFromFactory(qualifiedType, serviceMethod);
             if (!string.IsNullOrWhiteSpace(guessedProduct))
             {
-                var qualifiedProduct = QualifyTypeName(guessedProduct);
+                var qualifiedProduct = QualifyTypeName(guessedProduct, info.Assembly, info.Project);
                 if (invocation.Parent is EqualsValueClauseSyntax equalsClause && equalsClause.Parent is VariableDeclaratorSyntax declarator)
                 {
                     info.LocalVariables[declarator.Identifier.Text] = qualifiedProduct;
@@ -806,7 +816,7 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
-        var qualifiedFactory = QualifyTypeName(factoryType);
+    var qualifiedFactory = QualifyTypeName(factoryType);
         Add(factoryType);
         Add(qualifiedFactory);
 
@@ -1173,7 +1183,7 @@ public sealed partial class ProjectAnalyzer
                     !string.IsNullOrWhiteSpace(serviceUsage.RequestType))
                 {
                     var requestType = serviceUsage.RequestType!;
-                    var requestInfo = FindRequestByType(requestType);
+                    var requestInfo = FindRequestByType(requestType) ?? ResolveRequestForDispatch(requestType, action);
                     if (requestInfo is not null)
                     {
                         var requestNodeId = StableId.For("cqrs.request", requestInfo.Fqdn, requestInfo.Assembly, requestInfo.SymbolId);
@@ -1660,9 +1670,29 @@ public sealed partial class ProjectAnalyzer
                IsClientType(baseType);
     }
 
-    private static bool IsClientType(string typeName)
-        => typeName.EndsWith("Client", StringComparison.Ordinal) ||
-           typeName.Contains(".Client", StringComparison.Ordinal);
+    private static bool IsClientType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        var baseType = GetTypeNameWithoutGenerics(typeName);
+        var simple = baseType.Split('.').Last();
+
+        if (simple.Length > 1 && simple[0] == 'I' && char.IsUpper(simple[1]))
+        {
+            simple = simple[1..];
+        }
+
+        if (string.IsNullOrWhiteSpace(simple))
+        {
+            return false;
+        }
+
+        return simple.EndsWith("Client", StringComparison.OrdinalIgnoreCase) ||
+               simple.EndsWith("ClientBase", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string GetTypeNameWithoutGenerics(string typeName)
     {
@@ -1767,7 +1797,7 @@ public sealed partial class ProjectAnalyzer
                 methodName.StartsWith("Map", StringComparison.Ordinal))
             {
                 var routeLiteral = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                var route = ExtractRouteLiteral(tree, routeLiteral);
+                var route = ExtractRouteLiteral(tree, routeLiteral) ?? ResolveRouteFromExpression(routeLiteral);
                 if (route is null)
                 {
                     continue;
@@ -1791,7 +1821,7 @@ public sealed partial class ProjectAnalyzer
                 methodName.StartsWith("Map", StringComparison.Ordinal))
             {
                 var routeLiteral = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                var route = ExtractRouteLiteral(tree, routeLiteral);
+                var route = ExtractRouteLiteral(tree, routeLiteral) ?? ResolveRouteFromExpression(routeLiteral);
                 if (route is null)
                 {
                     continue;
@@ -2244,6 +2274,75 @@ public sealed partial class ProjectAnalyzer
         return props;
     }
 
+    private string? ResolveStringValue(ExpressionSyntax? expression)
+    {
+        if (expression is null)
+        {
+            return null;
+        }
+
+        if (expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+        {
+            return literal.Token.ValueText;
+        }
+
+        var expressionText = expression.ToString();
+        if (_stringConstants.TryGetValue(expressionText, out var value))
+        {
+            return value;
+        }
+
+        return expression switch
+        {
+            IdentifierNameSyntax identifier when _stringConstants.TryGetValue(identifier.Identifier.Text, out var identifierValue) => identifierValue,
+            MemberAccessExpressionSyntax memberAccess when _stringConstants.TryGetValue(memberAccess.Name.Identifier.Text, out var memberValue) => memberValue,
+            _ => null
+        };
+    }
+
+    private string? ResolveRouteFromExpression(ExpressionSyntax? expression, IReadOnlyDictionary<string, string>? localValues = null)
+    {
+        if (expression is null)
+        {
+            return null;
+        }
+
+        if (expression is IdentifierNameSyntax identifier)
+        {
+            if (localValues is not null && localValues.TryGetValue(identifier.Identifier.Text, out var localValue))
+            {
+                return NormalizeRoute(localValue);
+            }
+
+            if (_stringConstants.TryGetValue(identifier.Identifier.Text, out var identifierValue))
+            {
+                return NormalizeRoute(identifierValue);
+            }
+        }
+
+        var expressionText = expression.ToString();
+        if (_stringConstants.TryGetValue(expressionText, out var constantValue))
+        {
+            return NormalizeRoute(constantValue);
+        }
+
+        if (expression is MemberAccessExpressionSyntax memberAccess)
+        {
+            if (_stringConstants.TryGetValue(memberAccess.Name.Identifier.Text, out var memberValue))
+            {
+                return NormalizeRoute(memberValue);
+            }
+
+            var memberAccessText = memberAccess.ToString();
+            if (_stringConstants.TryGetValue(memberAccessText, out var fullValue))
+            {
+                return NormalizeRoute(fullValue);
+            }
+        }
+
+        return null;
+    }
+
     private static string? ResolveRoute(SyntaxList<AttributeListSyntax> attributes, string className)
     {
         foreach (var attribute in attributes.SelectMany(list => list.Attributes))
@@ -2268,6 +2367,11 @@ public sealed partial class ProjectAnalyzer
         if (string.IsNullOrWhiteSpace(route))
         {
             return "/";
+        }
+
+        if (route.Contains("://", StringComparison.Ordinal))
+        {
+            return route;
         }
 
         return route.StartsWith("/", StringComparison.Ordinal) ? route : "/" + route;
@@ -2295,6 +2399,80 @@ public sealed partial class ProjectAnalyzer
             default:
                 return null;
         }
+    }
+
+    private RequestInfo? ResolveRequestForDispatch(string requestType, ControllerActionInfo action)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return null;
+        }
+
+        var simple = requestType.Split('.').Last();
+        var candidates = _requests.Values
+            .Where(r => r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        if (candidates.Count == 1)
+        {
+            return candidates[0];
+        }
+
+        var callerRoot = GetAssemblyRoot(action.Assembly);
+        if (!string.IsNullOrWhiteSpace(callerRoot))
+        {
+            var sameRoot = candidates
+                .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (sameRoot.Count == 1)
+            {
+                return sameRoot[0];
+            }
+
+            if (sameRoot.Count > 1)
+            {
+                candidates = sameRoot;
+            }
+        }
+
+        if (requestType.Contains('.', StringComparison.Ordinal))
+        {
+            var namespaceHint = requestType[..requestType.LastIndexOf('.')];
+            if (!string.IsNullOrWhiteSpace(namespaceHint))
+            {
+                var scored = candidates
+                    .Select(r => new { Item = r, Score = LongestCommonPrefixLength(namespaceHint, r.Fqdn) })
+                    .OrderByDescending(x => x.Score)
+                    .ThenBy(x => x.Item.Fqdn, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (scored.Count > 0 && scored[0].Score > 0)
+                {
+                    if (scored.Count == 1 || scored[0].Score > scored.ElementAtOrDefault(1)?.Score)
+                    {
+                        return scored[0].Item;
+                    }
+                }
+            }
+        }
+
+        var nonTest = candidates
+            .Where(r => !r.Assembly.Contains(".Tests", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (nonTest.Count == 1)
+        {
+            return nonTest[0];
+        }
+
+        return candidates
+            .OrderBy(r => r.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
     }
 }
 

@@ -24,31 +24,63 @@ namespace GraphKit.Outputs
             AppendIndented(builder, indent, $"uses_client {clientDisplay}{lineText}");
             state.CurrentImpact?.RecordClient(clientDisplay);
 
-            List<string>? allowedMethods = null;
+            static bool IsHttpVerbCandidate(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    return false;
+                }
+
+                return value.Equals("GET", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("POST", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("PUT", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("PATCH", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("HEAD", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase) ||
+                       value.Equals("TRACE", StringComparison.OrdinalIgnoreCase);
+            }
+
+            HashSet<string>? allowedClientMethods = null;
+            HashSet<string>? allowedHttpVerbs = null;
+
+            void RecordAllowedValue(string? candidate)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    return;
+                }
+
+                var normalized = candidate.Trim();
+                if (normalized.Length == 0)
+                {
+                    return;
+                }
+
+                if (IsHttpVerbCandidate(normalized))
+                {
+                    allowedHttpVerbs ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    allowedHttpVerbs.Add(normalized);
+                }
+                else
+                {
+                    allowedClientMethods ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    allowedClientMethods.Add(normalized);
+                }
+            }
+
             if (clientEdge.Props is { } clientProps)
             {
                 if (clientProps.TryGetValue("method", out var methodValue) && methodValue is not null)
                 {
-                    var methodName = methodValue.ToString()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(methodName))
-                    {
-                        allowedMethods ??= new List<string>();
-                        allowedMethods.Add(methodName!);
-                    }
+                    RecordAllowedValue(methodValue.ToString());
                 }
 
                 if (clientProps.TryGetValue("methods", out var methodsValue) && methodsValue is IEnumerable<object> methodList)
                 {
                     foreach (var candidate in methodList)
                     {
-                        var text = candidate?.ToString()?.Trim();
-                        if (string.IsNullOrWhiteSpace(text))
-                        {
-                            continue;
-                        }
-
-                        allowedMethods ??= new List<string>();
-                        allowedMethods.Add(text!);
+                        RecordAllowedValue(candidate?.ToString());
                     }
                 }
             }
@@ -61,14 +93,27 @@ namespace GraphKit.Outputs
             // Candidate call edges
             var allCallEdges = clientEdges.Where(e => e.Kind == "calls").ToList();
             // Restrict by allowed methods if provided
-            if (allowedMethods is { Count: > 0 })
+            if ((allowedClientMethods is { Count: > 0 }) || (allowedHttpVerbs is { Count: > 0 }))
             {
                 allCallEdges = allCallEdges.Where(e =>
                 {
                     if (e.Props is not { } p) return false;
-                    if (p.TryGetValue("client_method", out var mv) && mv is string ms && allowedMethods.Any(m => string.Equals(m, ms.Trim(), StringComparison.OrdinalIgnoreCase))) return true;
-                    if (p.TryGetValue("method", out var mv2) && mv2 is string ms2 && allowedMethods.Any(m => string.Equals(m, ms2.Trim(), StringComparison.OrdinalIgnoreCase))) return true;
-                    return false;
+                    bool MethodMatches(HashSet<string>? candidates)
+                    {
+                        if (candidates is not { Count: > 0 }) return true;
+                        if (p.TryGetValue("client_method", out var mv) && mv is string ms && candidates.Contains(ms.Trim())) return true;
+                        if (p.TryGetValue("method", out var mv2) && mv2 is string ms2 && candidates.Contains(ms2.Trim())) return true;
+                        return false;
+                    }
+
+                    bool VerbMatches(HashSet<string>? candidates)
+                    {
+                        if (candidates is not { Count: > 0 }) return true;
+                        if (p.TryGetValue("verb", out var verbValue) && verbValue is string vs && candidates.Contains(vs.Trim())) return true;
+                        return false;
+                    }
+
+                    return MethodMatches(allowedClientMethods) && VerbMatches(allowedHttpVerbs);
                 }).ToList();
             }
 

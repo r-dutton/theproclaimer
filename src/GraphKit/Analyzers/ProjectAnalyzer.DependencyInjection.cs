@@ -238,6 +238,7 @@ public sealed partial class ProjectAnalyzer
     private void CaptureMediatorRegistration(string serviceType, string implementationType)
     {
         var serviceBase = GetTypeNameWithoutGenerics(serviceType);
+        var assemblyHint = GuessAssemblyName(implementationType);
         if (serviceBase.EndsWith("IPipelineBehavior", StringComparison.Ordinal))
         {
             var arguments = SplitGenericArguments(serviceType);
@@ -246,7 +247,7 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var requestType = QualifyTypeName(arguments[0]);
+            var requestType = QualifyTypeName(arguments[0], assemblyHint);
             RegisterPipelineRequest(requestType, implementationType);
             return;
         }
@@ -261,7 +262,7 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var requestType = QualifyTypeName(arguments[0]);
+            var requestType = QualifyTypeName(arguments[0], assemblyHint);
             RegisterProcessorRequest(requestType, implementationType);
         }
     }
@@ -681,9 +682,18 @@ public sealed partial class ProjectAnalyzer
                 .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => r.Span.StartLine))
             {
-                if (!TryResolveNodeReference(registration.ImplementationType, out var implementation))
+                string? implementationId;
+                if (TryResolveNodeReference(registration.ImplementationType, out var implementation))
                 {
-                    continue;
+                    implementationId = implementation.Id;
+                }
+                else
+                {
+                    implementationId = EnsureServiceImplementationNode(registration);
+                    if (implementationId is null)
+                    {
+                        continue;
+                    }
                 }
 
                 var props = new Dictionary<string, object>
@@ -695,7 +705,7 @@ public sealed partial class ProjectAnalyzer
                 _edges.Add(new GraphEdge
                 {
                     From = serviceId!,
-                    To = implementation.Id,
+                    To = implementationId,
                     Kind = "implemented_by",
                     Source = "static",
                     Confidence = 1.0,
@@ -954,6 +964,48 @@ public sealed partial class ProjectAnalyzer
         }
 
         return null;
+    }
+
+    private string? EnsureServiceImplementationNode(ServiceRegistrationInfo registration)
+    {
+        if (registration is null || string.IsNullOrWhiteSpace(registration.ImplementationType))
+        {
+            return null;
+        }
+
+        if (TryResolveNodeReference(registration.ImplementationType, out var reference))
+        {
+            return reference.Id;
+        }
+
+        var implementationType = registration.ImplementationType;
+        var assembly = string.IsNullOrWhiteSpace(registration.Assembly)
+            ? GuessAssemblyName(implementationType)
+            : registration.Assembly;
+        var project = string.IsNullOrWhiteSpace(registration.Project) ? string.Empty : registration.Project;
+        var symbolId = $"T:{implementationType}";
+        var id = StableId.For("app.service", implementationType, assembly, symbolId);
+
+        if (!_nodes.ContainsKey(id))
+        {
+            // Synthesize a minimal implementation node so flows can resolve the concrete type.
+            var simpleName = implementationType.Split('.').Last();
+            _nodes.TryAdd(id, new GraphNode
+            {
+                Id = id,
+                Type = "app.service",
+                Name = simpleName,
+                Fqdn = implementationType,
+                Assembly = assembly,
+                Project = project,
+                FilePath = string.Empty,
+                Span = null,
+                SymbolId = symbolId,
+                Tags = new[] { "app" }
+            });
+        }
+
+        return id;
     }
 
     private HttpClientBaseAddress? TryGetHttpClientBaseAddress(string clientType)

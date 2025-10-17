@@ -68,7 +68,7 @@ public sealed partial class ProjectAnalyzer
                 .Where(p => !string.IsNullOrWhiteSpace(p.Identifier.Text))
                 .ToDictionary(
                     p => p.Identifier.Text,
-                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString()),
+                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString(), project.AssemblyName, project.RelativeDirectory),
                     StringComparer.OrdinalIgnoreCase);
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -84,7 +84,7 @@ public sealed partial class ProjectAnalyzer
                         resolvedType = creation.Type.ToString();
                     }
 
-                    resolvedType = QualifyTypeName(resolvedType);
+                    resolvedType = QualifyTypeName(resolvedType, project.AssemblyName, project.RelativeDirectory);
                     localVariables[variable.Identifier.Text] = resolvedType;
                 }
             }

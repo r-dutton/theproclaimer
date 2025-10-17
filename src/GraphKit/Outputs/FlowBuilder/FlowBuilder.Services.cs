@@ -47,6 +47,18 @@ public static partial class FlowBuilder
                 }
             }
 
+            if (Utilities.IsRepositoryNode(serviceNode))
+            {
+                var repoImpl = TryResolveRepositoryPattern(state, caller, serviceNode) ?? TryResolveControlledRepository(state, caller, serviceNode);
+                if (repoImpl != null && repoImpl.Type is "app.repository" or "repository")
+                {
+                    var methodSuffix = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{methodName}";
+                    AppendIndented(builder, indent, $"implementation {repoImpl.Fqdn}{methodSuffix}");
+                    AppendRepositoryFlow(builder, state, repoImpl, indent + 1);
+                    return;
+                }
+            }
+
             var candidateList = new List<GraphNode>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -298,6 +310,15 @@ public static partial class FlowBuilder
         }
 
         var callerRoot = GetAssemblyRoot(caller.Assembly);
+
+        var sameSolution = candidates
+            .Where(candidate => Utilities.IsWithinCallerSolution(caller, candidate))
+            .ToList();
+        if (sameSolution.Count > 0)
+        {
+            candidates = sameSolution;
+        }
+
         var ordered = candidates
             .OrderBy(candidate => string.Equals(GetAssemblyRoot(candidate.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
             .ThenBy(candidate => candidate.Fqdn ?? candidate.Name ?? candidate.Id, StringComparer.OrdinalIgnoreCase)

@@ -10,6 +10,41 @@ namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
+    private void CollectStringConstants(ProjectInfo project, SyntaxTree tree, CompilationUnitSyntax root, CancellationToken cancellationToken)
+    {
+        foreach (var member in root.Members)
+        {
+            CollectStringConstants(project, tree, member, null, cancellationToken);
+        }
+    }
+
+    private void CollectStringConstants(ProjectInfo project, SyntaxTree tree, MemberDeclarationSyntax member, string? currentNamespace, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        switch (member)
+        {
+            case NamespaceDeclarationSyntax namespaceDeclaration:
+                foreach (var child in namespaceDeclaration.Members)
+                {
+                    CollectStringConstants(project, tree, child, namespaceDeclaration.Name.ToString(), cancellationToken);
+                }
+                break;
+            case FileScopedNamespaceDeclarationSyntax fileScoped:
+                foreach (var child in fileScoped.Members)
+                {
+                    CollectStringConstants(project, tree, child, fileScoped.Name.ToString(), cancellationToken);
+                }
+                break;
+            case ClassDeclarationSyntax classDeclaration:
+                var namespaceName = currentNamespace ?? project.RootNamespace;
+                var className = classDeclaration.Identifier.Text;
+                var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
+                CaptureStringConstants(classDeclaration, namespaceName, fqdn);
+                break;
+        }
+    }
+
     private void ProcessMember(ProjectInfo project, SyntaxTree tree, MemberDeclarationSyntax member, string? currentNamespace, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -60,6 +95,8 @@ public sealed partial class ProjectAnalyzer
                 fieldTypes[variable.Identifier.Text] = new FieldDescriptor(typeName, line);
             }
         }
+
+        CaptureStringConstants(classDeclaration, namespaceName, fqdn);
 
         if (ImplementsInterface(classDeclaration, "IRequest") || ImplementsInterface(classDeclaration, "IAsyncRequest"))
         {
@@ -186,6 +223,50 @@ public sealed partial class ProjectAnalyzer
              className.Contains(".Dtos.", StringComparison.Ordinal)))
         {
             _dtos[fqdn] = new DtoInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
+        }
+    }
+
+    private void CaptureStringConstants(ClassDeclarationSyntax classDeclaration, string? namespaceName, string fqdn)
+    {
+        foreach (var field in classDeclaration.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)))
+            {
+                continue;
+            }
+
+            var typeName = field.Declaration.Type.ToString();
+            if (!string.Equals(typeName, "string", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var variable in field.Declaration.Variables)
+            {
+                if (variable.Initializer?.Value is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+                {
+                    var value = literal.Token.ValueText;
+                    var constFqdn = string.IsNullOrWhiteSpace(fqdn)
+                        ? variable.Identifier.Text
+                        : $"{fqdn}.{variable.Identifier.Text}";
+                    var shortKey = constFqdn;
+                    if (!string.IsNullOrWhiteSpace(namespaceName) && shortKey.StartsWith(namespaceName + ".", StringComparison.Ordinal))
+                    {
+                        shortKey = shortKey[(namespaceName.Length + 1)..];
+                    }
+                    _stringConstants[constFqdn] = value;
+                    _stringConstants[shortKey] = value;
+                    _stringConstants[variable.Identifier.Text] = value;
+                }
+            }
+        }
+
+        foreach (var nested in classDeclaration.Members.OfType<ClassDeclarationSyntax>())
+        {
+            var nestedFqdn = string.IsNullOrWhiteSpace(fqdn)
+                ? nested.Identifier.Text
+                : $"{fqdn}.{nested.Identifier.Text}";
+            CaptureStringConstants(nested, namespaceName, nestedFqdn);
         }
     }
 

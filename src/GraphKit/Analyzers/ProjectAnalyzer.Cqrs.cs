@@ -23,9 +23,9 @@ public sealed partial class ProjectAnalyzer
         }
 
         var requestType = handlerInterface.TypeArgumentList.Arguments.FirstOrDefault()?.ToString() ?? string.Empty;
-        requestType = string.IsNullOrWhiteSpace(requestType) ? requestType : QualifyTypeName(requestType);
+    requestType = string.IsNullOrWhiteSpace(requestType) ? requestType : QualifyTypeName(requestType, project.AssemblyName, project.RelativeDirectory);
         var responseType = handlerInterface.TypeArgumentList.Arguments.Skip(1).FirstOrDefault()?.ToString() ?? "void";
-        responseType = string.IsNullOrWhiteSpace(responseType) ? responseType : QualifyTypeName(responseType);
+    responseType = string.IsNullOrWhiteSpace(responseType) ? responseType : QualifyTypeName(responseType, project.AssemblyName, project.RelativeDirectory);
 
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
@@ -43,7 +43,7 @@ public sealed partial class ProjectAnalyzer
                 .Where(p => !string.IsNullOrWhiteSpace(p.Identifier.Text))
                 .ToDictionary(
                     p => p.Identifier.Text,
-                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString()),
+                    p => p.Type is null ? null : QualifyTypeName(p.Type.ToString(), project.AssemblyName, project.RelativeDirectory),
                     StringComparer.OrdinalIgnoreCase);
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -59,7 +59,7 @@ public sealed partial class ProjectAnalyzer
                         resolvedType = creation.Type.ToString();
                     }
 
-                    resolvedType = QualifyTypeName(resolvedType);
+                    resolvedType = QualifyTypeName(resolvedType, project.AssemblyName, project.RelativeDirectory);
                     localVariables[variable.Identifier.Text] = resolvedType;
                 }
             }
@@ -159,10 +159,11 @@ public sealed partial class ProjectAnalyzer
                             handlerInfo.PublisherCalls.Add(new HandlerPublisherCall(typeName, methodName ?? string.Empty, line, messageType));
                             recordedUsage = true;
                         }
-                        else if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                        else if (IsRepositoryType(resolvedType) || IsRepositoryType(typeName))
                         {
+                            var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : typeName;
                             var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
+                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType ?? string.Empty, methodName ?? string.Empty, line, operation));
                             continue;
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
@@ -198,15 +199,62 @@ public sealed partial class ProjectAnalyzer
                             }
                         }
 
+                        var normalizedServiceType = NormalizeServiceType((resolvedType ?? typeName) ?? string.Empty);
+                        string? invocationMethod = methodName;
+                        string? dispatchRequestType = null;
+                        string? dispatchResponseType = null;
+                        string? dispatchKind = null;
+
+                        if (invocation is not null &&
+                            ((typeName?.Contains("IRequestProcessor", StringComparison.Ordinal) ?? false) || (resolvedType?.Contains("RequestProcessor", StringComparison.Ordinal) ?? false)) &&
+                            !string.IsNullOrWhiteSpace(methodName) &&
+                            (string.Equals(methodName, "Process", StringComparison.OrdinalIgnoreCase) || string.Equals(methodName, "ProcessAsync", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            if (memberAccess.Name is GenericNameSyntax generic && generic.TypeArgumentList.Arguments.Count > 0)
+                            {
+                                var responseCandidate = generic.TypeArgumentList.Arguments[0].ToString();
+                                if (!string.IsNullOrWhiteSpace(responseCandidate))
+                                {
+                                    dispatchResponseType = QualifyTypeName(responseCandidate, project.AssemblyName, project.RelativeDirectory);
+                                }
+                            }
+
+                            var argExpr = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+                            if (argExpr is ObjectCreationExpressionSyntax creationExpression)
+                            {
+                                dispatchRequestType = QualifyTypeName(creationExpression.Type.ToString(), project.AssemblyName, project.RelativeDirectory);
+                            }
+                            else if (argExpr is IdentifierNameSyntax identifierArgument)
+                            {
+                                dispatchRequestType = TryResolveExpressionType(identifierArgument, parameterTypes, localVariables);
+                            }
+                            else if (argExpr is MemberAccessExpressionSyntax memberAccessExpr &&
+                                     memberAccessExpr.Expression is IdentifierNameSyntax memberRoot)
+                            {
+                                dispatchRequestType = TryResolveExpressionType(memberRoot, parameterTypes, localVariables);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(dispatchRequestType))
+                            {
+                                dispatchRequestType = QualifyTypeName(dispatchRequestType, project.AssemblyName, project.RelativeDirectory);
+                                dispatchKind = "requestprocessor.dispatch";
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(dispatchResponseType))
+                            {
+                                dispatchResponseType = QualifyTypeName(dispatchResponseType, project.AssemblyName, project.RelativeDirectory);
+                            }
+                        }
+
+                        var serviceUsage = new ServiceUsage(normalizedServiceType, line, methodName, invocationMethod, dispatchRequestType, dispatchResponseType, dispatchKind);
+
                         if (!recordedUsage)
                         {
-                            var serviceType = NormalizeServiceType(resolvedType ?? typeName);
-                            handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
+                            handlerInfo.ServiceUsages.Add(serviceUsage);
                         }
-                        else if (!resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                        else if (!(resolvedType?.EndsWith("Repository", StringComparison.Ordinal) ?? false))
                         {
-                            var serviceType = NormalizeServiceType(resolvedType ?? typeName);
-                            handlerInfo.ServiceUsages.Add(new ServiceUsage(serviceType, line, methodName));
+                            handlerInfo.ServiceUsages.Add(serviceUsage);
                         }
                     }
                 }
@@ -611,6 +659,65 @@ public sealed partial class ProjectAnalyzer
                     Props = props,
                     Evidence = CreateEvidence(handler.FilePath, usage.Line)
                 });
+
+                if (!string.IsNullOrWhiteSpace(usage.DispatchKind) &&
+                    !string.IsNullOrWhiteSpace(usage.RequestType))
+                {
+                    var requestType = usage.RequestType!;
+                    var requestInfo = FindRequestByType(requestType);
+                    if (requestInfo is not null)
+                    {
+                        var requestNodeId = StableId.For("cqrs.request", requestInfo.Fqdn, requestInfo.Assembly, requestInfo.SymbolId);
+                        var sendsProps = new Dictionary<string, object>
+                        {
+                            ["service"] = usage.ServiceType,
+                            ["invocation"] = usage.InvocationMethod ?? usage.Method ?? string.Empty,
+                            ["request_type"] = requestType,
+                            ["response_type"] = usage.ResponseType ?? string.Empty
+                        };
+
+                        _edges.Add(new GraphEdge
+                        {
+                            From = id,
+                            To = requestNodeId,
+                            Kind = "sends_request",
+                            Source = "synthetic",
+                            Confidence = 0.9,
+                            Transform = new GraphTransform
+                            {
+                                Type = usage.DispatchKind!,
+                                Location = new GraphLocation { File = handler.FilePath, Line = usage.Line }
+                            },
+                            Props = sendsProps,
+                            Evidence = CreateEvidence(handler.FilePath, usage.Line)
+                        });
+
+                        if (FindHandlerForRequest(requestType) is { } downstreamHandler)
+                        {
+                            var downstreamHandlerId = StableId.For("cqrs.handler", downstreamHandler.Fqdn, downstreamHandler.Assembly, downstreamHandler.SymbolId);
+                            _edges.Add(new GraphEdge
+                            {
+                                From = requestNodeId,
+                                To = downstreamHandlerId,
+                                Kind = "handled_by",
+                                Source = "synthetic",
+                                Confidence = 0.85,
+                                Transform = new GraphTransform
+                                {
+                                    Type = usage.DispatchKind!,
+                                    Location = new GraphLocation { File = handler.FilePath, Line = usage.Line }
+                                },
+                                Props = new Dictionary<string, object>
+                                {
+                                    ["request_type"] = requestType,
+                                    ["handler"] = downstreamHandler.Fqdn,
+                                    ["response_type"] = usage.ResponseType ?? string.Empty
+                                },
+                                Evidence = CreateEvidence(handler.FilePath, usage.Line)
+                            });
+                        }
+                    }
+                }
             }
 
             foreach (var cache in handler.CacheInvocations)

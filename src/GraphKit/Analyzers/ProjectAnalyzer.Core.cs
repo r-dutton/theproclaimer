@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
@@ -46,6 +47,7 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, CacheInfo> _caches = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DbContextInfo> _dbContexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _interfaceMethodReturnTypes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _stringConstants = new(StringComparer.OrdinalIgnoreCase);
 
     public ProjectAnalyzer(string workspaceRoot)
     {
@@ -60,6 +62,8 @@ public sealed partial class ProjectAnalyzer
     {
         LoadConfigurationValues(project);
 
+        var parsedFiles = new List<(string FilePath, SyntaxTree Tree, CompilationUnitSyntax Root)>();
+
         foreach (var file in project.SourceFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -67,7 +71,16 @@ public sealed partial class ProjectAnalyzer
             var text = await File.ReadAllTextAsync(file, cancellationToken);
             var tree = CSharpSyntaxTree.ParseText(text, path: file);
             var root = tree.GetCompilationUnitRoot(cancellationToken);
+            parsedFiles.Add((file, tree, root));
+        }
 
+        foreach (var (_, tree, root) in parsedFiles)
+        {
+            CollectStringConstants(project, tree, root, cancellationToken);
+        }
+
+        foreach (var (file, tree, root) in parsedFiles)
+        {
             foreach (var member in root.Members)
             {
                 ProcessMember(project, tree, member, null, cancellationToken);

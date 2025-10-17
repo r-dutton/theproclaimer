@@ -166,12 +166,12 @@ public sealed partial class ProjectAnalyzer
                 if (invocation.Expression is MemberAccessExpressionSyntax { Expression: InvocationExpressionSyntax innerInvocation, Name.Identifier.Text: var setMethod })
                 {
                     var currentInvocation = innerInvocation;
-                    while (currentInvocation.Expression is MemberAccessExpressionSyntax access)
+                    while (currentInvocation.Expression is MemberAccessExpressionSyntax memberAccess)
                     {
-                        if (access.Expression is IdentifierNameSyntax contextIdentifier &&
-                            TryResolveDbContextType(contextIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
+                        if (memberAccess.Expression is IdentifierNameSyntax nameContextIdentifier &&
+                            TryResolveDbContextType(nameContextIdentifier.Identifier.Text, fieldLookup, parameterTypes, localVariables, out _))
                         {
-                            if (access.Name is GenericNameSyntax { Identifier.Text: "Set", TypeArgumentList.Arguments.Count: > 0 } generic)
+                            if (memberAccess.Name is GenericNameSyntax { Identifier.Text: "Set", TypeArgumentList.Arguments.Count: > 0 } generic)
                             {
                                 var entityType = generic.TypeArgumentList.Arguments[0].ToString();
                                 var line = GetLineNumber(tree, invocation);
@@ -181,7 +181,7 @@ public sealed partial class ProjectAnalyzer
                             break;
                         }
 
-                        if (access.Expression is InvocationExpressionSyntax nextInvocation)
+                        if (memberAccess.Expression is InvocationExpressionSyntax nextInvocation)
                         {
                             currentInvocation = nextInvocation;
                             continue;

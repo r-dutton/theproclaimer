@@ -256,7 +256,7 @@ namespace GraphKit.Outputs
                     AppendIndented(builder, childIndent, $"{label} {entityNode.Name}{lineText}");
                     state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
 
-                    if (entityNode.Type == "ef.entity")
+                    if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
                     {
                         AppendEntityFlow(builder, state, entityNode, childIndent + 1, dataEdge.Kind);
                     }
@@ -301,7 +301,10 @@ namespace GraphKit.Outputs
                     var isControlledRepoInterface = serviceNode.Name != null && serviceNode.Name.StartsWith("IControlledRepository<", StringComparison.Ordinal);
                     if (isControlledRepoInterface)
                     {
-                        var repoImpl = TryResolveControlledRepository(state, endpoint, serviceNode) ?? collapseImpl ?? TryResolveSingleImplementation(state, endpoint, serviceNode);
+                        var repoImpl = TryResolveControlledRepository(state, endpoint, serviceNode)
+                                       ?? TryResolveRepositoryPattern(state, endpoint, serviceNode)
+                                       ?? collapseImpl
+                                       ?? TryResolveSingleImplementation(state, endpoint, serviceNode);
                         if (repoImpl != null && repoImpl.Type is "app.repository" or "repository")
                         {
                             var alreadyPrinted = callEdges.Any(call => call.To == repoImpl.Id && string.Equals(GetCallMethod(call), serviceMethodName, StringComparison.OrdinalIgnoreCase));

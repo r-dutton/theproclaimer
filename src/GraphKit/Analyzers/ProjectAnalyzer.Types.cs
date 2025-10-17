@@ -24,6 +24,7 @@ public sealed partial class ProjectAnalyzer
         public List<EndpointAuthorization> Authorizations { get; } = new();
         public bool AllowsAnonymous { get; set; }
         public HashSet<int> StatusCodes { get; } = new();
+        public Dictionary<string, string> LocalStringValues { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
