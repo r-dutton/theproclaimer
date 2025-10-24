@@ -8,6 +8,8 @@ namespace GraphKit.Analyzers;
 
 internal static class ClientLinker
 {
+    private static readonly string[] KnownHttpVerbs = { "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS" };
+
     /// <summary>
     /// Synthetic linking pass: for any uses_client edges that have verb/route metadata but no explicit calls edge
     /// emit a calls edge from the client to matched endpoints (controllers or minimal APIs). Skips empty routes.
@@ -22,10 +24,23 @@ internal static class ClientLinker
             var existingCallKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var edge in edges.Where(e => e.Kind == "calls" && e.Props is { }))
             {
-                if (edge.Props!.TryGetValue("verb", out var verbVal) && edge.Props.TryGetValue("route", out var routeVal))
+                if (!edge.Props!.TryGetValue("route", out var routeVal))
                 {
-                    existingCallKeys.Add($"{edge.From}|{verbVal}|{routeVal}|{edge.To}");
+                    continue;
                 }
+
+                var routeValue = routeVal?.ToString();
+                if (string.IsNullOrWhiteSpace(routeValue))
+                {
+                    continue;
+                }
+
+                var canonicalRoute = CanonicalizeRoute(routeValue);
+                var existingVerb = edge.Props.TryGetValue("verb", out var verbVal)
+                    ? NormalizeHttpVerb(verbVal?.ToString()) ?? string.Empty
+                    : string.Empty;
+
+                existingCallKeys.Add($"{edge.From}|{existingVerb}|{canonicalRoute}|{edge.To}");
             }
 
             var endpoints = nodes.Values
@@ -43,18 +58,16 @@ internal static class ClientLinker
                     continue;
                 }
 
-                var verb = props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null;
-                var route = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
-                if (string.IsNullOrWhiteSpace(verb) && string.IsNullOrWhiteSpace(route))
-                {
-                    continue; // No metadata
-                }
-
-                // Skip empty or root-only routes to prevent explosion
-                if (string.IsNullOrWhiteSpace(route) && (route == "/" || route.Trim() == string.Empty))
+                var clientMethod = props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
+                var targetService = props.TryGetValue("target_service", out var targetValue) ? targetValue?.ToString() : null;
+                var rawRoute = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
+                if (string.IsNullOrWhiteSpace(rawRoute))
                 {
                     continue;
                 }
+
+                var canonicalRoute = CanonicalizeRoute(rawRoute!);
+                var normalizedVerb = NormalizeHttpVerb(props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null);
 
                 var clientId = uses.To;
                 if (!nodes.TryGetValue(clientId, out var clientNode) || clientNode.Type != "http.client")
@@ -63,14 +76,14 @@ internal static class ClientLinker
                 }
 
                 var hasExistingForVerbRoute = edges.Any(e => e.From == clientId && e.Kind == "calls" && e.Props is { } cp &&
-                    (string.IsNullOrWhiteSpace(verb) || (cp.TryGetValue("verb", out var ev) && string.Equals(ev?.ToString(), verb, StringComparison.OrdinalIgnoreCase))) &&
-                    (string.IsNullOrWhiteSpace(route) || (cp.TryGetValue("route", out var rv) && CanonicalizeRoute(rv?.ToString() ?? string.Empty) == CanonicalizeRoute(route ?? string.Empty))));
+                    (normalizedVerb is null || NormalizeHttpVerb(cp.TryGetValue("verb", out var ev) ? ev?.ToString() : null) == normalizedVerb) &&
+                    (cp.TryGetValue("route", out var rv) && CanonicalizeRoute(rv?.ToString() ?? string.Empty) == canonicalRoute));
                 if (hasExistingForVerbRoute)
                 {
                     continue;
                 }
 
-                var matched = endpoints.Where(ep => EndpointMatches(ep, route, verb)).ToList();
+                var matched = endpoints.Where(ep => EndpointMatches(ep, canonicalRoute, normalizedVerb)).ToList();
                 if (matched.Count == 0)
                 {
                     continue;
@@ -80,36 +93,43 @@ internal static class ClientLinker
                 {
                     var routeProp = ep.Props is { } epProps && epProps.TryGetValue("route", out var epRouteValue) ? epRouteValue?.ToString() : null;
                     var httpMethodProp = ep.Props is { } epProps2 && epProps2.TryGetValue("http_method", out var epVerbValue) ? epVerbValue?.ToString() : null;
-                    var effectiveVerb = verb ?? httpMethodProp ?? string.Empty;
-                    var effectiveRoute = route ?? routeProp ?? string.Empty;
-                    var key = $"{clientId}|{effectiveVerb}|{effectiveRoute}|{ep.Id}";
+                    var endpointVerb = NormalizeHttpVerb(httpMethodProp);
+                    var effectiveVerb = normalizedVerb ?? endpointVerb;
+                    var effectiveRoute = rawRoute ?? routeProp ?? string.Empty;
+                    var key = $"{clientId}|{(normalizedVerb ?? string.Empty)}|{canonicalRoute}|{ep.Id}";
                     if (!existingCallKeys.Add(key))
                     {
                         continue;
                     }
 
-                    string? targetService = null;
-                    if (clientTargetServices.TryGetValue(clientNode.Fqdn, out var mappedService) || clientTargetServices.TryGetValue(clientNode.Name, out mappedService))
+                    if (string.IsNullOrWhiteSpace(targetService) && (clientTargetServices.TryGetValue(clientNode.Fqdn, out var mappedService) || clientTargetServices.TryGetValue(clientNode.Name, out mappedService)))
                     {
                         targetService = mappedService;
                     }
 
                     var callProps = new Dictionary<string, object>
                     {
-                        ["verb"] = effectiveVerb,
                         ["route"] = effectiveRoute
                     };
+                    if (props.TryGetValue("query_params", out var queryValue) && queryValue is not null)
+                    {
+                        callProps["query_params"] = queryValue;
+                    }
+                    if (!string.IsNullOrWhiteSpace(effectiveVerb))
+                    {
+                        callProps["verb"] = effectiveVerb!;
+                    }
                     if (!string.IsNullOrWhiteSpace(targetService))
                     {
                         callProps["target_service"] = targetService!;
                     }
+                    if (!string.IsNullOrWhiteSpace(clientMethod))
+                    {
+                        callProps["client_method"] = clientMethod!;
+                    }
 
                     if (uses.Transform?.Location is { } loc)
                     {
-                        if (props.TryGetValue("method", out var m) && m is not null)
-                        {
-                            callProps["client_method"] = m.ToString();
-                        }
                         edges.Add(new GraphEdge
                         {
                             From = clientId,
@@ -135,14 +155,19 @@ internal static class ClientLinker
         }
     }
 
-    private static bool EndpointMatches(GraphNode endpoint, string? route, string? verb)
+    private static bool EndpointMatches(GraphNode endpoint, string canonicalRoute, string? normalizedVerb)
     {
         if (endpoint.Props is not { }) return false;
         var endpointRoute = endpoint.Props.TryGetValue("route", out var r) ? r?.ToString() : null;
-        var endpointVerb = endpoint.Props.TryGetValue("http_method", out var v) ? v?.ToString() : null;
-        var routeMatches = string.IsNullOrWhiteSpace(route) || (!string.IsNullOrWhiteSpace(endpointRoute) && CanonicalizeRoute(route) == CanonicalizeRoute(endpointRoute));
-        var verbMatches = string.IsNullOrWhiteSpace(verb) || (!string.IsNullOrWhiteSpace(endpointVerb) && string.Equals(verb, endpointVerb, StringComparison.OrdinalIgnoreCase));
-        return routeMatches && verbMatches;
+        var endpointCanonicalRoute = CanonicalizeRoute(endpointRoute ?? string.Empty);
+        if (!string.Equals(endpointCanonicalRoute, canonicalRoute, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var endpointVerb = NormalizeHttpVerb(endpoint.Props.TryGetValue("http_method", out var v) ? v?.ToString() : null);
+        var verbMatches = normalizedVerb is null || endpointVerb is null || string.Equals(normalizedVerb, endpointVerb, StringComparison.Ordinal);
+        return verbMatches;
     }
 
     private static string CanonicalizeRoute(string route)
@@ -154,5 +179,35 @@ internal static class ClientLinker
             trimmed = trimmed.Replace("//", "/", StringComparison.Ordinal);
         }
         return trimmed.ToLowerInvariant();
+    }
+
+    private static string? NormalizeHttpVerb(string? verb)
+    {
+        if (string.IsNullOrWhiteSpace(verb))
+        {
+            return null;
+        }
+
+        var trimmed = verb.Trim();
+        if (trimmed.EndsWith("Async", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[..^5];
+        }
+
+        var upper = trimmed.ToUpperInvariant();
+        foreach (var known in KnownHttpVerbs)
+        {
+            if (upper.Equals(known, StringComparison.Ordinal))
+            {
+                return known;
+            }
+
+            if (upper.StartsWith(known, StringComparison.Ordinal))
+            {
+                return known;
+            }
+        }
+
+        return null;
     }
 }

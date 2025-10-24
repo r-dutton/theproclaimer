@@ -311,7 +311,7 @@ public sealed partial class ProjectAnalyzer
             .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(u => u.Line).First()))
         {
-            if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration))
+            if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType))
             {
                 continue;
             }
@@ -358,6 +358,11 @@ public sealed partial class ProjectAnalyzer
             if (!string.IsNullOrWhiteSpace(usage.Method))
             {
                 props["method"] = usage.Method!;
+            }
+
+            if (!string.IsNullOrWhiteSpace(usage.TargetType))
+            {
+                props["target_type"] = usage.TargetType!;
             }
 
             _edges.Add(new GraphEdge
@@ -443,28 +448,5 @@ public sealed partial class ProjectAnalyzer
                 Evidence = CreateEvidence(sourceFile, cache.Line)
             });
         }
-    }
-
-    private static bool IsGenericPlaceholder(string typeName)
-    {
-        if (string.IsNullOrWhiteSpace(typeName))
-        {
-            return true;
-        }
-
-        if (!typeName.Contains('.', StringComparison.Ordinal))
-        {
-            if (typeName.Length == 1)
-            {
-                return true;
-            }
-
-            if (typeName.All(char.IsUpper))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

@@ -44,7 +44,8 @@ public sealed partial class ProjectAnalyzer
                 Tags = new[] { "app" }
             };
 
-            if (_dtos.Values.FirstOrDefault(dto => dto.Name == validator.TargetType.Split('.').Last()) is { } dtoInfo)
+            var targetSimple = GetSimpleIdentifier(validator.TargetType);
+            if (_dtos.Values.FirstOrDefault(dto => string.Equals(dto.Name, targetSimple, StringComparison.Ordinal)) is { } dtoInfo)
             {
                 var dtoId = StableId.For("dto", dtoInfo.Fqdn, dtoInfo.Assembly, dtoInfo.SymbolId);
                 _edges.Add(new GraphEdge

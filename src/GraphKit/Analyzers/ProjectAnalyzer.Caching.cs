@@ -63,7 +63,7 @@ public sealed partial class ProjectAnalyzer
         var id = StableId.For(nodeType, info.TypeName, "external", info.TypeName);
         if (!_nodes.ContainsKey(id))
         {
-            var name = info.TypeName.Split('.').Last();
+            var name = GetTopLevelSimpleIdentifier(info.TypeName);
             _nodes[id] = new GraphNode
             {
                 Id = id,

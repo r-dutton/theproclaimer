@@ -19,9 +19,54 @@ namespace GraphKit.Outputs
             GraphNode clientNode,
             int indent)
         {
-            var lineText = clientEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var clientDisplay = GetDisplayName(clientNode);
-            AppendIndented(builder, indent, $"uses_client {clientDisplay}{lineText}");
+            string? clientMethodHint = ExtractProp(clientEdge, "method");
+            string? clientVerbHint = ExtractProp(clientEdge, "verb");
+            string? clientRouteHint = ExtractProp(clientEdge, "route");
+            string? clientTargetService = ExtractProp(clientEdge, "target_service");
+            string? clientBaseUrl = ExtractProp(clientEdge, "base_url");
+            string? clientConfigKey = ExtractProp(clientEdge, "configuration_key");
+
+            clientMethodHint = string.IsNullOrWhiteSpace(clientMethodHint) ? null : clientMethodHint.Trim();
+            clientVerbHint = string.IsNullOrWhiteSpace(clientVerbHint) ? null : clientVerbHint.Trim();
+            clientRouteHint = string.IsNullOrWhiteSpace(clientRouteHint) ? null : clientRouteHint.Trim();
+            clientTargetService = string.IsNullOrWhiteSpace(clientTargetService) ? null : clientTargetService.Trim();
+            clientBaseUrl = string.IsNullOrWhiteSpace(clientBaseUrl) ? null : clientBaseUrl.Trim();
+            clientConfigKey = string.IsNullOrWhiteSpace(clientConfigKey) ? null : clientConfigKey.Trim();
+
+            var headerDetails = new List<string>();
+            if (!string.IsNullOrWhiteSpace(clientVerbHint) && !string.IsNullOrWhiteSpace(clientRouteHint))
+            {
+                headerDetails.Add($"{clientVerbHint} {clientRouteHint}");
+            }
+            else if (!string.IsNullOrWhiteSpace(clientRouteHint))
+            {
+                headerDetails.Add(clientRouteHint);
+            }
+
+            if (!string.IsNullOrWhiteSpace(clientMethodHint))
+            {
+                headerDetails.Add($"method={clientMethodHint}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(clientBaseUrl))
+            {
+                headerDetails.Add($"base={clientBaseUrl}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(clientConfigKey))
+            {
+                headerDetails.Add($"config={clientConfigKey}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(clientTargetService))
+            {
+                headerDetails.Add($"target={clientTargetService}");
+            }
+
+            var detailSuffix = headerDetails.Count > 0 ? $" ({string.Join(", ", headerDetails)})" : string.Empty;
+            var baseLabel = $"uses_client {clientDisplay}{detailSuffix}";
+            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, clientEdge.Transform?.Location));
             state.CurrentImpact?.RecordClient(clientDisplay);
 
             static bool IsHttpVerbCandidate(string? value)
@@ -85,13 +130,35 @@ namespace GraphKit.Outputs
                 }
             }
 
-            if (!state.EdgesByFrom.TryGetValue(clientNode.Id, out var clientEdges))
+            var directCallEdges = state.EdgesByFrom.TryGetValue(clientNode.Id, out var clientEdges)
+                ? clientEdges.Where(e => e.Kind == "calls").ToList()
+                : new List<GraphEdge>();
+
+            // Candidate call edges (include direct plus implementation fallbacks)
+            var allCallEdges = new List<GraphEdge>(directCallEdges);
+
+            foreach (var implementation in state.FindCandidateImplementations(clientNode))
             {
-                return;
+                if (!state.EdgesByFrom.TryGetValue(implementation.Id, out var implEdges) || implEdges.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var edge in implEdges)
+                {
+                    if (edge.Kind == "calls")
+                    {
+                        allCallEdges.Add(edge);
+                    }
+                }
             }
 
-            // Candidate call edges
-            var allCallEdges = clientEdges.Where(e => e.Kind == "calls").ToList();
+            if (allCallEdges.Count == 0)
+            {
+                // No observable downstream HTTP calls; rely on metadata fallbacks below.
+                allCallEdges = new List<GraphEdge>();
+            }
+
             // Restrict by allowed methods if provided
             if ((allowedClientMethods is { Count: > 0 }) || (allowedHttpVerbs is { Count: > 0 }))
             {
@@ -135,13 +202,28 @@ namespace GraphKit.Outputs
 
             // Distinct by method + verb + route + target_service to collapse duplicates
             var distinctCalls = allCallEdges
-                .Select(e => new
+                .Select(e =>
                 {
-                    Edge = e,
-                    Method = ExtractProp(e, "client_method") ?? ExtractProp(e, "method") ?? e.Props?.GetValueOrDefault("method")?.ToString() ?? string.Empty,
-                    Verb = ExtractProp(e, "verb") ?? string.Empty,
-                    Route = ExtractProp(e, "route") ?? string.Empty,
-                    TargetService = ExtractProp(e, "target_service") ?? string.Empty
+                    var method = ExtractProp(e, "client_method") ?? ExtractProp(e, "method") ?? e.Props?.GetValueOrDefault("method")?.ToString();
+                    method = string.IsNullOrWhiteSpace(method) ? clientMethodHint : method?.Trim();
+
+                    var verb = ExtractProp(e, "verb");
+                    verb = string.IsNullOrWhiteSpace(verb) ? clientVerbHint : verb?.Trim();
+
+                    var route = ExtractProp(e, "route");
+                    route = string.IsNullOrWhiteSpace(route) ? clientRouteHint : route?.Trim();
+
+                    var targetService = ExtractProp(e, "target_service");
+                    targetService = string.IsNullOrWhiteSpace(targetService) ? clientTargetService : targetService?.Trim();
+
+                    return new
+                    {
+                        Edge = e,
+                        Method = method ?? string.Empty,
+                        Verb = verb ?? string.Empty,
+                        Route = route ?? string.Empty,
+                        TargetService = targetService ?? string.Empty
+                    };
                 })
                 .GroupBy(x => (x.Method, x.Verb, x.Route, x.TargetService))
                 .Select(g => g.First())
@@ -152,7 +234,7 @@ namespace GraphKit.Outputs
                 var callEdge = call.Edge;
                 var baseUrlValue = callEdge.Props is { } baseProps && baseProps.TryGetValue("base_url", out var baseObj)
                     ? baseObj?.ToString()
-                    : null;
+                    : clientBaseUrl;
                 state.CurrentImpact?.RecordRemoteCall(clientDisplay, call.Verb, call.Route, baseUrlValue, call.TargetService);
             }
 
@@ -162,13 +244,13 @@ namespace GraphKit.Outputs
                 AppendIndented(builder, indent + 1, $"calls {clientNode.Name} (distinct_methods={distinctCalls.Count}) [elided]");
                 foreach (var sample in distinctCalls.Take(10))
                 {
-                    var sampleLine = sample.Edge.Transform?.Location?.Line is int sl ? $" [L{sl}]" : string.Empty;
                     var detailParts = new List<string>();
                     if (!string.IsNullOrWhiteSpace(sample.Verb) && !string.IsNullOrWhiteSpace(sample.Route)) detailParts.Add($"{sample.Verb} {sample.Route}");
                     if (!string.IsNullOrWhiteSpace(sample.Method)) detailParts.Add(sample.Method);
                     if (!string.IsNullOrWhiteSpace(sample.TargetService)) detailParts.Add($"target={sample.TargetService}");
                     var detail = detailParts.Count > 0 ? " (" + string.Join(", ", detailParts) + ")" : string.Empty;
-                    AppendIndented(builder, indent + 2, $"calls{detail}{sampleLine}");
+                    var sampleLabel = $"calls{detail}";
+                    AppendIndented(builder, indent + 2, FormatLinkedCode(sampleLabel, sample.Edge.Transform?.Location));
                 }
                 var remaining = distinctCalls.Count - 10;
                 if (remaining > 0)
@@ -185,12 +267,19 @@ namespace GraphKit.Outputs
                 if (!state.NodesById.TryGetValue(callEdge.To, out var targetNode)) continue;
                 var verb = call.Verb;
                 var route = call.Route;
-                var baseUrl = callEdge.Props is { } p3 && p3.TryGetValue("base_url", out var b) ? b?.ToString() : null;
-                var configKey = callEdge.Props is { } p4 && p4.TryGetValue("configuration_key", out var c) ? c?.ToString() : null;
+                var baseUrl = callEdge.Props is { } p3 && p3.TryGetValue("base_url", out var b) ? b?.ToString() : clientBaseUrl;
+                var configKey = callEdge.Props is { } p4 && p4.TryGetValue("configuration_key", out var c) ? c?.ToString() : clientConfigKey;
                 var targetService = call.TargetService;
                 var queryParams = callEdge.Props is { } p5 && p5.TryGetValue("query_params", out var qObj) && qObj is IEnumerable<object> rawParams
                     ? rawParams.Select(x => x?.ToString()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList()
                     : null;
+                if (queryParams is null && clientEdge.Props is { } clientEdgeProps && clientEdgeProps.TryGetValue("query_params", out var clientQueryObj) && clientQueryObj is IEnumerable<object> clientParams)
+                {
+                    queryParams = clientParams
+                        .Select(x => x?.ToString())
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .ToList();
+                }
                 var details = new List<string>();
                 if (!string.IsNullOrWhiteSpace(verb) && !string.IsNullOrWhiteSpace(route)) details.Add($"{verb} {route}");
                 if (!string.IsNullOrWhiteSpace(call.Method)) details.Add($"method={call.Method}");
@@ -199,24 +288,30 @@ namespace GraphKit.Outputs
                 if (!string.IsNullOrWhiteSpace(targetService)) details.Add($"target={targetService}");
                 if (queryParams is { Count: > 0 }) details.Add($"query={string.Join('&', queryParams)}");
                 var detailText = details.Count > 0 ? $" ({string.Join(", ", details)})" : string.Empty;
-                var callLineText = callEdge.Transform?.Location?.Line is int callLine ? $" [L{callLine}]" : string.Empty;
-                AppendIndented(builder, indent + 1, $"calls {targetNode.Name}{detailText}{callLineText}");
+                var callLabel = $"calls {targetNode.Name}{detailText}";
+                AppendIndented(builder, indent + 1, FormatLinkedCode(callLabel, callEdge.Transform?.Location));
                 var expKey = clientNode.Id + "::" + (targetService ?? "*") + "::" + (verb ?? "*") + "::" + (route ?? "*");
                 if (!state.HttpClientExpansionKeys.Add(expKey))
                 {
                     AppendIndented(builder, indent + 2, "remote_endpoint_expansion_suppressed (see previous expansion)");
                     continue;
                 }
-                AppendTargetServiceFlow(builder, state, callEdge, indent + 2);
+                AppendTargetServiceFlow(builder, state, callEdge, indent + 2, string.IsNullOrWhiteSpace(call.TargetService) ? clientTargetService : call.TargetService);
             }
 
             // If we printed only the client usage and either there are no call edges or none include route/verb, annotate gap.
-            var callEdges = clientEdges.Where(e => e.Kind == "calls").ToList();
-            var anyCallEdges = callEdges.Count > 0;
-            var anyCallWithMetadata = callEdges.Any(e => e.Props is { } cp && (cp.ContainsKey("route") || cp.ContainsKey("verb")));
+            var metadataEdges = directCallEdges.Count > 0 ? directCallEdges : allCallEdges;
+            var anyCallEdges = metadataEdges.Count > 0;
+            var anyCallWithMetadata = metadataEdges.Any(e => e.Props is { } cp && (cp.ContainsKey("route") || cp.ContainsKey("verb")));
             if (!anyCallEdges || !anyCallWithMetadata)
             {
-                AppendIndented(builder, indent + 1, "remote_endpoint_metadata_missing (no route/verb captured for client calls)");
+                var metadataParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(clientVerbHint)) metadataParts.Add($"verb={clientVerbHint}");
+                if (!string.IsNullOrWhiteSpace(clientRouteHint)) metadataParts.Add($"route={clientRouteHint}");
+                if (!string.IsNullOrWhiteSpace(clientTargetService)) metadataParts.Add($"target={clientTargetService}");
+                if (!string.IsNullOrWhiteSpace(clientBaseUrl)) metadataParts.Add($"base={clientBaseUrl}");
+                var metadataSuffix = metadataParts.Count > 0 ? $" [{string.Join(", ", metadataParts)}]" : string.Empty;
+                AppendIndented(builder, indent + 1, $"remote_endpoint_metadata_missing (no route/verb captured for client calls){metadataSuffix}");
             }
         }
     }

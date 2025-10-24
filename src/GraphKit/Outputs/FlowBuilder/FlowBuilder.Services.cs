@@ -377,9 +377,8 @@ public static partial class FlowBuilder
         var expansionKey = identity + "::" + (invokedMethod ?? "*");
         var alreadyExpanded = state.ExpandedImplementations.Contains(expansionKey);
 
-        var span = implementation.Span;
-        var spanText = span is null ? string.Empty : $" [L{span.StartLine}-L{span.EndLine}]";
         var methodSuffix = string.IsNullOrWhiteSpace(invokedMethod) ? string.Empty : $".{invokedMethod}";
+        var baseLabel = $"implementation {implementation.Fqdn}{methodSuffix}";
         // Only append heuristic suffix when flagged AND we lack concrete evidence (span or internal file or outgoing edges)
         var hasConcreteEvidence = implementation.Span is not null ||
                                    (!string.IsNullOrWhiteSpace(implementation.FilePath) && !implementation.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase)) ||
@@ -393,7 +392,7 @@ public static partial class FlowBuilder
             }
             else
             {
-                AppendIndented(builder, indent, $"implementation {implementation.Fqdn}{methodSuffix}{spanText}{heuristicSuffix}");
+                AppendIndented(builder, indent, $"{FormatLinkedCode(baseLabel, implementation)}{heuristicSuffix}");
             }
         }
         else if (alreadyExpanded)
@@ -412,19 +411,17 @@ public static partial class FlowBuilder
         // If a specific method was invoked on an interface/service, attempt to expand only edges whose method prop matches invokedMethod
         if (!string.IsNullOrWhiteSpace(invokedMethod) && state.EdgesByFrom.TryGetValue(implementation.Id, out var methodImplEdges))
         {
-            var filtered = methodImplEdges.Where(e => e.Props is { } p && p.TryGetValue("method", out var mv) && string.Equals(mv?.ToString(), invokedMethod, StringComparison.OrdinalIgnoreCase)).ToList();
+            var filtered = methodImplEdges.Where(e => EdgeMatchesMethod(invokedMethod, e)).ToList();
             if (filtered.Count > 0)
             {
                 // Narrow expansion strictly to edges tagged with the invoked method
                 AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
                 return; // Avoid double-expansion via switch below
             }
-            else
-            {
-                // Fallback: no tagged edges for the method; allow a broader expansion (untagged internal edges) so we don't show an empty block
-                AppendGenericServiceNode(builder, state, implementation, null, childIndent, suppressSelfHeuristic: true);
-                return;
-            }
+
+            // Fallback: no tagged edges for the method; allow a broader expansion (untagged internal edges) so we don't show an empty block
+            AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
+            return;
         }
 
         if (!string.IsNullOrWhiteSpace(implementation.Fqdn) &&

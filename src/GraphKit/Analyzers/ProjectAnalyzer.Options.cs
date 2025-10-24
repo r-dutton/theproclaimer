@@ -116,7 +116,7 @@ public sealed partial class ProjectAnalyzer
             return info;
         }
 
-        var simple = optionsType.Split('.').Last();
+        var simple = GetTopLevelSimpleIdentifier(optionsType);
         return _options.Values.FirstOrDefault(o =>
             o.Fqdn.Equals(optionsType, StringComparison.OrdinalIgnoreCase) ||
             o.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));

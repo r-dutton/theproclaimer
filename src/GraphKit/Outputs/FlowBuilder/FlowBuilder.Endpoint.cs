@@ -1,4 +1,4 @@
-﻿using GraphKit.Graph;
+using GraphKit.Graph;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,7 +53,8 @@ namespace GraphKit.Outputs
                 }
                 var statusText = string.IsNullOrWhiteSpace(statusCodes) ? string.Empty : $" status={statusCodes}";
                 var simulateText = endpoint.Props is { } eprops && eprops.TryGetValue("simulation", out var simVal) && simVal is bool sb && sb ? " [simulate]" : string.Empty;
-                var header = $"[web] {method} {route}  ({endpoint.Fqdn})  [L{span?.StartLine}–L{span?.EndLine}]{statusText}{authAnnotation}{simulateText}";
+                var headerLabel = $"[web] {method} {route}  ({endpoint.Fqdn})";
+                var header = $"{FormatLinkedCode(headerLabel, endpoint.FilePath, span?.StartLine, span?.EndLine)}{statusText}{authAnnotation}{simulateText}";
 
                 if (previouslyRendered)
                 {
@@ -97,13 +98,13 @@ namespace GraphKit.Outputs
                     var value = configEdge.Props is { } cprops3 && cprops3.TryGetValue("value", out var valVal)
                         ? valVal?.ToString()
                         : null;
-                    var lineText = configEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var detailParts = new List<string>();
                     if (!string.IsNullOrWhiteSpace(accessor)) detailParts.Add(accessor!);
                     if (!string.IsNullOrWhiteSpace(key)) detailParts.Add(key!);
                     var details = detailParts.Count > 0 ? string.Join(":", detailParts) : configNode.Name;
                     var valueText = string.IsNullOrWhiteSpace(value) ? string.Empty : $" value={value}";
-                    AppendIndented(builder, childIndent, $"uses_configuration {details}{valueText}{lineText}");
+                    var baseLabel = $"uses_configuration {details}";
+                    AppendIndented(builder, childIndent, $"{FormatLinkedCode(baseLabel, configEdge.Transform?.Location)}{valueText}");
                 }
 
                 foreach (var mapEdge in edges.Where(e => e.Kind == "maps_to"))
@@ -136,14 +137,12 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = validatorEdge.Transform?.Location?.Line is int line
-                        ? $" [L{line}]"
-                        : string.Empty;
                     var targetType = validatorEdge.Props is { } props && props.TryGetValue("target_type", out var value)
                         ? value?.ToString()
                         : null;
                     var extra = string.IsNullOrWhiteSpace(targetType) ? string.Empty : $" ({targetType})";
-                    AppendIndented(builder, childIndent, $"uses_validator {validatorNode.Name}{extra}{lineText}");
+                    var baseLabel = $"uses_validator {validatorNode.Name}{extra}";
+                    AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, validatorEdge.Transform?.Location));
                     state.CurrentImpact?.RecordValidator(GetDisplayName(validatorNode));
                 }
 
@@ -163,14 +162,15 @@ namespace GraphKit.Outputs
                     var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
                         ? keyValue?.ToString()
                         : null;
-                    var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
+
                     var methodPart = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
                     var opPart = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
                     var keyPart = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
                     var cacheKey = cacheEdge.From + "::" + cacheEdge.To + "::" + cacheMethod + "::" + operation + "::" + key;
                     state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
                     if (!state.DedupRequests.Add("CACHE::" + cacheKey)) continue;
-                    AppendIndented(builder, childIndent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
+                    var baseLabel = $"uses_cache {cacheNode.Name}{methodPart}";
+                    AppendIndented(builder, childIndent, $"{FormatLinkedCode(baseLabel, cacheEdge.Transform?.Location)}{opPart}{keyPart}");
                     state.CurrentImpact?.RecordCache(GetDisplayName(cacheNode));
                 }
 
@@ -183,8 +183,8 @@ namespace GraphKit.Outputs
 
                     var section = GetNodeProp(optionsNode, "section");
                     var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-                    var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                    AppendIndented(builder, childIndent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+                    var baseLabel = $"uses_options {optionsNode.Name}{sectionText}";
+                    AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, optionsEdge.Transform?.Location));
                     state.CurrentImpact?.RecordOption(GetDisplayName(optionsNode));
                 }
 
@@ -205,8 +205,8 @@ namespace GraphKit.Outputs
                             continue;
                         }
                         var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
-                        var lineText = callEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                        AppendIndented(builder, childIndent, $"calls {targetNode.Name}{serviceMethodText}{lineText}");
+                        var label = $"calls {targetNode.Name}{serviceMethodText}";
+                        AppendIndented(builder, childIndent, FormatLinkedCode(label, callEdge.Transform?.Location));
                         if (targetNode.Type == "app.repository" || targetNode.Type == "repository")
                         {
                             AppendRepositoryFlow(builder, state, targetNode, childIndent + 1);
@@ -232,14 +232,17 @@ namespace GraphKit.Outputs
                     {
                         var callMethod = callEdge.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
                         var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
-                        var lineText = callEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                        AppendIndented(builder, childIndent, $"calls {targetNode.Name}{serviceMethodText}{lineText}");
+                        var label = $"calls {targetNode.Name}{serviceMethodText}";
+                        AppendIndented(builder, childIndent, FormatLinkedCode(label, callEdge.Transform?.Location));
                     }
                     else
                     {
                         var methodsPart = $" (methods: {string.Join(",", uniqueMethods)})";
-                        var lineTextGroup = firstLine.HasValue ? $" [L{firstLine}]" : string.Empty;
-                        AppendIndented(builder, childIndent, $"calls {targetNode.Name}{methodsPart}{lineTextGroup}");
+                        var label = $"calls {targetNode.Name}{methodsPart}";
+                        var linked = firstLine.HasValue
+                            ? FormatLinkedCode(label, callEdge.Transform?.Location?.File, firstLine, null)
+                            : label;
+                        AppendIndented(builder, childIndent, linked);
                     }
                     AppendRepositoryFlow(builder, state, targetNode, childIndent + 1);
                 }
@@ -251,9 +254,9 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = dataEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var label = ExtractOperationLabel(dataEdge);
-                    AppendIndented(builder, childIndent, $"{label} {entityNode.Name}{lineText}");
+                    var baseLabel = $"{label} {entityNode.Name}";
+                    AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, dataEdge.Transform?.Location));
                     state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
 
                     if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
@@ -275,7 +278,6 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = serviceEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var lifetime = serviceEdge.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
                         ? lifetimeValue?.ToString()
                         : null;
@@ -283,7 +285,7 @@ namespace GraphKit.Outputs
                     var serviceMethodName = serviceEdge.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
                         ? methodValue?.ToString()
                         : null;
-                    var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
+                    var location = serviceEdge.Transform?.Location;
                     // Attempt collapse: single concrete implementation for interface service
                     GraphNode? collapseImpl = null;
                     bool collapse = false;
@@ -311,7 +313,8 @@ namespace GraphKit.Outputs
                             if (!alreadyPrinted)
                             {
                                 var repoMethodSuffix = string.IsNullOrWhiteSpace(serviceMethodName) ? string.Empty : $".{serviceMethodName}";
-                                AppendIndented(builder, childIndent, $"calls {repoImpl.Name}{repoMethodSuffix}{lineText}");
+                                var repoLabel = $"calls {repoImpl.Name}{repoMethodSuffix}";
+                                AppendIndented(builder, childIndent, FormatLinkedCode(repoLabel, location));
                             }
                             AppendRepositoryFlow(builder, state, repoImpl, childIndent + 1);
                             continue; // Skip generic service expansion path
@@ -325,12 +328,17 @@ namespace GraphKit.Outputs
                         printedName = printedName.TrimEnd('>');
                     }
                     state.CurrentImpact?.RecordServiceUsage(printedName ?? GetDisplayName(serviceNode));
-                    AppendIndented(builder, childIndent, $"uses_service {printedName}{suffix}{serviceLineText}");
-
+                    var baseLabel = $"uses_service {printedName}{suffix}";
                     var nextIndent = childIndent + 1;
-                    if (!string.IsNullOrWhiteSpace(serviceMethodName))
+                    if (string.IsNullOrWhiteSpace(serviceMethodName))
                     {
-                        AppendIndented(builder, childIndent + 1, $"method {serviceMethodName}{lineText}");
+                        AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, location));
+                    }
+                    else
+                    {
+                        AppendIndented(builder, childIndent, baseLabel);
+                        var methodLabel = $"method {serviceMethodName}";
+                        AppendIndented(builder, childIndent + 1, FormatLinkedCode(methodLabel, location));
                         nextIndent = childIndent + 2;
                     }
                     if (collapse && collapseImpl != null)
@@ -351,10 +359,10 @@ namespace GraphKit.Outputs
                     {
                         continue;
                     }
-                    var lineText = locatedEdge.Transform?.Location?.Line is int l ? $" [L{l}]" : string.Empty;
                     var locatorMethod = locatedEdge.Props is { } lprops && lprops.TryGetValue("method", out var mv) ? mv?.ToString() : null;
                     var methodText = string.IsNullOrWhiteSpace(locatorMethod) ? string.Empty : $".{locatorMethod}";
-                    AppendIndented(builder, childIndent, $"service_located {locatedNode.Name}{methodText}{lineText}");
+                    var baseLabel = $"service_located {locatedNode.Name}{methodText}";
+                    AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, locatedEdge.Transform?.Location));
                 }
 
                 foreach (var storageEdge in edges.Where(e => e.Kind == "uses_storage"))
@@ -364,12 +372,12 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = storageEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var methodName = storageEdge.Props is { } props && props.TryGetValue("method", out var value)
                         ? value?.ToString()
                         : null;
                     var methodSuffix = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{methodName}";
-                    AppendIndented(builder, childIndent, $"uses_storage {storageNode.Name}{methodSuffix}{lineText}");
+                    var baseLabel = $"uses_storage {storageNode.Name}{methodSuffix}";
+                    AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, storageEdge.Transform?.Location));
                     state.CurrentImpact?.RecordStorage(GetDisplayName(storageNode));
                 }
 
@@ -380,12 +388,12 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = logEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var level = logEdge.Props is { } props && props.TryGetValue("level", out var levelValue)
                         ? levelValue?.ToString()
                         : null;
                     var levelText = string.IsNullOrWhiteSpace(level) ? string.Empty : $" [{level}]";
-                    AppendIndented(builder, childIndent, $"logs {loggerNode.Name}{levelText}{lineText}");
+                    var baseLabel = $"logs {loggerNode.Name}";
+                    AppendIndented(builder, childIndent, $"{FormatLinkedCode(baseLabel, logEdge.Transform?.Location)}{levelText}");
                 }
 
                 foreach (var validationEdge in edges.Where(e => e.Kind == "validation"))
@@ -395,12 +403,12 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = validationEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var validationMethod = validationEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
                         ? methodValue?.ToString()
                         : null;
                     var methodText = string.IsNullOrWhiteSpace(validationMethod) ? string.Empty : $".{validationMethod}";
-                    AppendIndented(builder, childIndent, $"validation {guardNode.Name}{methodText}{lineText}");
+                    var baseLabel = $"validation {guardNode.Name}{methodText}";
+                    AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, validationEdge.Transform?.Location));
                 }
 
                 foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
@@ -412,7 +420,6 @@ namespace GraphKit.Outputs
                     state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
                     if (!state.DedupRequests.Add(requestKey)) continue;
 
-                    var lineText = requestEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var responseType = requestEdge.Props is { } rprops && rprops.TryGetValue("response_type", out var rt) ? rt?.ToString() : null;
                     var handlerName = string.Empty;
                     if (state.EdgesByFrom.TryGetValue(requestNode.Id, out var downstream) && downstream.FirstOrDefault(e => e.Kind == "handled_by") is { } handled && state.NodesById.TryGetValue(handled.To, out var handlerNode))
@@ -420,10 +427,11 @@ namespace GraphKit.Outputs
                         handlerName = handlerNode.Name;
                     }
                     var handlerPart = string.IsNullOrWhiteSpace(handlerName) ? string.Empty : $" -> {handlerName}";
-                    var responsePart = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" : {responseType}";
+                    var responsePart = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" ({responseType})";
                     var synthetic = string.Equals(requestEdge.Source, "synthetic", StringComparison.OrdinalIgnoreCase) && requestEdge.Transform?.Type == "requestprocessor.dispatch";
                     var prefix = synthetic ? "dispatches" : "sends_request";
-                    AppendIndented(builder, childIndent, $"{prefix} {requestNode.Name}{handlerPart}{responsePart}{lineText}");
+                    var baseLabel = $"{prefix} {requestNode.Name}";
+                    AppendIndented(builder, childIndent, $"{FormatLinkedCode(baseLabel, requestEdge.Transform?.Location)}{handlerPart}{responsePart}");
                     state.CurrentImpact?.RecordRequest(GetDisplayName(requestNode));
                     if (!string.IsNullOrWhiteSpace(handlerName))
                     {
@@ -447,10 +455,8 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = notificationEdge.Transform?.Location?.Line is int line
-                        ? $" [L{line}]"
-                        : string.Empty;
-                    AppendIndented(builder, childIndent, $"publishes_notification {notificationNode.Name}{lineText}");
+                    var baseLabel = $"publishes_notification {notificationNode.Name}";
+                    AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, notificationEdge.Transform?.Location));
                     state.CurrentImpact?.RecordNotification(GetDisplayName(notificationNode));
                     AppendNotificationFlow(builder, state, notificationNode, childIndent + 1);
                 }

@@ -38,6 +38,17 @@ public sealed partial class ProjectAnalyzer
                     {
                         serviceType = baseTypeName;
                     }
+                    else if (!serviceType.Contains('<', StringComparison.Ordinal))
+                    {
+                        serviceType = baseTypeName;
+                    }
+
+                    var entityType = SplitGenericArguments(baseTypeName).FirstOrDefault();
+                    if (!string.IsNullOrWhiteSpace(entityType))
+                    {
+                        var qualifiedEntity = QualifyTypeName(entityType);
+                        repository.ControlledEntities.Add(!string.IsNullOrWhiteSpace(qualifiedEntity) ? qualifiedEntity : entityType);
+                    }
 
                     RegisterServiceRegistration(
                         serviceType,

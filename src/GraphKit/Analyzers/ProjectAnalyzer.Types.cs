@@ -29,7 +29,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
 
-    private sealed record ControllerClientInvocation(string ClientType, string HttpMethod, string? RelativePath, int Line);
+    private sealed record ControllerClientInvocation(string ClientType, string? HttpMethod, string? RelativePath, int Line, string? ClientMethod = null, string? TargetService = null);
 
     private sealed record ControllerMappingInvocation(string? SourceType, string? DestinationType, string? AssignedVariable, int Line);
 
@@ -75,12 +75,38 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerRepositoryCall> RepositoryCalls { get; } = new();
         public List<HandlerMapperCall> MapperCalls { get; } = new();
         public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
+        public List<BaseServiceClientInvocation> BaseServiceClientInvocations { get; } = new();
+        public Dictionary<string, List<ServiceWrapperInvocation>> WrapperInvocations { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, List<ClientInvocationTemplate>> WrapperClientTemplates { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
         public List<HandlerValidationCall> ValidationCalls { get; } = new();
         public List<HandlerLogInvocation> LogInvocations { get; } = new();
     }
+
+    private sealed record BaseServiceClientInvocation(
+        string BaseServiceType,
+        string InvokedMethod,
+        string HttpMethod,
+        string? Route,
+        IReadOnlyCollection<string>? QueryParameters,
+        int Line,
+        string DeclaringMethod);
+
+    private sealed record ServiceWrapperInvocation(
+        string MethodName,
+        string HttpMethod,
+        string Route,
+        IReadOnlyCollection<string>? QueryParameters,
+        int Line);
+
+    private sealed record ClientInvocationTemplate(
+        string ClientType,
+        string? HttpMethod,
+        string? ClientMethod,
+        string? TargetService,
+        IReadOnlyCollection<string>? QueryParameters);
 
     private sealed record PipelineBehaviorInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType)
     {
@@ -104,7 +130,15 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
 
-    private sealed record HandlerClientInvocation(string ClientType, string HttpMethod, string? RelativePath, int Line);
+    private sealed record HandlerClientInvocation(
+        string ClientType,
+        string HttpMethod,
+        string? RelativePath,
+        int Line,
+        string? ClientMethod = null,
+        string? TargetService = null,
+        IReadOnlyCollection<string>? QueryParameters = null,
+        string? OwnerMethod = null);
 
     private sealed record HandlerMapperCall(string? SourceType, string? DestinationType, int Line);
 
@@ -177,6 +211,7 @@ public sealed partial class ProjectAnalyzer
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
         public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
+        public HashSet<string> ControlledEntities { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed record RepositoryDbAccess(string Member, string Method, int Line, string Operation);
@@ -194,7 +229,8 @@ public sealed partial class ProjectAnalyzer
         string? InvocationMethod = null,
         string? RequestType = null,
         string? ResponseType = null,
-        string? DispatchKind = null);
+        string? DispatchKind = null,
+        string? TargetType = null);
 
     private sealed record FieldDescriptor(string Type, int Line);
 

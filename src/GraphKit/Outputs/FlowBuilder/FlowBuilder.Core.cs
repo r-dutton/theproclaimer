@@ -62,8 +62,6 @@ public static partial class FlowBuilder
 
         // Build outgoing adjacency without LINQ GroupBy to reduce transient allocations
         var edgesByFrom = new Dictionary<string, List<GraphEdge>>(StringComparer.Ordinal);
-        // Also build incoming adjacency for inbound reachability
-        var edgesByTo = new Dictionary<string, List<GraphEdge>>(StringComparer.Ordinal);
         foreach (var e in document.Edges)
         {
             if (!edgesByFrom.TryGetValue(e.From, out var listFrom))
@@ -72,13 +70,6 @@ public static partial class FlowBuilder
                 edgesByFrom[e.From] = listFrom;
             }
             listFrom.Add(e);
-
-            if (!edgesByTo.TryGetValue(e.To, out var listTo))
-            {
-                listTo = new List<GraphEdge>(2);
-                edgesByTo[e.To] = listTo;
-            }
-            listTo.Add(e);
         }
 
         // Retain name/fqdn lookups (needed for implementation heuristics)
@@ -118,37 +109,89 @@ public static partial class FlowBuilder
 
         var mapLookup = BuildMapLookup(document);
 
-        var controllers = document.Nodes
+        var actionNodes = document.Nodes
             .Where(n => n.Type == "endpoint.controller" && controllerPredicate(n))
             .OrderBy(n => n.Fqdn, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (controllers.Count == 0)
+        if (actionNodes.Count == 0)
         {
             return string.Empty;
         }
 
         var builder = new StringBuilder();
-        foreach (var controller in controllers)
+        var grouped = actionNodes
+            .GroupBy(action => ResolveControllerKey(action))
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in grouped)
         {
-            // Reachability (outbound from controller)
-            var outward = CollectReachable(controller.Id, edgesByFrom);
-            // Inbound (who references controller) – may surface upstream context if needed later
-            var inbound = CollectInbound(controller.Id, edgesByTo);
-            // Union for allowed expansion set
-            var allowed = new HashSet<string>(outward.Count + inbound.Count, StringComparer.Ordinal);
-            foreach (var id in outward) allowed.Add(id);
-            foreach (var id in inbound) allowed.Add(id);
+            var actions = group
+                .OrderBy(a => a.Fqdn, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (actions.Count == 0)
+            {
+                continue;
+            }
+
+            var allowed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var action in actions)
+            {
+                var outward = CollectReachable(action.Id, edgesByFrom);
+                foreach (var id in outward)
+                {
+                    allowed.Add(id);
+                }
+            }
 
             var state = new FlowRenderState(document, nodesById, edgesByFrom, nodesByFqdn, nodesByName, mapLookup, workspace, maxDepth)
             {
                 AllowedIds = allowed
             };
-            AppendControllerFlow(builder, state, controller);
+            var displayName = ResolveControllerDisplayName(actions[0], group.Key);
+            AppendControllerFlow(builder, state, displayName, actions);
             builder.AppendLine();
         }
 
         return builder.ToString();
+    }
+
+    private static string ResolveControllerKey(GraphNode action)
+    {
+        var fromProps = GetNodeProp(action, "controller_type");
+        if (!string.IsNullOrWhiteSpace(fromProps))
+        {
+            return fromProps!;
+        }
+
+        var fqdn = action.Fqdn;
+        if (!string.IsNullOrWhiteSpace(fqdn))
+        {
+            var lastDot = fqdn!.LastIndexOf('.');
+            if (lastDot > 0)
+            {
+                return fqdn[..lastDot];
+            }
+        }
+
+        return action.Name ?? action.Id;
+    }
+
+    private static string ResolveControllerDisplayName(GraphNode action, string controllerKey)
+    {
+        var fromProps = GetNodeProp(action, "controller_name");
+        if (!string.IsNullOrWhiteSpace(fromProps))
+        {
+            return fromProps!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(controllerKey))
+        {
+            return controllerKey;
+        }
+
+        return action.Name ?? action.Id;
     }
     public static bool IsMutationVerb(string verb)
         => !string.Equals(verb, "GET", StringComparison.OrdinalIgnoreCase)
@@ -308,13 +351,27 @@ public static partial class FlowBuilder
         return false;
     }
 
-    public static void AppendControllerFlow(StringBuilder builder, FlowRenderState state, GraphNode controller)
+    public static void AppendControllerFlow(StringBuilder builder, FlowRenderState state, string controllerName, IReadOnlyList<GraphNode> actions)
     {
-        var impact = new ImpactAccumulator(GetAssemblyRoot(controller.Assembly));
+        if (!string.IsNullOrWhiteSpace(controllerName))
+        {
+            builder.AppendLine($"## {controllerName}");
+            builder.AppendLine();
+        }
+
+    var primaryAction = actions.Count > 0 ? actions[0] : null;
+    var impact = new ImpactAccumulator(GetAssemblyRoot(primaryAction?.Assembly ?? string.Empty));
         state.PushImpact(impact);
         try
         {
-            AppendEndpointFlow(builder, state, controller, indent: 0);
+            for (var i = 0; i < actions.Count; i++)
+            {
+                AppendEndpointFlow(builder, state, actions[i], indent: 0);
+                if (i < actions.Count - 1)
+                {
+                    builder.AppendLine();
+                }
+            }
             AppendImpactSummary(builder, impact);
         }
         finally
@@ -360,9 +417,9 @@ public static partial class FlowBuilder
                 continue;
             }
 
-            var lineText = write.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var operation = ExtractOperationLabel(write);
-            AppendIndented(builder, indent, $"{operation} {entityNode.Name}{lineText}");
+            var baseLabel = $"{operation} {entityNode.Name}";
+            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, write.Transform?.Location));
             state.CurrentImpact?.RecordRepositoryOperation(GetDisplayName(repository), write.Kind, GetDisplayName(entityNode));
             if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
             {
@@ -386,14 +443,14 @@ public static partial class FlowBuilder
             var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
                 ? keyValue?.ToString()
                 : null;
-            var lineText = cacheEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var methodPart = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
             var opPart = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
             var keyPart = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
             var cacheKey = cacheEdge.From + "::" + cacheEdge.To + "::" + cacheMethod + "::" + operation + "::" + key;
             state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
             if (!state.DedupRequests.Add("CACHE::" + cacheKey)) continue;
-            AppendIndented(builder, indent, $"uses_cache {cacheNode.Name}{methodPart}{opPart}{keyPart}{lineText}");
+            var baseLabel = $"uses_cache {cacheNode.Name}{methodPart}";
+            AppendIndented(builder, indent, $"{FormatLinkedCode(baseLabel, cacheEdge.Transform?.Location)}{opPart}{keyPart}");
             state.CurrentImpact?.RecordCache(GetDisplayName(cacheNode));
         }
 
@@ -406,8 +463,8 @@ public static partial class FlowBuilder
 
             var section = GetNodeProp(optionsNode, "section");
             var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-            var lineText = optionsEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"uses_options {optionsNode.Name}{sectionText}{lineText}");
+            var baseLabel = $"uses_options {optionsNode.Name}{sectionText}";
+            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, optionsEdge.Transform?.Location));
             state.CurrentImpact?.RecordOption(GetDisplayName(optionsNode));
         }
     }
@@ -454,8 +511,8 @@ public static partial class FlowBuilder
             var transform = tableEdge.Kind == "reads_from"
                 ? "reads_from"
                 : ExtractOperationLabel(tableEdge);
-            var lineText = tableEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-            AppendIndented(builder, indent, $"{transform} {tableNode.Name}{lineText}");
+            var baseLabel = $"{transform} {tableNode.Name}";
+            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, tableEdge.Transform?.Location));
         }
 
         foreach (var mapEdge in edges.Where(e => e.Kind == "maps_to"))
@@ -475,8 +532,8 @@ public static partial class FlowBuilder
             return;
         }
 
-        var lineText = edge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-        AppendIndented(builder, indent, $"converts_to {destination.Name}{lineText}");
+        var baseLabel = $"converts_to {destination.Name}";
+        AppendIndented(builder, indent, FormatLinkedCode(baseLabel, edge.Transform?.Location));
         AppendAutomapperRegistrations(builder, state, edge, indent + 1);
     }
 
@@ -541,7 +598,8 @@ public static partial class FlowBuilder
             var mapLabel = mapNode.Props is { } props && props.TryGetValue("map", out var mapValue)
                 ? mapValue?.ToString()
                 : mapNode.Name;
-            AppendIndented(builder, indent, $"automapper.registration {profileName} ({mapLabel}) [L{mapNode.Span?.StartLine}]");
+            var baseLabel = $"automapper.registration {profileName} ({mapLabel})";
+            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, mapNode));
         }
 
         if (elided.Count > 0)
@@ -613,7 +671,7 @@ public static partial class FlowBuilder
         return props.TryGetValue(key, out var value) ? value?.ToString() : null;
     }
 
-    public static void AppendTargetServiceFlow(StringBuilder builder, FlowRenderState state, GraphEdge callEdge, int indent)
+    public static void AppendTargetServiceFlow(StringBuilder builder, FlowRenderState state, GraphEdge callEdge, int indent, string? fallbackTargetService = null)
     {
         if (state.Workspace is null)
         {
@@ -632,6 +690,11 @@ public static partial class FlowBuilder
 
         // If target_service is present we use existing assembly mapping logic; otherwise attempt global match.
         var serviceName = props.TryGetValue("target_service", out var serviceValue) ? serviceValue?.ToString() : null;
+
+        if (string.IsNullOrWhiteSpace(serviceName) && !string.IsNullOrWhiteSpace(fallbackTargetService))
+        {
+            serviceName = fallbackTargetService;
+        }
 
         var host = ExtractHost(baseUrl, route);
         if (string.IsNullOrWhiteSpace(serviceName) && state.Workspace.TryResolveServiceByHost(host, out var hostService))
@@ -755,6 +818,15 @@ public static partial class FlowBuilder
 
             AppendIndented(builder, indent + 1, $"unmatched_endpoint route={route} verb={verb}");
             return;
+        }
+
+        if (state.AllowedIds is { } allowed)
+        {
+            foreach (var endpoint in matched)
+            {
+                // Remote targets can sit outside the controller's initial reachability set.
+                allowed.Add(endpoint.Id);
+            }
         }
 
         foreach (var endpoint in matched)
@@ -1077,10 +1149,10 @@ public static partial class FlowBuilder
 
         foreach (var d in dispatches)
         {
-            var lineText = d.Edge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var responseType = d.Edge.Props is { } props && props.TryGetValue("response_type", out var rt) ? rt?.ToString() : null;
             var responsePart = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" : {responseType}";
-            AppendIndented(builder, indent, $"dispatches {d.Node.Name}{responsePart}{lineText}");
+            var baseLabel = $"dispatches {d.Node.Name}{responsePart}";
+            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, d.Edge.Transform?.Location));
 
             // Expand pipeline behaviors (processed_by edges) under the request
             if (state.EdgesByFrom.TryGetValue(d.Node.Id, out var requestEdges))

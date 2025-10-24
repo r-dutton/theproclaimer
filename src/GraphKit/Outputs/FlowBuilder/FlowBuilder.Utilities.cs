@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 
@@ -11,7 +12,130 @@ namespace GraphKit.Outputs
     public static partial class Utilities
     {
         public static string? GetNodeProp(GraphNode node, string key)
-            => node.Props is { } props && props.TryGetValue(key, out var value) ? value?.ToString() : null;
+            => node.Props is { } props && props.TryGetValue(key, out var value) ? ToStringValue(value) : null;
+
+        private static string? BuildCodeLinkTarget(string? filePath, int? startLine = null, int? endLine = null)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                return null;
+            }
+
+            if (filePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var normalized = filePath.Replace('\\', '/');
+            if (!normalized.StartsWith("./") && !normalized.StartsWith("../"))
+            {
+                normalized = "./" + normalized.TrimStart('/');
+            }
+
+            string anchor = string.Empty;
+            if (startLine.HasValue)
+            {
+                anchor = endLine.HasValue && endLine.Value > startLine.Value
+                    ? $"#L{startLine}-L{endLine}"
+                    : $"#L{startLine}";
+            }
+
+            return $"{normalized}{anchor}";
+        }
+
+        public static string FormatCodeLink(string? filePath, int? startLine = null, int? endLine = null)
+        {
+            var target = BuildCodeLinkTarget(filePath, startLine, endLine);
+            return target is null ? string.Empty : $" [View Code]({target})";
+        }
+
+        public static string FormatCodeLink(GraphLocation? location)
+            => location is null ? string.Empty : FormatCodeLink(location.File, location.Line);
+
+        public static string FormatCodeLink(GraphNode node)
+        {
+            if (node is null)
+            {
+                return string.Empty;
+            }
+
+            var span = node.Span;
+            if (span is null)
+            {
+                return FormatCodeLink(node.FilePath);
+            }
+
+            var endLine = span.EndLine > span.StartLine ? span.EndLine : (int?)null;
+            return FormatCodeLink(node.FilePath, span.StartLine, endLine);
+        }
+
+        public static string FormatLinkedCode(string label, string? filePath, int? startLine = null, int? endLine = null)
+        {
+            var trimmedLabel = string.IsNullOrWhiteSpace(label) ? "View Code" : label;
+            var target = BuildCodeLinkTarget(filePath, startLine, endLine);
+            return target is null ? trimmedLabel : $"[{trimmedLabel}]({target})";
+        }
+
+        public static string FormatLinkedCode(string label, GraphLocation? location)
+            => location is null ? (string.IsNullOrWhiteSpace(label) ? string.Empty : label) : FormatLinkedCode(label, location.File, location.Line);
+
+        public static string FormatLinkedCode(string label, GraphNode node)
+        {
+            if (node is null)
+            {
+                return string.IsNullOrWhiteSpace(label) ? string.Empty : label;
+            }
+
+            var span = node.Span;
+            if (span is null)
+            {
+                return FormatLinkedCode(label, node.FilePath);
+            }
+
+            var endLine = span.EndLine > span.StartLine ? span.EndLine : (int?)null;
+            return FormatLinkedCode(label, node.FilePath, span.StartLine, endLine);
+        }
+
+        private static string? ToStringValue(object? value)
+        {
+            switch (value)
+            {
+                case null:
+                    return null;
+                case string text:
+                    return text;
+                case JsonElement element:
+                    if (element.ValueKind == JsonValueKind.Null)
+                    {
+                        return null;
+                    }
+
+                    if (element.ValueKind == JsonValueKind.String)
+                    {
+                        return element.GetString();
+                    }
+
+                    return element.ToString();
+                default:
+                    return value.ToString();
+            }
+        }
+
+        private static string NormalizeMethodName(string value)
+        {
+            var trimmed = value.Trim();
+            if (trimmed.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            if (trimmed.EndsWith("Async", StringComparison.OrdinalIgnoreCase) && trimmed.Length > 5)
+            {
+                trimmed = trimmed[..^5];
+            }
+
+            return trimmed;
+        }
 
         public static string GetSimpleType(string? type)
         {
@@ -156,13 +280,13 @@ namespace GraphKit.Outputs
         public static void AppendIndented(StringBuilder builder, int indent, string text)
         {
             builder.Append(' ', indent * 2);
-            builder.AppendLine($"└─ {text}");
+            builder.AppendLine($"- {text}");
         }
 
         public static string? GetCallMethod(GraphEdge edge)
         {
             return edge.Props is { } props && props.TryGetValue("method", out var methodValue)
-                ? methodValue?.ToString()
+                ? ToStringValue(methodValue)
                 : null;
         }
 
@@ -208,14 +332,24 @@ namespace GraphKit.Outputs
                 return false;
             }
 
-            if (props.TryGetValue("method", out var methodValue) && methodValue is string methodName && !string.IsNullOrWhiteSpace(methodName))
+            var normalizedInvoked = NormalizeMethodName(invokedMethod);
+
+            if (props.TryGetValue("method", out var methodValue))
             {
-                return string.Equals(methodName.Trim(), invokedMethod.Trim(), StringComparison.OrdinalIgnoreCase);
+                var methodName = ToStringValue(methodValue);
+                if (!string.IsNullOrWhiteSpace(methodName) && string.Equals(NormalizeMethodName(methodName), normalizedInvoked, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
 
-            if (props.TryGetValue("client_method", out var clientMethodValue) && clientMethodValue is string clientMethod && !string.IsNullOrWhiteSpace(clientMethod))
+            if (props.TryGetValue("client_method", out var clientMethodValue))
             {
-                return string.Equals(clientMethod.Trim(), invokedMethod.Trim(), StringComparison.OrdinalIgnoreCase);
+                var clientMethod = ToStringValue(clientMethodValue);
+                if (!string.IsNullOrWhiteSpace(clientMethod) && string.Equals(NormalizeMethodName(clientMethod), normalizedInvoked, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
 
             return false;
@@ -340,7 +474,8 @@ namespace GraphKit.Outputs
                 var handlerKey = $"{handlerNode.Id}:{span?.StartLine}:{span?.EndLine}";
                 state.DedupHandlers ??= new HashSet<string>(StringComparer.Ordinal);
                 if (!state.DedupHandlers.Add(handlerKey)) continue;
-                AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
+                var label = $"handled_by {handlerNode.Fqdn}.Handle";
+                AppendIndented(builder, indent, FormatLinkedCode(label, handlerNode));
                 state.CurrentImpact?.RecordHandler(GetDisplayName(handlerNode));
                 FlowBuilder.AppendHandlerFlow(builder, state, handlerNode, indent + 1);
             }
@@ -417,8 +552,8 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var span = handlerNode.Span;
-                    AppendIndented(builder, indent, $"handled_by {handlerNode.Fqdn}.Handle [L{span?.StartLine}–L{span?.EndLine}]");
+                    var label = $"handled_by {handlerNode.Fqdn}.Handle";
+                    AppendIndented(builder, indent, FormatLinkedCode(label, handlerNode));
                     state.CurrentImpact?.RecordHandler(GetDisplayName(handlerNode));
                     AppendNotificationHandlerFlow(builder, state, handlerNode, indent + 1);
                 }
@@ -453,8 +588,8 @@ namespace GraphKit.Outputs
                     continue;
                 }
 
-                var lineText = produced.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                AppendIndented(builder, indent, $"produces_event {contract.Name}{lineText}");
+                var label = $"produces_event {contract.Name}";
+                AppendIndented(builder, indent, FormatLinkedCode(label, produced.Transform?.Location));
             }
         }
 
@@ -476,7 +611,6 @@ namespace GraphKit.Outputs
                 return; // not in reachability scope
             }
 
-            var lineText = edge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
             var variable = edge.Props is { } props && props.TryGetValue("variable", out var value)
                 ? value?.ToString()
                 : null;
@@ -487,7 +621,8 @@ namespace GraphKit.Outputs
             }
             var variableText = string.IsNullOrWhiteSpace(variable) ? string.Empty : $" (var {variable})";
             var annotationText = string.IsNullOrWhiteSpace(annotation) ? string.Empty : $" [{annotation}]";
-            AppendIndented(builder, indent, $"{label} {destination.Name}{variableText}{lineText}{annotationText}");
+            var baseLabel = $"{label} {destination.Name}{variableText}";
+            AppendIndented(builder, indent, $"{FormatLinkedCode(baseLabel, edge.Transform?.Location)}{annotationText}");
             state.CurrentImpact?.RecordMapping(GetDisplayName(destination));
 
             if (includeAutomapper)
@@ -548,8 +683,8 @@ namespace GraphKit.Outputs
                     {
                         var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
                         var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
-                        var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                        AppendIndented(builder, indent, $"calls {target.Name}{serviceMethodText}{lineText}");
+                        var label = $"calls {target.Name}{serviceMethodText}";
+                        AppendIndented(builder, indent, FormatLinkedCode(label, call.Transform?.Location));
                         continue;
                     }
                     var methods = new List<string>();
@@ -570,14 +705,17 @@ namespace GraphKit.Outputs
                     {
                         var callMethod = call.Props is { } props && props.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null;
                         var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
-                        var lineText = call.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                        AppendIndented(builder, indent, $"calls {target.Name}{serviceMethodText}{lineText}");
+                        var label = $"calls {target.Name}{serviceMethodText}";
+                        AppendIndented(builder, indent, FormatLinkedCode(label, call.Transform?.Location));
                     }
                     else
                     {
                         var methodsPart = $" (methods: {string.Join(",", uniqueMethods)})";
-                        var lineTextGroup = firstLine.HasValue ? $" [L{firstLine}]" : string.Empty;
-                        AppendIndented(builder, indent, $"calls {target.Name}{methodsPart}{lineTextGroup}");
+                        var label = $"calls {target.Name}{methodsPart}";
+                        var linked = firstLine.HasValue
+                            ? FormatLinkedCode(label, call.Transform?.Location?.File, firstLine, null)
+                            : label;
+                        AppendIndented(builder, indent, linked);
                     }
                     FlowBuilder.AppendRepositoryFlow(builder, state, target, indent + 1);
                 }
@@ -599,7 +737,6 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = service.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
                     var lifetime = service.Props is { } props && props.TryGetValue("lifetime", out var lifetimeValue)
                         ? lifetimeValue?.ToString()
                         : null;
@@ -607,13 +744,17 @@ namespace GraphKit.Outputs
                     var serviceMethodName = service.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
                         ? methodValue?.ToString()
                         : null;
-                    var serviceLineText = string.IsNullOrWhiteSpace(serviceMethodName) ? lineText : string.Empty;
-                    AppendIndented(builder, indent, $"uses_service {serviceNode.Name}{suffix}{serviceLineText}");
-
+                    var baseLabel = $"uses_service {serviceNode.Name}{suffix}";
                     var nextIndent = indent + 1;
-                    if (!string.IsNullOrWhiteSpace(serviceMethodName))
+                    if (string.IsNullOrWhiteSpace(serviceMethodName))
                     {
-                        AppendIndented(builder, indent + 1, $"method {serviceMethodName}{lineText}");
+                        AppendIndented(builder, indent, FormatLinkedCode(baseLabel, service.Transform?.Location));
+                    }
+                    else
+                    {
+                        AppendIndented(builder, indent, baseLabel);
+                        var methodLabel = $"method {serviceMethodName}";
+                        AppendIndented(builder, indent + 1, FormatLinkedCode(methodLabel, service.Transform?.Location));
                         nextIndent = indent + 2;
                     }
 
@@ -627,8 +768,8 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = requestEdge.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                    AppendIndented(builder, indent, $"sends_request {requestNode.Name}{lineText}");
+                    var label = $"sends_request {requestNode.Name}";
+                    AppendIndented(builder, indent, FormatLinkedCode(label, requestEdge.Transform?.Location));
                     AppendCommandFlow(builder, state, requestNode, indent + 1);
                 }
 
@@ -639,8 +780,8 @@ namespace GraphKit.Outputs
                         continue;
                     }
 
-                    var lineText = publish.Transform?.Location?.Line is int line ? $" [L{line}]" : string.Empty;
-                    AppendIndented(builder, indent, $"publishes_notification {notificationNode.Name}{lineText}");
+                    var label = $"publishes_notification {notificationNode.Name}";
+                    AppendIndented(builder, indent, FormatLinkedCode(label, publish.Transform?.Location));
                     AppendNotificationFlow(builder, state, notificationNode, indent + 1);
                 }
             }
