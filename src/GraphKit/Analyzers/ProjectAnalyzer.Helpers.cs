@@ -41,7 +41,7 @@ public sealed partial class ProjectAnalyzer
 
     private bool TryResolveNodeReference(string typeName, out NodeReference reference)
     {
-        var simple = typeName.Split('.').Last();
+        var simple = GetSimpleIdentifier(typeName);
 
         if (_dtos.TryGetValue(typeName, out var dto))
         {
@@ -219,12 +219,12 @@ public sealed partial class ProjectAnalyzer
             return handler;
         }
 
-        var simple = requestType.Split('.').Last();
+        var simple = GetSimpleIdentifier(requestType);
 
         var matches = _handlers.Values
             .Where(h =>
                 h.RequestType.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
-                h.RequestType.Split('.').Last().Equals(simple, StringComparison.OrdinalIgnoreCase))
+                GetSimpleIdentifier(h.RequestType).Equals(simple, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         return matches.Count == 1 ? matches[0] : null;
@@ -237,7 +237,7 @@ public sealed partial class ProjectAnalyzer
             return request;
         }
 
-        var simple = requestType.Split('.').Last();
+        var simple = GetSimpleIdentifier(requestType);
 
         var matches = _requests.Values
             .Where(r =>
@@ -254,7 +254,7 @@ public sealed partial class ProjectAnalyzer
         // one whose namespace shares the longest common prefix with the incoming requestType.
         if (matches.Count > 1 && !string.IsNullOrWhiteSpace(requestType))
         {
-            var requestNamespace = requestType.Contains('.') ? requestType[..requestType.LastIndexOf('.')] : string.Empty;
+            var requestNamespace = GetTypeNamespace(requestType);
             if (!string.IsNullOrWhiteSpace(requestNamespace))
             {
                 var ordered = matches
@@ -295,7 +295,7 @@ public sealed partial class ProjectAnalyzer
             return info;
         }
 
-        var simple = baseType.Split('.').Last();
+        var simple = GetSimpleIdentifier(baseType);
         var matches = _pipelineBehaviors.Values
             .Where(b =>
                 b.Fqdn.Equals(behaviorType, StringComparison.OrdinalIgnoreCase) ||
@@ -325,7 +325,7 @@ public sealed partial class ProjectAnalyzer
             return info;
         }
 
-        var simple = baseType.Split('.').Last();
+        var simple = GetSimpleIdentifier(baseType);
         var matches = _requestProcessors.Values
             .Where(p =>
                 p.Fqdn.Equals(processorType, StringComparison.OrdinalIgnoreCase) ||
@@ -343,7 +343,7 @@ public sealed partial class ProjectAnalyzer
             return notification;
         }
 
-        var simple = notificationType.Split('.').Last();
+        var simple = GetSimpleIdentifier(notificationType);
 
         var matches = _notifications.Values
             .Where(n =>
@@ -372,6 +372,22 @@ public sealed partial class ProjectAnalyzer
             return implementationType;
         }
 
+        if (typeName.StartsWith("IControlledRepository", StringComparison.Ordinal))
+        {
+            var entity = SplitGenericArguments(typeName).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(entity))
+            {
+                var qualifiedEntity = QualifyTypeName(entity);
+                var targetEntity = !string.IsNullOrWhiteSpace(qualifiedEntity) ? qualifiedEntity : entity;
+                if (_repositories.Values.FirstOrDefault(r => r.ControlledEntities.Any(e =>
+                        string.Equals(e, targetEntity, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(GetSimpleIdentifier(e), GetSimpleIdentifier(targetEntity), StringComparison.OrdinalIgnoreCase))) is { } repository)
+                {
+                    return repository.Fqdn;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -386,7 +402,7 @@ public sealed partial class ProjectAnalyzer
         var registration = FindServiceRegistration(openServiceType);
         if (registration is null)
         {
-            var simpleOpen = openServiceType.Split('.').Last();
+            var simpleOpen = GetSimpleIdentifier(openServiceType);
             registration = FindServiceRegistration(simpleOpen);
         }
 
@@ -397,6 +413,13 @@ public sealed partial class ProjectAnalyzer
 
         var implementationOpenType = registration.ImplementationType;
         if (!TryMakeOpenGenericType(implementationOpenType, out var implementationOpen, out _))
+        {
+            implementationType = registration.ImplementationType;
+            return true;
+        }
+
+        var implementationArity = GetGenericArity(implementationOpen);
+        if (implementationArity > 0 && implementationArity != typeArguments.Count)
         {
             implementationType = registration.ImplementationType;
             return true;
@@ -473,7 +496,7 @@ public sealed partial class ProjectAnalyzer
             return serviceInfo.Fqdn;
         }
 
-        var simple = serviceType.Split('.').Last();
+        var simple = GetSimpleIdentifier(serviceType);
         var match = _services.Values.FirstOrDefault(s =>
             s.Fqdn.Equals(serviceType, StringComparison.OrdinalIgnoreCase) ||
             s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
@@ -571,7 +594,7 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private string QualifyTypeName(string typeName)
+    private string QualifyTypeName(string typeName, string? preferredAssembly = null, string? preferredProject = null)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
@@ -583,11 +606,76 @@ public sealed partial class ProjectAnalyzer
             return typeName;
         }
 
-        var simple = typeName.Split('.').Last();
+        var simple = GetSimpleIdentifier(typeName);
 
         var requestMatches = _requests.Values
             .Where(r => r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
             .ToList();
+        if (requestMatches.Count > 1)
+        {
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                var assemblyMatches = requestMatches
+                    .Where(r => string.Equals(r.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (assemblyMatches.Count == 1)
+                {
+                    return assemblyMatches[0].Fqdn;
+                }
+
+                if (assemblyMatches.Count > 1 && !string.IsNullOrWhiteSpace(preferredProject))
+                {
+                    var projectMatches = assemblyMatches
+                        .Where(r => string.Equals(r.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (projectMatches.Count == 1)
+                    {
+                        return projectMatches[0].Fqdn;
+                    }
+                }
+
+                if (assemblyMatches.Count == 0)
+                {
+                    var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                    if (!string.IsNullOrWhiteSpace(preferredRoot))
+                    {
+                        var rootMatches = requestMatches
+                            .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        if (rootMatches.Count == 1)
+                        {
+                            return rootMatches[0].Fqdn;
+                        }
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject))
+            {
+                var projectMatches = requestMatches
+                    .Where(r => string.Equals(r.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (projectMatches.Count == 1)
+                {
+                    return projectMatches[0].Fqdn;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                if (!string.IsNullOrWhiteSpace(preferredRoot))
+                {
+                    var rootMatches = requestMatches
+                        .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (rootMatches.Count == 1)
+                    {
+                        return rootMatches[0].Fqdn;
+                    }
+                }
+            }
+        }
         if (requestMatches.Count == 1)
         {
             return requestMatches[0].Fqdn;
@@ -596,9 +684,56 @@ public sealed partial class ProjectAnalyzer
         var handlerMatches = _handlers.Values
             .Where(h => h.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
             .ToList();
+        if (handlerMatches.Count > 1 && !string.IsNullOrWhiteSpace(preferredAssembly))
+        {
+            var assemblyMatches = handlerMatches
+                .Where(h => string.Equals(h.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (assemblyMatches.Count == 1)
+            {
+                return assemblyMatches[0].Fqdn;
+            }
+
+            if (assemblyMatches.Count > 1 && !string.IsNullOrWhiteSpace(preferredProject))
+            {
+                var projectFiltered = assemblyMatches
+                    .Where(h => string.Equals(h.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (projectFiltered.Count == 1)
+                {
+                    return projectFiltered[0].Fqdn;
+                }
+            }
+
+            if (assemblyMatches.Count == 0)
+            {
+                var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                if (!string.IsNullOrWhiteSpace(preferredRoot))
+                {
+                    var rootMatches = handlerMatches
+                        .Where(h => string.Equals(GetAssemblyRoot(h.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (rootMatches.Count == 1)
+                    {
+                        return rootMatches[0].Fqdn;
+                    }
+                }
+            }
+        }
         if (handlerMatches.Count == 1)
         {
-            return handlerMatches[0].RequestType;
+            return handlerMatches[0].Fqdn;
+        }
+
+        if (!string.IsNullOrWhiteSpace(preferredProject))
+        {
+            var projectMatches = handlerMatches
+                .Where(h => string.Equals(h.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (projectMatches.Count == 1)
+            {
+                return projectMatches[0].Fqdn;
+            }
         }
 
         return typeName;
@@ -687,6 +822,313 @@ public sealed partial class ProjectAnalyzer
         return arguments;
     }
 
+    private static string TrimGlobalAlias(string typeName)
+        => typeName.StartsWith("global::", StringComparison.Ordinal)
+            ? typeName["global::".Length..]
+            : typeName;
+
+    private static string GetSimpleIdentifier(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return typeName;
+        }
+
+        var trimmed = TrimGlobalAlias(typeName.Trim());
+
+        var genericArguments = SplitGenericArguments(trimmed);
+        if (genericArguments.Count > 0)
+        {
+            for (var i = genericArguments.Count - 1; i >= 0; i--)
+            {
+                var simpleCandidate = GetSimpleIdentifier(genericArguments[i]);
+                if (!string.IsNullOrWhiteSpace(simpleCandidate))
+                {
+                    return simpleCandidate;
+                }
+            }
+        }
+
+        return NormalizeTopLevelIdentifier(trimmed);
+    }
+
+    private static int GetGenericArity(string openType)
+    {
+        if (string.IsNullOrWhiteSpace(openType))
+        {
+            return 0;
+        }
+
+        var start = openType.IndexOf('<');
+        var end = openType.LastIndexOf('>');
+        if (start < 0 || end <= start)
+        {
+            return 0;
+        }
+
+        var inner = openType.Substring(start + 1, end - start - 1);
+        if (string.IsNullOrWhiteSpace(inner))
+        {
+            return 1;
+        }
+
+        var arity = 1;
+        for (var i = 0; i < inner.Length; i++)
+        {
+            if (inner[i] == ',')
+            {
+                arity++;
+            }
+        }
+
+        return arity;
+    }
+
+    private static string GetTopLevelSimpleIdentifier(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return typeName;
+        }
+
+        var trimmed = TrimGlobalAlias(typeName.Trim());
+
+        return NormalizeTopLevelIdentifier(trimmed);
+    }
+
+    private static string NormalizeTopLevelIdentifier(string typeName)
+    {
+        var withoutGenerics = GetTypeNameWithoutGenerics(typeName);
+
+        if (withoutGenerics.EndsWith("?", StringComparison.Ordinal))
+        {
+            withoutGenerics = withoutGenerics[..^1];
+        }
+
+        while (withoutGenerics.EndsWith("[]", StringComparison.Ordinal))
+        {
+            withoutGenerics = withoutGenerics[..^2];
+        }
+
+        var lastDot = withoutGenerics.LastIndexOf('.');
+        var candidate = (lastDot >= 0 ? withoutGenerics[(lastDot + 1)..] : withoutGenerics).Trim();
+        if (string.IsNullOrEmpty(candidate))
+        {
+            return candidate;
+        }
+
+        if (candidate.IndexOfAny(new[] { ' ', '(', ')', '{', '}', '[', ']', ',' }) >= 0)
+        {
+            return candidate;
+        }
+
+        return ExtractIdentifierToken(candidate);
+    }
+
+    private static string ExtractIdentifierToken(string candidate)
+    {
+        var span = candidate.AsSpan();
+        string? lastToken = null;
+        var tokenStart = -1;
+        for (var i = 0; i < span.Length; i++)
+        {
+            var ch = span[i];
+            if (char.IsLetterOrDigit(ch) || ch == '_')
+            {
+                if (tokenStart < 0)
+                {
+                    tokenStart = i;
+                }
+            }
+            else if (tokenStart >= 0)
+            {
+                lastToken = span.Slice(tokenStart, i - tokenStart).ToString();
+                tokenStart = -1;
+            }
+        }
+
+        if (tokenStart >= 0)
+        {
+            lastToken = span.Slice(tokenStart).ToString();
+        }
+
+        return string.IsNullOrWhiteSpace(lastToken) ? candidate : lastToken!;
+    }
+
+    private static int FindLastDotOutsideGenerics(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return -1;
+        }
+
+        var trimmed = TrimGlobalAlias(typeName.Trim());
+        var depth = 0;
+        var lastDot = -1;
+        for (var i = 0; i < trimmed.Length; i++)
+        {
+            var ch = trimmed[i];
+            switch (ch)
+            {
+                case '<':
+                    depth++;
+                    break;
+                case '>':
+                    if (depth > 0)
+                    {
+                        depth--;
+                    }
+                    break;
+                case ':':
+                    if (i + 1 < trimmed.Length && trimmed[i + 1] == ':')
+                    {
+                        i++;
+                    }
+                    break;
+                case '.':
+                    if (depth == 0)
+                    {
+                        lastDot = i;
+                    }
+                    break;
+            }
+        }
+
+        return lastDot;
+    }
+
+    private static int FindFirstDotOutsideGenerics(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return -1;
+        }
+
+        var trimmed = TrimGlobalAlias(typeName.Trim());
+        var depth = 0;
+        for (var i = 0; i < trimmed.Length; i++)
+        {
+            var ch = trimmed[i];
+            switch (ch)
+            {
+                case '<':
+                    depth++;
+                    break;
+                case '>':
+                    if (depth > 0)
+                    {
+                        depth--;
+                    }
+                    break;
+                case ':':
+                    if (i + 1 < trimmed.Length && trimmed[i + 1] == ':')
+                    {
+                        i++;
+                    }
+                    break;
+                case '.':
+                    if (depth == 0)
+                    {
+                        return i;
+                    }
+                    break;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string GetTypeNamespace(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return string.Empty;
+        }
+
+        var lastDot = FindLastDotOutsideGenerics(typeName);
+        return lastDot <= 0 ? string.Empty : TrimGlobalAlias(typeName.Trim())[..lastDot];
+    }
+
+    private static string GetTypeAssemblyRoot(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = TrimGlobalAlias(typeName.Trim());
+        var baseType = GetTypeNameWithoutGenerics(trimmed);
+        var firstDot = FindFirstDotOutsideGenerics(baseType);
+        if (firstDot < 0)
+        {
+            return string.Empty;
+        }
+
+        if (firstDot == 0)
+        {
+            return string.Empty;
+        }
+
+        return baseType[..firstDot];
+    }
+
+    private static bool IsGenericPlaceholder(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return true;
+        }
+
+        var simple = GetTopLevelSimpleIdentifier(typeName);
+        if (string.IsNullOrWhiteSpace(simple))
+        {
+            return true;
+        }
+
+        if (!simple.Contains('.', StringComparison.Ordinal))
+        {
+            if (simple.Length == 1)
+            {
+                return true;
+            }
+
+            if (simple.All(char.IsUpper))
+            {
+                return true;
+            }
+
+            if (simple.Length > 1 && simple[0] == 'T' && char.IsUpper(simple[1]))
+            {
+                var remainder = simple.AsSpan(2);
+                if (remainder.IsEmpty || remainder.ToString().All(char.IsLetter))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasConcreteGenericArguments(string typeName)
+    {
+        var arguments = SplitGenericArguments(typeName);
+        if (arguments.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var argument in arguments)
+        {
+            if (!IsGenericPlaceholder(argument))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsOptionsDeclaration(TypeDeclarationSyntax declaration)
     {
         if (declaration.Identifier.Text.EndsWith("Options", StringComparison.Ordinal))
@@ -715,6 +1157,17 @@ public sealed partial class ProjectAnalyzer
             if (a[i] != b[i]) break;
         }
         return i;
+    }
+
+    private static string GetAssemblyRoot(string? assembly)
+    {
+        if (string.IsNullOrWhiteSpace(assembly))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = assembly.IndexOf('.');
+        return separatorIndex > 0 ? assembly[..separatorIndex] : assembly;
     }
 
     private static bool IsLoggerType(string? typeName)

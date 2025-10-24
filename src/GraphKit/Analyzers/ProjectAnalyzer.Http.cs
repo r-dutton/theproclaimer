@@ -135,14 +135,14 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var call in _httpCalls)
         {
-            // If we couldn't canonicalize the route skip
+            // If we couldn't canonicalize the route, skip
             var endpointRouteForKey = call.EndpointRoute;
             if (string.IsNullOrWhiteSpace(endpointRouteForKey))
             {
                 continue;
             }
 
-            // Remove query string portion for lookup key
+            // Remove query string for lookup key
             var qmIndex = endpointRouteForKey.IndexOf('?');
             if (qmIndex >= 0)
             {
@@ -161,6 +161,10 @@ public sealed partial class ProjectAnalyzer
                 _clientTargetServices.TryGetValue(call.Client.Name, out mappedService))
             {
                 targetService = mappedService;
+            }
+            else
+            {
+                targetService = ResolveClientTargetService(call.Client.Fqdn) ?? ResolveClientTargetService(call.Client.Name);
             }
 
             var clientId = StableId.For("http.client", call.Client.Fqdn, call.Client.Assembly, call.Client.SymbolId);
@@ -258,7 +262,7 @@ public sealed partial class ProjectAnalyzer
         return props;
     }
 
-    private static Dictionary<string, RouteHint> CollectRouteHints(SyntaxTree tree, MethodDeclarationSyntax method)
+    private Dictionary<string, RouteHint> CollectRouteHints(SyntaxTree tree, MethodDeclarationSyntax method)
     {
         var hints = new Dictionary<string, RouteHint>(StringComparer.OrdinalIgnoreCase);
 
@@ -291,7 +295,7 @@ public sealed partial class ProjectAnalyzer
         return hints;
     }
 
-    private static bool TryCaptureWrapperHttpCall(
+    private bool TryCaptureWrapperHttpCall(
         SyntaxTree tree,
         InvocationExpressionSyntax invocation,
         IReadOnlyDictionary<string, RouteHint> routeHints,
@@ -325,7 +329,7 @@ public sealed partial class ProjectAnalyzer
         return true;
     }
 
-    private static RouteHint? TryResolveRouteHint(SyntaxTree tree, ExpressionSyntax expression, IReadOnlyDictionary<string, RouteHint> routeHints)
+    private RouteHint? TryResolveRouteHint(SyntaxTree tree, ExpressionSyntax expression, IReadOnlyDictionary<string, RouteHint> routeHints)
     {
         switch (expression)
         {
@@ -376,7 +380,7 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private static RouteHint? TryResolveRouteFromBuilder(SyntaxTree tree, ExpressionSyntax expression)
+    private RouteHint? TryResolveRouteFromBuilder(SyntaxTree tree, ExpressionSyntax expression)
     {
         var chain = new List<InvocationExpressionSyntax>();
         ExpressionSyntax current = expression;
@@ -406,7 +410,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var literal = creation.ArgumentList?.Arguments.FirstOrDefault()?.Expression;
-        var route = ExtractRouteLiteral(tree, literal);
+        var route = ExtractRouteLiteral(tree, literal) ?? ResolveRouteFromExpression(literal);
         if (string.IsNullOrWhiteSpace(route))
         {
             return null;

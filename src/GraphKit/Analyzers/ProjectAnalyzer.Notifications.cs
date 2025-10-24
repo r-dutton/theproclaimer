@@ -379,7 +379,7 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
-                if (!TryEnsureServiceNode(service.ServiceType, out var serviceId, out var registration))
+                if (!TryEnsureServiceNode(service.ServiceType, out var serviceId, out var registration, service.TargetType))
                 {
                     continue;
                 }
@@ -397,6 +397,11 @@ public sealed partial class ProjectAnalyzer
                 if (!string.IsNullOrWhiteSpace(service.Method))
                 {
                     props["method"] = service.Method!;
+                }
+
+                if (!string.IsNullOrWhiteSpace(service.TargetType))
+                {
+                    props["target_type"] = service.TargetType!;
                 }
 
                 _edges.Add(new GraphEdge

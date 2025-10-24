@@ -6,11 +6,12 @@ using System.Text;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 
+using static GraphKit.Outputs.Utilities;
 namespace GraphKit.Outputs;
 
 public static partial class FlowBuilder
 {
-    private sealed class FlowRenderState
+    public sealed class FlowRenderState
     {
         public FlowRenderState(
             GraphDocument document,
@@ -169,7 +170,9 @@ public static partial class FlowBuilder
 
     private static void AppendImpactSummary(StringBuilder builder, ImpactAccumulator impact)
     {
-        if (impact.IsEmpty)
+        // Disabled for now
+        ///if (impact.IsEmpty)
+        if (true)
         {
             return;
         }

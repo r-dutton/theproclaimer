@@ -212,9 +212,10 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
+        var simple = GetSimpleIdentifier(typeName);
         return string.Equals(entity.Fqdn, typeName, StringComparison.OrdinalIgnoreCase)
             || string.Equals(entity.Name, typeName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(entity.Name, typeName.Split('.').Last(), StringComparison.OrdinalIgnoreCase);
+            || string.Equals(entity.Name, simple, StringComparison.OrdinalIgnoreCase);
     }
 
     private EntityInfo? TryFindEntityByTypeName(string typeName)
@@ -224,7 +225,7 @@ public sealed partial class ProjectAnalyzer
             return entity;
         }
 
-        var simple = typeName.Split('.').Last();
+        var simple = GetSimpleIdentifier(typeName);
         return _entities.Values.FirstOrDefault(e =>
             string.Equals(e.Fqdn, typeName, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(e.Name, simple, StringComparison.OrdinalIgnoreCase));

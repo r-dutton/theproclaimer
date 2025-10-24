@@ -8,34 +8,57 @@ namespace GraphKit.Workspace;
 
 public sealed class FlowWorkspaceIndex
 {
+    private sealed record ServiceEntry(IReadOnlyCollection<string> Assemblies, IReadOnlyCollection<string> Hosts);
+
     private static readonly IReadOnlyCollection<string> EmptyAssemblies = Array.Empty<string>();
-    private readonly Dictionary<string, IReadOnlyCollection<string>> _serviceAssemblies;
+    private readonly Dictionary<string, ServiceEntry> _services;
+    private readonly Dictionary<string, string> _hostLookup;
 
     public FlowWorkspaceIndex()
-        : this(new Dictionary<string, IEnumerable<string>>(StringComparer.OrdinalIgnoreCase))
+        : this(new Dictionary<string, ServiceEntry>(StringComparer.OrdinalIgnoreCase))
     {
     }
 
     public FlowWorkspaceIndex(IReadOnlyDictionary<string, IEnumerable<string>> services)
+        : this(ConvertLegacyAssemblies(services))
     {
-        _serviceAssemblies = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.OrdinalIgnoreCase);
+    }
 
-        foreach (var kvp in services)
+    private FlowWorkspaceIndex(IReadOnlyDictionary<string, ServiceEntry> services)
+    {
+        _services = new Dictionary<string, ServiceEntry>(StringComparer.OrdinalIgnoreCase);
+        _hostLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (serviceName, entry) in services)
         {
-            if (string.IsNullOrWhiteSpace(kvp.Key))
+            if (string.IsNullOrWhiteSpace(serviceName))
             {
                 continue;
             }
 
-            var assemblies = kvp.Value?
+            var normalizedAssemblies = entry.Assemblies
                 .Where(a => !string.IsNullOrWhiteSpace(a))
-                .Select(a => a!.Trim())
+                .Select(a => a.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            if (assemblies is { Length: > 0 })
+            var normalizedHosts = entry.Hosts
+                .Where(h => !string.IsNullOrWhiteSpace(h))
+                .Select(h => h.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (normalizedAssemblies.Length == 0 && normalizedHosts.Length == 0)
             {
-                _serviceAssemblies[kvp.Key] = assemblies;
+                continue;
+            }
+
+            var storedEntry = new ServiceEntry(normalizedAssemblies, normalizedHosts);
+            _services[serviceName] = storedEntry;
+
+            foreach (var host in normalizedHosts)
+            {
+                _hostLookup.TryAdd(host, serviceName);
             }
         }
     }
@@ -58,9 +81,10 @@ public sealed class FlowWorkspaceIndex
                 return new FlowWorkspaceIndex();
             }
 
-            var services = new Dictionary<string, IEnumerable<string>>(StringComparer.OrdinalIgnoreCase);
+            var services = new Dictionary<string, ServiceEntry>(StringComparer.OrdinalIgnoreCase);
             foreach (var serviceProperty in servicesElement.EnumerateObject())
             {
+                var hostSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (serviceProperty.Value.TryGetProperty("assembly_names", out var assemblyNames))
                 {
                     var assemblies = assemblyNames
@@ -70,10 +94,24 @@ public sealed class FlowWorkspaceIndex
                         .Select(value => value!.Trim())
                         .ToArray();
 
-                    if (assemblies.Length > 0)
+                    if (serviceProperty.Value.TryGetProperty("base_addresses", out var baseAddresses))
                     {
-                        services[serviceProperty.Name] = assemblies;
+                        foreach (var addressProperty in baseAddresses.EnumerateObject())
+                        {
+                            var addressValue = addressProperty.Value.GetString();
+                            if (string.IsNullOrWhiteSpace(addressValue))
+                            {
+                                continue;
+                            }
+
+                            if (Uri.TryCreate(addressValue, UriKind.Absolute, out var uri))
+                            {
+                                hostSet.Add(uri.Host);
+                            }
+                        }
                     }
+
+                    services[serviceProperty.Name] = new ServiceEntry(assemblies, hostSet);
                 }
             }
 
@@ -97,13 +135,58 @@ public sealed class FlowWorkspaceIndex
             return false;
         }
 
-        if (_serviceAssemblies.TryGetValue(serviceName, out var result))
+        if (_services.TryGetValue(serviceName, out var entry) && entry.Assemblies.Count > 0)
         {
-            assemblies = result;
-            return assemblies.Count > 0;
+            assemblies = entry.Assemblies;
+            return true;
         }
 
         assemblies = EmptyAssemblies;
         return false;
+    }
+
+    public bool TryResolveServiceByHost(string? host, out string serviceName)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            serviceName = string.Empty;
+            return false;
+        }
+
+        if (_hostLookup.TryGetValue(host.Trim(), out var resolved))
+        {
+            serviceName = resolved;
+            return true;
+        }
+
+        serviceName = string.Empty;
+        return false;
+    }
+
+    private static IReadOnlyDictionary<string, ServiceEntry> ConvertLegacyAssemblies(IReadOnlyDictionary<string, IEnumerable<string>>? services)
+    {
+        if (services is null || services.Count == 0)
+        {
+            return new Dictionary<string, ServiceEntry>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var converted = new Dictionary<string, ServiceEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (serviceName, assemblyList) in services)
+        {
+            if (string.IsNullOrWhiteSpace(serviceName))
+            {
+                continue;
+            }
+
+            var normalizedAssemblies = (assemblyList ?? Array.Empty<string>())
+                .Where(a => !string.IsNullOrWhiteSpace(a))
+                .Select(a => a!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            converted[serviceName] = new ServiceEntry(normalizedAssemblies, Array.Empty<string>());
+        }
+
+        return converted;
     }
 }

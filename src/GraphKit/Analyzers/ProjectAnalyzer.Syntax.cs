@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -10,6 +11,51 @@ namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
+    private void CollectStringConstants(ProjectInfo project, SyntaxTree tree, CompilationUnitSyntax root, CancellationToken cancellationToken)
+    {
+        foreach (var member in root.Members)
+        {
+            CollectStringConstants(project, tree, member, null, cancellationToken);
+        }
+    }
+
+    private void CollectStringConstants(ProjectInfo project, SyntaxTree tree, MemberDeclarationSyntax member, string? currentNamespace, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        switch (member)
+        {
+            case NamespaceDeclarationSyntax namespaceDeclaration:
+                foreach (var child in namespaceDeclaration.Members)
+                {
+                    CollectStringConstants(project, tree, child, namespaceDeclaration.Name.ToString(), cancellationToken);
+                }
+                break;
+            case FileScopedNamespaceDeclarationSyntax fileScoped:
+                foreach (var child in fileScoped.Members)
+                {
+                    CollectStringConstants(project, tree, child, fileScoped.Name.ToString(), cancellationToken);
+                }
+                break;
+            case ClassDeclarationSyntax classDeclaration:
+                {
+                    var namespaceName = currentNamespace ?? project.RootNamespace;
+                    var className = classDeclaration.Identifier.Text;
+                    var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
+                    CaptureStringConstants(classDeclaration, namespaceName, fqdn);
+                    break;
+                }
+            case StructDeclarationSyntax structDeclaration:
+                {
+                    var namespaceName = currentNamespace ?? project.RootNamespace;
+                    var structName = structDeclaration.Identifier.Text;
+                    var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? structName : $"{namespaceName}.{structName}";
+                    CaptureStringConstants(structDeclaration, namespaceName, fqdn);
+                    break;
+                }
+        }
+    }
+
     private void ProcessMember(ProjectInfo project, SyntaxTree tree, MemberDeclarationSyntax member, string? currentNamespace, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -30,6 +76,9 @@ public sealed partial class ProjectAnalyzer
                 break;
             case ClassDeclarationSyntax classDeclaration:
                 AnalyzeClass(project, tree, classDeclaration, currentNamespace);
+                break;
+            case StructDeclarationSyntax structDeclaration:
+                AnalyzeStruct(project, tree, structDeclaration, currentNamespace);
                 break;
             case InterfaceDeclarationSyntax interfaceDeclaration:
                 AnalyzeInterface(project, tree, interfaceDeclaration, currentNamespace);
@@ -60,6 +109,8 @@ public sealed partial class ProjectAnalyzer
                 fieldTypes[variable.Identifier.Text] = new FieldDescriptor(typeName, line);
             }
         }
+
+        CaptureStringConstants(classDeclaration, namespaceName, fqdn);
 
         if (ImplementsInterface(classDeclaration, "IRequest") || ImplementsInterface(classDeclaration, "IAsyncRequest"))
         {
@@ -187,6 +238,177 @@ public sealed partial class ProjectAnalyzer
         {
             _dtos[fqdn] = new DtoInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
         }
+    }
+
+    private void AnalyzeStruct(ProjectInfo project, SyntaxTree tree, StructDeclarationSyntax structDeclaration, string? currentNamespace)
+    {
+        var namespaceName = currentNamespace ?? project.RootNamespace;
+        var structName = structDeclaration.Identifier.Text;
+        var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? structName : $"{namespaceName}.{structName}";
+        var symbolId = $"T:{fqdn}";
+        var filePath = GetRelativePath(tree.FilePath);
+        var span = ToGraphSpan(tree, structDeclaration);
+
+        CaptureStringConstants(structDeclaration, namespaceName, fqdn);
+
+        if (ImplementsInterface(structDeclaration, "IRequest") || ImplementsInterface(structDeclaration, "IAsyncRequest"))
+        {
+            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, structName);
+            _requests[fqdn] = requestInfo;
+        }
+        else if (structDeclaration.BaseList is { Types.Count: > 0 })
+        {
+            var baseTypeName = structDeclaration.BaseList.Types.First().Type.ToString();
+            if (IsLikelyRequestName(baseTypeName))
+            {
+                _derivedRequestCandidates.Add(new DerivedRequestCandidate(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, structName, baseTypeName));
+            }
+        }
+
+        if (IsMessageContract(structDeclaration))
+        {
+            _messageContracts[fqdn] = new MessageContractInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, structDeclaration.Identifier.Text);
+        }
+
+        if (ImplementsInterface(structDeclaration, "INotification"))
+        {
+            RegisterNotification(project, tree, structDeclaration, namespaceName);
+        }
+
+        if (IsOptionsDeclaration(structDeclaration))
+        {
+            RegisterOptions(project, tree, structDeclaration, namespaceName);
+        }
+
+        if (structDeclaration.Modifiers.Any(m => m.Text == "public") &&
+            (tree.FilePath.Contains("Dtos", StringComparison.OrdinalIgnoreCase) ||
+             structName.EndsWith("Dto", StringComparison.Ordinal) ||
+             structName.Contains(".Dtos.", StringComparison.Ordinal)))
+        {
+            _dtos[fqdn] = new DtoInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, structName);
+        }
+    }
+
+    private void CaptureStringConstants(TypeDeclarationSyntax typeDeclaration, string? namespaceName, string fqdn)
+    {
+        foreach (var field in typeDeclaration.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)))
+            {
+                continue;
+            }
+
+            var typeName = field.Declaration.Type.ToString();
+            if (!string.Equals(typeName, "string", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var variable in field.Declaration.Variables)
+            {
+                var initializer = variable.Initializer?.Value;
+                if (initializer is null)
+                {
+                    continue;
+                }
+
+                var value = TryEvaluateStringConstant(initializer);
+                if (value is null)
+                {
+                    continue;
+                }
+
+                var constFqdn = string.IsNullOrWhiteSpace(fqdn)
+                    ? variable.Identifier.Text
+                    : $"{fqdn}.{variable.Identifier.Text}";
+                var shortKey = constFqdn;
+                if (!string.IsNullOrWhiteSpace(namespaceName) && shortKey.StartsWith(namespaceName + ".", StringComparison.Ordinal))
+                {
+                    shortKey = shortKey[(namespaceName.Length + 1)..];
+                }
+                _stringConstants[constFqdn] = value;
+                _stringConstants[shortKey] = value;
+                _stringConstants[variable.Identifier.Text] = value;
+            }
+        }
+
+        foreach (var nested in typeDeclaration.Members.OfType<ClassDeclarationSyntax>())
+        {
+            var nestedFqdn = string.IsNullOrWhiteSpace(fqdn)
+                ? nested.Identifier.Text
+                : $"{fqdn}.{nested.Identifier.Text}";
+            CaptureStringConstants(nested, namespaceName, nestedFqdn);
+        }
+
+        foreach (var nestedStruct in typeDeclaration.Members.OfType<StructDeclarationSyntax>())
+        {
+            var nestedFqdn = string.IsNullOrWhiteSpace(fqdn)
+                ? nestedStruct.Identifier.Text
+                : $"{fqdn}.{nestedStruct.Identifier.Text}";
+            CaptureStringConstants(nestedStruct, namespaceName, nestedFqdn);
+        }
+    }
+
+    private string? TryEvaluateStringConstant(ExpressionSyntax expression)
+    {
+        switch (expression)
+        {
+            case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression):
+                return literal.Token.ValueText;
+            case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.NullLiteralExpression):
+                return null;
+            case InterpolatedStringExpressionSyntax interpolated:
+                var builder = new StringBuilder();
+                foreach (var content in interpolated.Contents)
+                {
+                    switch (content)
+                    {
+                        case InterpolatedStringTextSyntax text:
+                            builder.Append(text.TextToken.ValueText);
+                            break;
+                        case InterpolationSyntax interpolation:
+                            var interpolatedValue = TryEvaluateStringConstant(interpolation.Expression);
+                            if (interpolatedValue is null)
+                            {
+                                return null;
+                            }
+                            builder.Append(interpolatedValue);
+                            break;
+                        default:
+                            return null;
+                    }
+                }
+                return builder.ToString();
+            case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression):
+                var left = TryEvaluateStringConstant(binary.Left);
+                var right = TryEvaluateStringConstant(binary.Right);
+                return left is null || right is null ? null : left + right;
+            case IdentifierNameSyntax identifier:
+                return LookupStringConstant(identifier.Identifier.Text);
+            case MemberAccessExpressionSyntax memberAccess:
+                return LookupStringConstant(memberAccess.ToString()) ?? LookupStringConstant(memberAccess.Name.Identifier.Text);
+            default:
+                return LookupStringConstant(expression.ToString());
+        }
+    }
+
+    private string? LookupStringConstant(string key)
+    {
+        if (_stringConstants.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+
+        if (key.Contains('.', StringComparison.Ordinal))
+        {
+            var simple = GetTopLevelSimpleIdentifier(key);
+            if (_stringConstants.TryGetValue(simple, out value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private void AnalyzeInterface(ProjectInfo project, SyntaxTree tree, InterfaceDeclarationSyntax interfaceDeclaration, string? currentNamespace)
@@ -353,18 +575,12 @@ public sealed partial class ProjectAnalyzer
         foreach (var baseType in typeDeclaration.BaseList.Types)
         {
             var typeText = baseType.Type.ToString();
-            if (typeText.StartsWith(interfaceName, StringComparison.Ordinal))
+            if (string.IsNullOrWhiteSpace(typeText))
             {
-                return true;
+                continue;
             }
 
-            var genericIndex = typeText.IndexOf('<');
-            if (genericIndex >= 0)
-            {
-                typeText = typeText[..genericIndex];
-            }
-
-            var simpleName = typeText.Split('.').Last();
+            var simpleName = GetTopLevelSimpleIdentifier(typeText);
             if (simpleName.Equals(interfaceName, StringComparison.Ordinal))
             {
                 return true;
@@ -379,10 +595,25 @@ public sealed partial class ProjectAnalyzer
 
     private static bool IsHttpClient(ClassDeclarationSyntax typeDeclaration, IReadOnlyDictionary<string, FieldDescriptor> fieldTypes)
     {
-        if (!typeDeclaration.Identifier.Text.EndsWith("Client", StringComparison.Ordinal))
+        var inheritsHttpClient = typeDeclaration.BaseList?.Types.Any(baseType =>
         {
-            return false;
+            var identifier = baseType.Type.ToString();
+            var genericIndex = identifier.IndexOf('<');
+            if (genericIndex >= 0)
+            {
+                identifier = identifier[..genericIndex];
+            }
+
+            return identifier.EndsWith("HttpClient", StringComparison.Ordinal)
+                || identifier.EndsWith("OAuthClient", StringComparison.Ordinal)
+                || identifier.EndsWith("RestClient", StringComparison.Ordinal);
+        }) == true;
+
+        if (inheritsHttpClient)
+        {
+            return true;
         }
+
 
         if (fieldTypes.Values.Any(v => v.Type.Contains("HttpClient", StringComparison.Ordinal)))
         {
@@ -394,6 +625,11 @@ public sealed partial class ProjectAnalyzer
                 v.Type.Contains("IDataGetService", StringComparison.Ordinal)))
         {
             return true;
+        }
+
+        if (!typeDeclaration.Identifier.Text.EndsWith("Client", StringComparison.Ordinal))
+        {
+            return false;
         }
 
         return typeDeclaration.DescendantNodes()
@@ -461,7 +697,53 @@ public sealed partial class ProjectAnalyzer
             || classDeclaration.BaseList?.Types.Any(t => t.Type.ToString().EndsWith("IHostedService", StringComparison.Ordinal)) == true;
 
     private static bool IsRepository(ClassDeclarationSyntax classDeclaration)
-        => classDeclaration.Identifier.Text.EndsWith("Repository", StringComparison.Ordinal);
+    {
+        if (classDeclaration.Identifier.Text.EndsWith("Repository", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!classDeclaration.Identifier.Text.EndsWith("Query", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (classDeclaration.BaseList is not { Types.Count: > 0 })
+        {
+            return false;
+        }
+
+        foreach (var baseType in classDeclaration.BaseList.Types)
+        {
+            var baseText = baseType.Type.ToString();
+            if (string.IsNullOrWhiteSpace(baseText))
+            {
+                continue;
+            }
+
+            // Dapper queries within Cirrus (and similar solutions) derive from AsyncDapperQuery or helper abstractions such as GetLedgerQuery.
+            if (baseText.Contains("AsyncDapperQuery", StringComparison.Ordinal) ||
+                baseText.Contains("DapperQuery", StringComparison.Ordinal) ||
+                baseText.Contains("GetLedgerQuery", StringComparison.Ordinal) ||
+                baseText.Contains("GetTrialBalanceQuery", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var genericIndex = baseText.IndexOf('<');
+            if (genericIndex > 0)
+            {
+                var genericBase = baseText[..genericIndex];
+                if (genericBase.EndsWith("Query", StringComparison.Ordinal) &&
+                    genericBase.Contains("Dapper", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     private static bool IsDerivedRequest(RecordDeclarationSyntax recordDeclaration)
         => recordDeclaration.BaseList?.Types.Any(t => IsLikelyRequestName(t.Type.ToString())) == true;

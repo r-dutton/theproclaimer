@@ -129,7 +129,7 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
-                if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration))
+                if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType))
                 {
                     continue;
                 }
@@ -142,6 +142,16 @@ public sealed partial class ProjectAnalyzer
                 if (registration is not null)
                 {
                     props["lifetime"] = registration.Lifetime;
+                }
+
+                if (!string.IsNullOrWhiteSpace(usage.Method))
+                {
+                    props["method"] = usage.Method!;
+                }
+
+                if (!string.IsNullOrWhiteSpace(usage.TargetType))
+                {
+                    props["target_type"] = usage.TargetType!;
                 }
 
                 _edges.Add(new GraphEdge

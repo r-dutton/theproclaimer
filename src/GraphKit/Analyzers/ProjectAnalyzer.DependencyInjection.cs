@@ -16,58 +16,178 @@ public sealed partial class ProjectAnalyzer
 {
     private void LoadFlowMap()
     {
-        var mapPath = Path.Combine(_workspaceRoot, "flow.map.json");
-        if (!File.Exists(mapPath))
+        var candidates = EnumerateFlowMapCandidates(_workspaceRoot).ToList();
+        if (candidates.Count == 0)
         {
             return;
         }
 
-        using var stream = File.OpenRead(mapPath);
-        using var document = JsonDocument.Parse(stream);
-        var root = document.RootElement;
-
-        if (root.TryGetProperty("services", out var servicesElement))
+        foreach (var mapPath in candidates)
         {
-            foreach (var serviceProperty in servicesElement.EnumerateObject())
+            try
             {
-                if (serviceProperty.Value.TryGetProperty("base_urls", out var baseUrls))
+                using var stream = File.OpenRead(mapPath);
+                using var document = JsonDocument.Parse(stream);
+                var root = document.RootElement;
+
+                if (root.TryGetProperty("services", out var servicesElement))
                 {
-                    foreach (var baseUrlProperty in baseUrls.EnumerateObject())
+                    foreach (var serviceProperty in servicesElement.EnumerateObject())
                     {
-                        var value = baseUrlProperty.Value.GetString();
-                        if (string.IsNullOrWhiteSpace(value))
+                        if (serviceProperty.Value.TryGetProperty("base_urls", out var baseUrls))
+                        {
+                            foreach (var baseUrlProperty in baseUrls.EnumerateObject())
+                            {
+                                var value = baseUrlProperty.Value.GetString();
+                                if (string.IsNullOrWhiteSpace(value))
+                                {
+                                    continue;
+                                }
+
+                                var normalized = NormalizeBaseUrlKey(value);
+                                if (!string.IsNullOrWhiteSpace(normalized))
+                                {
+                                    _baseUrlServiceAliases[normalized] = serviceProperty.Name;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (root.TryGetProperty("bindings", out var bindingsElement))
+                {
+                    foreach (var binding in bindingsElement.EnumerateArray())
+                    {
+                        if (!binding.TryGetProperty("client", out var clientElement) || !binding.TryGetProperty("target_service", out var targetElement))
                         {
                             continue;
                         }
 
-                        var normalized = NormalizeBaseUrlKey(value);
-                        if (!string.IsNullOrWhiteSpace(normalized))
+                        var client = clientElement.GetString();
+                        var target = targetElement.GetString();
+                        if (string.IsNullOrWhiteSpace(client) || string.IsNullOrWhiteSpace(target))
                         {
-                            _baseUrlServiceAliases[normalized] = serviceProperty.Name;
+                            continue;
                         }
+
+                        RegisterClientTargetService(client, target);
                     }
                 }
             }
+            catch
+            {
+                // Ignore malformed flow maps so one bad file does not break analysis.
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateFlowMapCandidates(string workspaceRoot)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceRoot))
+        {
+            yield break;
         }
 
-        if (root.TryGetProperty("bindings", out var bindingsElement))
+        var current = Path.GetFullPath(workspaceRoot);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (!string.IsNullOrWhiteSpace(current))
         {
-            foreach (var binding in bindingsElement.EnumerateArray())
+            var candidate = Path.Combine(current, "flow.map.json");
+            if (File.Exists(candidate) && seen.Add(candidate))
             {
-                if (!binding.TryGetProperty("client", out var clientElement) || !binding.TryGetProperty("target_service", out var targetElement))
-                {
-                    continue;
-                }
-
-                var client = clientElement.GetString();
-                var target = targetElement.GetString();
-                if (string.IsNullOrWhiteSpace(client) || string.IsNullOrWhiteSpace(target))
-                {
-                    continue;
-                }
-
-                _clientTargetServices[client] = target;
+                yield return candidate;
             }
+
+            var parent = Directory.GetParent(current)?.FullName;
+            if (parent is null || string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            current = parent;
+        }
+    }
+
+    private void RegisterClientTargetService(string client, string target)
+    {
+        _clientTargetServices[client] = target;
+
+        foreach (var alternate in DeriveClientBindingKeys(client))
+        {
+            if (string.IsNullOrWhiteSpace(alternate))
+            {
+                continue;
+            }
+
+            if (!_clientTargetServices.TryGetValue(alternate, out var existing) || string.Equals(existing, target, StringComparison.OrdinalIgnoreCase))
+            {
+                _clientTargetServices[alternate] = target;
+            }
+        }
+    }
+
+    private static IEnumerable<string> DeriveClientBindingKeys(string client)
+    {
+        if (string.IsNullOrWhiteSpace(client))
+        {
+            yield break;
+        }
+
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                keys.Add(value);
+            }
+        }
+
+        var normalized = TrimGlobalAlias(client.Replace('+', '.'));
+        Add(normalized);
+        Add(GetTypeNameWithoutGenerics(normalized));
+
+        var candidateTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            normalized,
+            GetTypeNameWithoutGenerics(normalized)
+        };
+
+        foreach (var typeName in candidateTypes.ToArray())
+        {
+            foreach (var argument in SplitGenericArguments(typeName))
+            {
+                candidateTypes.Add(argument);
+                candidateTypes.Add(GetTypeNameWithoutGenerics(argument));
+            }
+        }
+
+        foreach (var typeName in candidateTypes)
+        {
+            if (string.IsNullOrWhiteSpace(typeName))
+            {
+                continue;
+            }
+
+            var topLevel = GetTopLevelSimpleIdentifier(typeName);
+            Add(topLevel);
+            if (!string.IsNullOrWhiteSpace(topLevel) && topLevel.Length > 1 && topLevel[0] == 'I' && char.IsUpper(topLevel[1]))
+            {
+                Add(topLevel[1..]);
+            }
+
+            var innermost = GetSimpleIdentifier(typeName);
+            Add(innermost);
+            if (!string.IsNullOrWhiteSpace(innermost) && innermost.Length > 1 && innermost[0] == 'I' && char.IsUpper(innermost[1]))
+            {
+                Add(innermost[1..]);
+            }
+        }
+
+        foreach (var key in keys)
+        {
+            yield return key;
         }
     }
 
@@ -160,8 +280,9 @@ public sealed partial class ProjectAnalyzer
                     foreach (var autoRegistration in autofacRegistrations)
                     {
                         AddServiceRegistration(autoRegistration.ServiceType, autoRegistration);
-                        var simpleName = autoRegistration.ServiceType.Split('.').Last();
-                        if (!string.Equals(simpleName, autoRegistration.ServiceType, StringComparison.Ordinal))
+                        var simpleName = GetTopLevelSimpleIdentifier(autoRegistration.ServiceType);
+                        if (!string.IsNullOrWhiteSpace(simpleName) &&
+                            !string.Equals(simpleName, autoRegistration.ServiceType, StringComparison.Ordinal))
                         {
                             AddServiceRegistration(simpleName, autoRegistration);
                         }
@@ -191,8 +312,9 @@ public sealed partial class ProjectAnalyzer
                     foreach (var autoRegistration in autofacRegistrations)
                     {
                         AddServiceRegistration(autoRegistration.ServiceType, autoRegistration);
-                        var simpleName = autoRegistration.ServiceType.Split('.').Last();
-                        if (!string.Equals(simpleName, autoRegistration.ServiceType, StringComparison.Ordinal))
+                        var simpleName = GetTopLevelSimpleIdentifier(autoRegistration.ServiceType);
+                        if (!string.IsNullOrWhiteSpace(simpleName) &&
+                            !string.Equals(simpleName, autoRegistration.ServiceType, StringComparison.Ordinal))
                         {
                             AddServiceRegistration(simpleName, autoRegistration);
                         }
@@ -227,8 +349,9 @@ public sealed partial class ProjectAnalyzer
             AddServiceRegistration(serviceType!, registration);
             CaptureMediatorRegistration(serviceType!, implementationType!);
 
-            var simple = serviceType!.Split('.').Last();
-            if (!string.Equals(simple, serviceType, StringComparison.Ordinal))
+            var simple = GetTopLevelSimpleIdentifier(serviceType!);
+            if (!string.IsNullOrWhiteSpace(simple) &&
+                !string.Equals(simple, serviceType, StringComparison.Ordinal))
             {
                 AddServiceRegistration(simple, registration);
             }
@@ -238,6 +361,7 @@ public sealed partial class ProjectAnalyzer
     private void CaptureMediatorRegistration(string serviceType, string implementationType)
     {
         var serviceBase = GetTypeNameWithoutGenerics(serviceType);
+        var assemblyHint = GuessAssemblyName(implementationType);
         if (serviceBase.EndsWith("IPipelineBehavior", StringComparison.Ordinal))
         {
             var arguments = SplitGenericArguments(serviceType);
@@ -246,7 +370,7 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var requestType = QualifyTypeName(arguments[0]);
+            var requestType = QualifyTypeName(arguments[0], assemblyHint);
             RegisterPipelineRequest(requestType, implementationType);
             return;
         }
@@ -261,7 +385,7 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var requestType = QualifyTypeName(arguments[0]);
+            var requestType = QualifyTypeName(arguments[0], assemblyHint);
             RegisterProcessorRequest(requestType, implementationType);
         }
     }
@@ -380,6 +504,14 @@ public sealed partial class ProjectAnalyzer
             var line = GetLineNumber(tree, invocation);
             var address = new HttpClientBaseAddress(clientType!, baseUrl, GetRelativePath(tree.FilePath), line, configurationKey, configuration);
             _httpClientBaseUrls[clientType!] = address;
+
+            foreach (var alias in DeriveClientBindingKeys(clientType!))
+            {
+                if (!_httpClientBaseUrls.ContainsKey(alias))
+                {
+                    _httpClientBaseUrls[alias] = address;
+                }
+            }
         }
     }
 
@@ -494,10 +626,26 @@ public sealed partial class ProjectAnalyzer
         var registration = new ServiceRegistrationInfo(serviceType, implementationType, lifetime, filePath, span, project.AssemblyName, project.RelativeDirectory);
         AddServiceRegistration(serviceType, registration);
 
-        var simple = serviceType.Split('.').Last();
-        if (!string.Equals(simple, serviceType, StringComparison.Ordinal))
+        var simple = GetTopLevelSimpleIdentifier(serviceType);
+        if (!string.IsNullOrWhiteSpace(simple))
         {
-            AddServiceRegistration(simple, registration);
+            if (!string.Equals(simple, serviceType, StringComparison.Ordinal))
+            {
+                AddServiceRegistration(simple, registration);
+            }
+
+            if (simple.Length > 1 && simple[0] == 'I' && char.IsUpper(simple[1]))
+            {
+                var trimmedSimple = simple[1..];
+                AddServiceRegistration(trimmedSimple, registration);
+
+                var namespacePart = GetTypeNamespace(serviceType);
+                if (!string.IsNullOrWhiteSpace(namespacePart))
+                {
+                    var qualifiedTrimmed = $"{namespacePart}.{trimmedSimple}";
+                    AddServiceRegistration(qualifiedTrimmed, registration);
+                }
+            }
         }
     }
 
@@ -620,14 +768,13 @@ public sealed partial class ProjectAnalyzer
 
         if (generic.TypeArgumentList.Arguments.Count == 1 && invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is LambdaExpressionSyntax lambda)
         {
-            var created = lambda.Body switch
+            var serviceType = generic.TypeArgumentList.Arguments[0].ToString();
+            var created = TryExtractImplementationType(lambda.Body);
+            if (string.IsNullOrWhiteSpace(created))
             {
-                ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                BlockSyntax block => block.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().FirstOrDefault()?.Type.ToString(),
-                _ => null
-            };
-
-            return (generic.TypeArgumentList.Arguments[0].ToString(), created);
+                created = serviceType;
+            }
+            return (serviceType, created);
         }
 
         return (null, null);
@@ -643,6 +790,10 @@ public sealed partial class ProjectAnalyzer
 
         var serviceType = ExtractTypeFromExpression(arguments[0].Expression);
         var implementationType = ExtractTypeFromExpression(arguments[1].Expression);
+        if (string.IsNullOrWhiteSpace(implementationType))
+        {
+            implementationType = serviceType;
+        }
         return (serviceType, implementationType);
     }
 
@@ -655,6 +806,88 @@ public sealed partial class ProjectAnalyzer
             IdentifierNameSyntax identifier => identifier.Identifier.Text,
             _ => null
         };
+    }
+
+    private static string? TryExtractImplementationType(CSharpSyntaxNode? body)
+    {
+        switch (body)
+        {
+            case null:
+                return null;
+            case ExpressionSyntax expr:
+                return TryExtractTypeFromLambdaExpression(expr);
+            case BlockSyntax block:
+                foreach (var returnStatement in block.DescendantNodes().OfType<ReturnStatementSyntax>())
+                {
+                    var returned = TryExtractTypeFromLambdaExpression(returnStatement.Expression);
+                    if (!string.IsNullOrWhiteSpace(returned))
+                    {
+                        return returned;
+                    }
+                }
+
+                var creation = block.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().FirstOrDefault();
+                if (creation is not null)
+                {
+                    return creation.Type.ToString();
+                }
+
+                var invocation = block.DescendantNodes().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+                if (invocation is not null)
+                {
+                    return TryExtractTypeFromLambdaExpression(invocation);
+                }
+                break;
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractTypeFromLambdaExpression(ExpressionSyntax? expression)
+    {
+        switch (expression)
+        {
+            case null:
+                return null;
+            case ObjectCreationExpressionSyntax creation:
+                return creation.Type.ToString();
+            case AwaitExpressionSyntax awaitExpression:
+                return TryExtractTypeFromLambdaExpression(awaitExpression.Expression);
+            case CastExpressionSyntax castExpression:
+                return castExpression.Type.ToString();
+            case InvocationExpressionSyntax invocation:
+                if (invocation.Expression is MemberAccessExpressionSyntax { Name: GenericNameSyntax genericMember } && genericMember.TypeArgumentList.Arguments.Count > 0)
+                {
+                    return genericMember.TypeArgumentList.Arguments.Last().ToString();
+                }
+
+                if (invocation.Expression is GenericNameSyntax genericInvocation && genericInvocation.TypeArgumentList.Arguments.Count > 0)
+                {
+                    return genericInvocation.TypeArgumentList.Arguments.Last().ToString();
+                }
+
+                if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+                    memberAccess.Name is IdentifierNameSyntax identifierName &&
+                    invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is TypeOfExpressionSyntax typeOfExpression)
+                {
+                    var method = identifierName.Identifier.Text;
+                    if (string.Equals(method, "CreateInstance", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return typeOfExpression.Type.ToString();
+                    }
+                }
+
+                if (invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is TypeOfExpressionSyntax typeOfArgument)
+                {
+                    return typeOfArgument.Type.ToString();
+                }
+
+                return null;
+            case ParenthesizedExpressionSyntax parenthesized:
+                return TryExtractTypeFromLambdaExpression(parenthesized.Expression);
+        }
+
+        return null;
     }
 
     private void EmitServiceRegistrations()
@@ -681,9 +914,18 @@ public sealed partial class ProjectAnalyzer
                 .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => r.Span.StartLine))
             {
-                if (!TryResolveNodeReference(registration.ImplementationType, out var implementation))
+                string? implementationId;
+                if (TryResolveNodeReference(registration.ImplementationType, out var implementation))
                 {
-                    continue;
+                    implementationId = implementation.Id;
+                }
+                else
+                {
+                    implementationId = EnsureServiceImplementationNode(registration);
+                    if (implementationId is null)
+                    {
+                        continue;
+                    }
                 }
 
                 var props = new Dictionary<string, object>
@@ -695,7 +937,7 @@ public sealed partial class ProjectAnalyzer
                 _edges.Add(new GraphEdge
                 {
                     From = serviceId!,
-                    To = implementation.Id,
+                    To = implementationId,
                     Kind = "implemented_by",
                     Source = "static",
                     Confidence = 1.0,
@@ -752,7 +994,7 @@ public sealed partial class ProjectAnalyzer
                             {
                                 Id = id,
                                 Type = "config.options_poco",
-                                Name = inner.Split('.').Last(),
+                                Name = GetTopLevelSimpleIdentifier(inner),
                                 Fqdn = inner,
                                 Assembly = GuessAssemblyName(inner),
                                 Project = string.Empty,
@@ -794,41 +1036,44 @@ public sealed partial class ProjectAnalyzer
             }
 
             // Open generic closure mapping
-            if (service.Fqdn.Contains('<', StringComparison.Ordinal) && service.Fqdn.Contains('>', StringComparison.Ordinal))
+            if (HasConcreteGenericArguments(service.Fqdn))
             {
-                // Skip open generic definitions (contain `T` or other single-letter parameters) and focus on closed (contains '.') arguments
-                var genericArgsSegment = service.Fqdn[(service.Fqdn.IndexOf('<') + 1)..service.Fqdn.LastIndexOf('>')];
-                if (genericArgsSegment.Contains('.', StringComparison.Ordinal))
+                var baseName = service.Name.Split('<')[0];
+                if (openGenericServiceNodes.TryGetValue(baseName, out var openNodes))
                 {
-                    var baseName = service.Name.Split('<')[0];
-                    if (openGenericServiceNodes.TryGetValue(baseName, out var openNodes))
+                    foreach (var openNode in openNodes)
                     {
-                        foreach (var openNode in openNodes)
+                        if (!implementedByLookup.TryGetValue(openNode.Id, out var implEdges))
                         {
-                            if (implementedByLookup.TryGetValue(openNode.Id, out var implEdges))
+                            continue;
+                        }
+
+                        foreach (var implEdge in implEdges)
+                        {
+                            if (_edges.Any(e => e.From == service.Id && e.To == implEdge.To && e.Kind == "implemented_by"))
                             {
-                                foreach (var implEdge in implEdges)
-                                {
-                                    // Synthesize edge if absent
-                                    if (!_edges.Any(e => e.From == service.Id && e.To == implEdge.To && e.Kind == "implemented_by"))
-                                    {
-                                        _edges.Add(new GraphEdge
-                                        {
-                                            From = service.Id,
-                                            To = implEdge.To,
-                                            Kind = "implemented_by",
-                                            Source = "synthetic",
-                                            Confidence = implEdge.Confidence * 0.9,
-                                            Transform = new GraphTransform { Type = "generic.closure" },
-                                            Props = new Dictionary<string, object>
-                                            {
-                                                ["closure_of"] = openNode.Fqdn ?? openNode.Name,
-                                                ["closed_args"] = genericArgsSegment
-                                            }
-                                        });
-                                    }
-                                }
+                                continue;
                             }
+
+                            var closedArguments = SplitGenericArguments(service.Fqdn);
+                            var closedArgumentText = closedArguments.Count > 0
+                                ? string.Join(", ", closedArguments)
+                                : string.Empty;
+
+                            _edges.Add(new GraphEdge
+                            {
+                                From = service.Id,
+                                To = implEdge.To,
+                                Kind = "implemented_by",
+                                Source = "synthetic",
+                                Confidence = implEdge.Confidence * 0.9,
+                                Transform = new GraphTransform { Type = "generic.closure" },
+                                Props = new Dictionary<string, object>
+                                {
+                                    ["closure_of"] = openNode.Fqdn ?? openNode.Name,
+                                    ["closed_args"] = closedArgumentText
+                                }
+                            });
                         }
                     }
                 }
@@ -836,10 +1081,24 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
-    private bool TryEnsureServiceNode(string serviceType, out string? nodeId, out ServiceRegistrationInfo? registration)
+    private bool TryEnsureServiceNode(string serviceType, out string? nodeId, out ServiceRegistrationInfo? registration, string? preferredTargetType = null)
     {
-        registration = FindServiceRegistration(serviceType);
-        var effectiveServiceType = registration?.ServiceType ?? serviceType;
+        var targetAwareServiceType = serviceType;
+        registration = null;
+
+        if (!string.IsNullOrWhiteSpace(preferredTargetType) && !serviceType.Contains('<'))
+        {
+            var closedCandidate = $"{GetTypeNameWithoutGenerics(serviceType)}<{preferredTargetType}>";
+            var closedRegistration = FindServiceRegistration(closedCandidate, preferredTargetType);
+            if (closedRegistration is not null)
+            {
+                targetAwareServiceType = closedCandidate;
+                registration = closedRegistration;
+            }
+        }
+
+        registration ??= FindServiceRegistration(targetAwareServiceType, preferredTargetType);
+        var effectiveServiceType = registration?.ServiceType ?? targetAwareServiceType;
         var assembly = registration?.Assembly ?? GuessAssemblyName(effectiveServiceType);
         var project = registration?.Project ?? string.Empty;
         var filePath = registration?.FilePath ?? string.Empty;
@@ -855,7 +1114,7 @@ public sealed partial class ProjectAnalyzer
         }
         else
         {
-            var simple = effectiveServiceType.Split('.').Last();
+            var simple = GetTopLevelSimpleIdentifier(effectiveServiceType);
             var match = _services.Values.FirstOrDefault(s => s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
             if (match is not null)
             {
@@ -876,7 +1135,7 @@ public sealed partial class ProjectAnalyzer
             {
                 Id = id,
                 Type = "app.service_contract",
-                Name = effectiveServiceType.Split('.').Last(),
+                Name = GetTopLevelSimpleIdentifier(effectiveServiceType),
                 Fqdn = effectiveServiceType,
                 Assembly = assembly,
                 Project = project,
@@ -898,62 +1157,254 @@ public sealed partial class ProjectAnalyzer
             return string.Empty;
         }
 
-        var firstSegment = serviceType.Split('.').FirstOrDefault();
-        return string.IsNullOrWhiteSpace(firstSegment) ? serviceType : firstSegment;
+        var root = GetTypeAssemblyRoot(serviceType);
+        if (!string.IsNullOrWhiteSpace(root))
+        {
+            return root;
+        }
+
+        var arguments = SplitGenericArguments(serviceType);
+        foreach (var argument in arguments)
+        {
+            var argumentRoot = GetTypeAssemblyRoot(argument);
+            if (!string.IsNullOrWhiteSpace(argumentRoot))
+            {
+                return argumentRoot;
+            }
+        }
+
+        var trimmed = TrimGlobalAlias(serviceType.Trim());
+        var withoutGenerics = GetTypeNameWithoutGenerics(trimmed);
+        var fallbackRoot = GetTypeAssemblyRoot(withoutGenerics);
+        return string.IsNullOrWhiteSpace(fallbackRoot) ? withoutGenerics : fallbackRoot;
     }
 
-    private ServiceRegistrationInfo? FindServiceRegistration(string serviceType)
+    private ServiceRegistrationInfo? FindServiceRegistration(string serviceType, string? preferredTargetType = null)
     {
         if (_serviceRegistrations.TryGetValue(serviceType, out var registrations) && !registrations.IsEmpty)
         {
-            return registrations
-                .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(r => r.Span.StartLine)
-                .FirstOrDefault();
+            var best = SelectBestRegistration(serviceType, registrations, preferredTargetType);
+            if (best is not null)
+            {
+                return best;
+            }
         }
 
         if (TryMakeOpenGenericType(serviceType, out var openServiceType, out _))
         {
             if (_serviceRegistrations.TryGetValue(openServiceType, out var openRegistrations) && !openRegistrations.IsEmpty)
             {
-                return openRegistrations
-                    .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(r => r.Span.StartLine)
-                    .FirstOrDefault();
+                var bestOpen = SelectBestRegistration(serviceType, openRegistrations, preferredTargetType);
+                if (bestOpen is not null)
+                {
+                    return bestOpen;
+                }
             }
 
-            var openSimple = openServiceType.Split('.').Last();
+            var openSimple = GetTopLevelSimpleIdentifier(openServiceType);
             if (_serviceRegistrations.TryGetValue(openSimple, out var openSimpleRegistrations) && !openSimpleRegistrations.IsEmpty)
             {
-                return openSimpleRegistrations
-                    .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(r => r.Span.StartLine)
-                    .FirstOrDefault();
+                var bestOpenSimple = SelectBestRegistration(serviceType, openSimpleRegistrations, preferredTargetType);
+                if (bestOpenSimple is not null)
+                {
+                    return bestOpenSimple;
+                }
             }
         }
 
-        var simple = serviceType.Split('.').Last();
+        var simple = GetTopLevelSimpleIdentifier(serviceType);
         if (_serviceRegistrations.TryGetValue(simple, out var simpleRegistrations) && !simpleRegistrations.IsEmpty)
         {
-            return simpleRegistrations
-                .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(r => r.Span.StartLine)
-                .FirstOrDefault();
+            var bestSimple = SelectBestRegistration(serviceType, simpleRegistrations, preferredTargetType);
+            if (bestSimple is not null)
+            {
+                return bestSimple;
+            }
         }
 
-        if (serviceType.StartsWith("I", StringComparison.Ordinal) && serviceType.Length > 1)
+        var simpleWithoutInterface = GetTopLevelSimpleIdentifier(serviceType);
+        if (!string.IsNullOrWhiteSpace(simpleWithoutInterface) &&
+            simpleWithoutInterface.Length > 1 &&
+            simpleWithoutInterface[0] == 'I' &&
+            char.IsUpper(simpleWithoutInterface[1]))
         {
-            var trimmed = serviceType.TrimStart('I');
-            if (_serviceRegistrations.TryGetValue(trimmed, out var altRegistrations) && !altRegistrations.IsEmpty)
+            var trimmedSimple = simpleWithoutInterface[1..];
+            if (_serviceRegistrations.TryGetValue(trimmedSimple, out var altSimpleRegistrations) && !altSimpleRegistrations.IsEmpty)
             {
-                return altRegistrations
-                    .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(r => r.Span.StartLine)
-                    .FirstOrDefault();
+                var bestTrimmed = SelectBestRegistration(serviceType, altSimpleRegistrations, preferredTargetType);
+                if (bestTrimmed is not null)
+                {
+                    return bestTrimmed;
+                }
+            }
+
+            var namespacePart = GetTypeNamespace(serviceType);
+            if (!string.IsNullOrWhiteSpace(namespacePart))
+            {
+                var qualifiedTrimmed = $"{namespacePart}.{trimmedSimple}";
+                if (_serviceRegistrations.TryGetValue(qualifiedTrimmed, out var qualifiedRegistrations) && !qualifiedRegistrations.IsEmpty)
+                {
+                    var bestQualified = SelectBestRegistration(serviceType, qualifiedRegistrations, preferredTargetType);
+                    if (bestQualified is not null)
+                    {
+                        return bestQualified;
+                    }
+                }
             }
         }
 
         return null;
+    }
+
+    private ServiceRegistrationInfo? SelectBestRegistration(string requestedType, IEnumerable<ServiceRegistrationInfo> candidates, string? preferredTargetType = null)
+    {
+        var list = candidates as IList<ServiceRegistrationInfo> ?? candidates.ToList();
+        if (list.Count == 0)
+        {
+            return null;
+        }
+
+        var requestedSimple = GetTopLevelSimpleIdentifier(requestedType);
+        var requestedNamespace = GetTypeNamespace(requestedType);
+        var requestedAssemblyRoot = GetTypeAssemblyRoot(requestedType);
+
+        ServiceRegistrationInfo? best = null;
+        var bestScore = int.MinValue;
+
+        foreach (var candidate in list)
+        {
+            var score = 0;
+
+            if (string.Equals(candidate.ServiceType, requestedType, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 1_000;
+            }
+
+            var candidateSimple = GetTopLevelSimpleIdentifier(candidate.ServiceType);
+            if (!string.IsNullOrWhiteSpace(requestedSimple) &&
+                string.Equals(candidateSimple, requestedSimple, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 200;
+            }
+
+            var candidateNamespace = GetTypeNamespace(candidate.ServiceType);
+            if (!string.IsNullOrWhiteSpace(requestedNamespace) && !string.IsNullOrWhiteSpace(candidateNamespace))
+            {
+                score += LongestCommonPrefixLength(requestedNamespace, candidateNamespace);
+            }
+
+            if (!string.IsNullOrWhiteSpace(requestedAssemblyRoot))
+            {
+                var candidateAssemblyRoot = GetAssemblyRoot(candidate.Assembly);
+                if (!string.IsNullOrWhiteSpace(candidateAssemblyRoot) &&
+                    string.Equals(candidateAssemblyRoot, requestedAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 150;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(candidate.Project) &&
+                !string.IsNullOrWhiteSpace(requestedNamespace) &&
+                requestedNamespace.IndexOf(candidate.Project, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                score += 25;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredTargetType))
+            {
+                var targetSimple = GetTopLevelSimpleIdentifier(preferredTargetType);
+                if (!string.IsNullOrWhiteSpace(targetSimple))
+                {
+                    if (candidate.ImplementationType.Contains(targetSimple, StringComparison.OrdinalIgnoreCase) ||
+                        candidate.ServiceType.Contains(targetSimple, StringComparison.OrdinalIgnoreCase))
+                    {
+                        score += 400;
+                    }
+                }
+
+                if (candidate.ImplementationType.Contains(preferredTargetType, StringComparison.OrdinalIgnoreCase) ||
+                    candidate.ServiceType.Contains(preferredTargetType, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 250;
+                }
+            }
+
+            if (best is null || score > bestScore ||
+                (score == bestScore && CompareRegistrations(candidate, best) < 0))
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best ?? list.OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Span.StartLine)
+            .FirstOrDefault();
+    }
+
+    private static int CompareRegistrations(ServiceRegistrationInfo left, ServiceRegistrationInfo right)
+    {
+        var fileCompare = StringComparer.OrdinalIgnoreCase.Compare(left.FilePath ?? string.Empty, right.FilePath ?? string.Empty);
+        if (fileCompare != 0)
+        {
+            return fileCompare;
+        }
+
+        var spanCompare = left.Span.StartLine.CompareTo(right.Span.StartLine);
+        if (spanCompare != 0)
+        {
+            return spanCompare;
+        }
+
+        return StringComparer.OrdinalIgnoreCase.Compare(left.ServiceType, right.ServiceType);
+    }
+
+    private static string ExtractTypeNamespace(string typeName)
+        => GetTypeNamespace(typeName);
+
+    private static string GetAssemblyRootFromTypeName(string typeName)
+        => GetTypeAssemblyRoot(typeName);
+
+    private string? EnsureServiceImplementationNode(ServiceRegistrationInfo registration)
+    {
+        if (registration is null || string.IsNullOrWhiteSpace(registration.ImplementationType))
+        {
+            return null;
+        }
+
+        if (TryResolveNodeReference(registration.ImplementationType, out var reference))
+        {
+            return reference.Id;
+        }
+
+        var implementationType = registration.ImplementationType;
+        var assembly = string.IsNullOrWhiteSpace(registration.Assembly)
+            ? GuessAssemblyName(implementationType)
+            : registration.Assembly;
+        var project = string.IsNullOrWhiteSpace(registration.Project) ? string.Empty : registration.Project;
+        var symbolId = $"T:{implementationType}";
+        var id = StableId.For("app.service", implementationType, assembly, symbolId);
+
+        if (!_nodes.ContainsKey(id))
+        {
+            // Synthesize a minimal implementation node so flows can resolve the concrete type.
+            var simpleName = GetTopLevelSimpleIdentifier(implementationType);
+            _nodes.TryAdd(id, new GraphNode
+            {
+                Id = id,
+                Type = "app.service",
+                Name = simpleName,
+                Fqdn = implementationType,
+                Assembly = assembly,
+                Project = project,
+                FilePath = string.Empty,
+                Span = null,
+                SymbolId = symbolId,
+                Tags = new[] { "app" }
+            });
+        }
+
+        return id;
     }
 
     private HttpClientBaseAddress? TryGetHttpClientBaseAddress(string clientType)
@@ -963,7 +1414,7 @@ public sealed partial class ProjectAnalyzer
             return address;
         }
 
-        var simple = clientType.Split('.').Last();
+        var simple = GetTopLevelSimpleIdentifier(clientType);
         if (_httpClientBaseUrls.TryGetValue(simple, out var simpleAddress))
         {
             return simpleAddress;

@@ -95,7 +95,22 @@ public sealed partial class ProjectAnalyzer
             };
 
             var publisherAliases = new[] { publisher.Fqdn, publisher.Name }
-                .SelectMany(alias => new[] { alias, alias.Split('.').Last() })
+                .SelectMany<string, string>(alias =>
+                {
+                    if (string.IsNullOrWhiteSpace(alias))
+                    {
+                        return Array.Empty<string>();
+                    }
+
+                    var aliases = new List<string> { alias };
+                    var simple = GetTopLevelSimpleIdentifier(alias);
+                    if (!string.IsNullOrWhiteSpace(simple))
+                    {
+                        aliases.Add(simple);
+                    }
+
+                    return aliases;
+                })
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
@@ -172,7 +187,7 @@ public sealed partial class ProjectAnalyzer
             return contract;
         }
 
-        var simple = messageType.Split('.').Last();
+        var simple = GetTopLevelSimpleIdentifier(messageType);
         var existing = _messageContracts.Values.FirstOrDefault(c =>
             c.Fqdn.Equals(messageType, StringComparison.OrdinalIgnoreCase) ||
             c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
@@ -184,6 +199,7 @@ public sealed partial class ProjectAnalyzer
 
         var fqdn = messageType.Contains('.') ? messageType : simple;
         var symbolId = $"T:{fqdn}";
-        return new MessageContractInfo(fqdn, string.Empty, string.Empty, string.Empty, new GraphSpan { StartLine = 1, EndLine = 1 }, symbolId, simple);
+        var name = string.IsNullOrWhiteSpace(simple) ? messageType : simple;
+        return new MessageContractInfo(fqdn, string.Empty, string.Empty, string.Empty, new GraphSpan { StartLine = 1, EndLine = 1 }, symbolId, name);
     }
 }
