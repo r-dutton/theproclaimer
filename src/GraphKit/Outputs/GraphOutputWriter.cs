@@ -264,19 +264,16 @@ public sealed class GraphOutputWriter
             {
                 var flow = FlowBuilder.BuildFlows(document, node => string.Equals(node.Id, controller.Id, StringComparison.Ordinal), _workspaceIndex);
                 if (string.IsNullOrWhiteSpace(flow)) continue;
+
                 await writer.WriteAsync(flow);
                 await writer.WriteLineAsync();
-            }
-            await writer.FlushAsync();
-        }
 
-        // Also write individual controller flow files for convenience (unchanged functionality)
-        foreach (var controller in controllers)
-        {
-            var flow = FlowBuilder.BuildFlows(document, node => string.Equals(node.Id, controller.Id, StringComparison.Ordinal), _workspaceIndex);
-            if (string.IsNullOrWhiteSpace(flow)) continue;
-            var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(controller.Fqdn) ? controller.Name : controller.Fqdn) + ".md";
-            await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
+                // Persist the per-controller flow for convenience without recomputing the narrative.
+                var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(controller.Fqdn) ? controller.Name : controller.Fqdn) + ".md";
+                await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
+            }
+
+            await writer.FlushAsync();
         }
     }
 
