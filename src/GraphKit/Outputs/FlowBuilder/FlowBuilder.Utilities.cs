@@ -428,7 +428,7 @@ namespace GraphKit.Outputs
                 {
                     continue;
                 }
-                if (state.AllowedIds != null && !state.AllowedIds.Contains(behaviorNode.Id)) continue;
+                if (!state.IsAllowedNode(behaviorNode.Id)) continue;
 
                 var stage = behaviorNode.Props is { } bProps && bProps.TryGetValue("stage", out var stageVal)
                     ? stageVal?.ToString()
@@ -469,7 +469,7 @@ namespace GraphKit.Outputs
             foreach (var handlerEdge in handlerEdges)
             {
                 if (!state.NodesById.TryGetValue(handlerEdge.To, out var handlerNode)) continue;
-                if (state.AllowedIds != null && !state.AllowedIds.Contains(handlerNode.Id)) continue;
+                if (!state.IsAllowedNode(handlerNode.Id)) continue;
                 var span = handlerNode.Span;
                 var handlerKey = $"{handlerNode.Id}:{span?.StartLine}:{span?.EndLine}";
                 state.DedupHandlers ??= new HashSet<string>(StringComparer.Ordinal);
@@ -606,7 +606,7 @@ namespace GraphKit.Outputs
             {
                 return;
             }
-            if (state.AllowedIds != null && !state.AllowedIds.Contains(destination.Id))
+            if (!state.IsAllowedNode(destination.Id))
             {
                 return; // not in reachability scope
             }
@@ -635,7 +635,7 @@ namespace GraphKit.Outputs
                 return;
             }
             // Prevent expansion of downstream if outside allowed set
-            if (state.AllowedIds != null && !state.AllowedIds.Contains(destination.Id)) return;
+            if (!state.IsAllowedNode(destination.Id)) return;
 
             foreach (var convertEdge in downstreamEdges.Where(e => e.Kind == "converts_to"))
             {
@@ -1023,5 +1023,26 @@ namespace GraphKit.Outputs
                 ? $" ({string.Join(", ", details)})"
                 : string.Empty;
         }
+    }
+}
+
+
+using System.Text.RegularExpressions;
+using System.Diagnostics.CodeAnalysis;
+
+namespace GraphKit.Outputs
+{
+    public static partial class Utilities
+    {
+        [GeneratedRegex("\\{[^}]+\\}", RegexOptions.NonBacktracking)]
+        private static partial Regex RouteParamRx();
+        
+        [GeneratedRegex("With(?:Required|Optional)QueryParameter\(\s*\"([^\"]+)\"",
+            RegexOptions.NonBacktracking)]
+        private static partial Regex QueryParamRx();
+
+        private static readonly Dictionary<string,string> __routeCache = new(StringComparer.Ordinal);
+        public static string NormaliseRouteCached(string raw)
+            => string.IsNullOrEmpty(raw) ? raw : (__routeCache.TryGetValue(raw, out var n) ? n : (__routeCache[raw] = RouteParamRx().Replace(raw, "{}")));
     }
 }

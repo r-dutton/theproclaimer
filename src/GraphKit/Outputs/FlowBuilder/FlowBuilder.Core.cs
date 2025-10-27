@@ -135,15 +135,10 @@ public static partial class FlowBuilder
                 continue;
             }
 
-            var allowed = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var action in actions)
-            {
-                var outward = CollectReachable(action.Id, edgesByFrom);
-                foreach (var id in outward)
-                {
-                    allowed.Add(id);
-                }
-            }
+            // Single traversal seeded with all endpoints in the group
+            var startIds = new List<string>(actions.Count);
+            foreach (var action in actions) startIds.Add(action.Id);
+            var allowed = CollectReachable(startIds, edgesByFrom, maxDepth);
 
             var state = new FlowRenderState(document, nodesById, edgesByFrom, nodesByFqdn, nodesByName, mapLookup, workspace, maxDepth)
             {
@@ -156,6 +151,40 @@ public static partial class FlowBuilder
 
         return builder.ToString();
     }
+    /// <summary>
+    /// Breadth-first reachability from a set of start node IDs.
+    /// Avoids repeated traversals across convergent flows.
+    /// </summary>
+    private static HashSet<string> CollectReachable(IEnumerable<string> startIds,
+                                                    Dictionary<string, List<GraphEdge>> edgesByFrom,
+                                                    int? maxDepth = null,
+                                                    System.Threading.CancellationToken ct = default)
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal);
+        var q = new Queue<(string Id, int Depth)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var s in startIds)
+        {
+            if (string.IsNullOrWhiteSpace(s)) continue;
+            if (seen.Add(s)) q.Enqueue((s, 0));
+        }
+        while (q.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (id, d) = q.Dequeue();
+            allowed.Add(id);
+            if (maxDepth.HasValue && d >= maxDepth.Value) continue;
+            if (!edgesByFrom.TryGetValue(id, out var outs) || outs is null) continue;
+            foreach (var e in outs)
+            {
+                var to = e.To;
+                if (to is null) continue;
+                if (seen.Add(to)) q.Enqueue((to, d + 1));
+            }
+        }
+        return allowed;
+    }
+
 
     private static string ResolveControllerKey(GraphNode action)
     {
@@ -178,7 +207,7 @@ public static partial class FlowBuilder
         return action.Name ?? action.Id;
     }
 
-    private static string ResolveControllerDisplayName(GraphNode action, string controllerKey)
+    public static string ResolveControllerDisplayName(GraphNode action, string controllerKey)
     {
         var fromProps = GetNodeProp(action, "controller_name");
         if (!string.IsNullOrWhiteSpace(fromProps))
@@ -1172,5 +1201,46 @@ public static partial class FlowBuilder
         }
     }
 
+
+
+    public static IEnumerable<(string Key, List<ControllerAction> Actions)> GroupControllers(GraphDocument document)
+    {
+        var groups = new Dictionary<string, List<ControllerAction>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in document.Nodes)
+        {
+            if (!string.Equals(node.Type, "controller_action", StringComparison.OrdinalIgnoreCase)) continue;
+            var action = new ControllerAction(node);
+            var key = ResolveControllerDisplayName(action, action.Name ?? action.Id);
+            (groups.TryGetValue(key, out var list) ? list : groups[key] = new()).Add(action);
+        }
+        return groups.Select(kv => (kv.Key, kv.Value.OrderBy(a => a.Fqdn ?? a.Name, StringComparer.OrdinalIgnoreCase).ToList()));
+    }
+
+    public static FlowRenderState CreateState(GraphDocument document, FlowWorkspaceIndex? workspace, int? maxDepth)
+    {
+        var nodesById = new Dictionary<string, GraphNode>(document.Nodes.Count, StringComparer.Ordinal);
+        foreach (var n in document.Nodes) nodesById[n.Id] = n;
+
+        var edgesByFrom = new Dictionary<string, List<GraphEdge>>(StringComparer.Ordinal);
+        foreach (var e in document.Edges)
+        {
+            if (!edgesByFrom.TryGetValue(e.From, out var list))
+                edgesByFrom[e.From] = list = new List<GraphEdge>(4);
+            list.Add(e);
+        }
+
+        var nodesByFqdn = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
+        var nodesByName = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in document.Nodes)
+        {
+            if (!string.IsNullOrWhiteSpace(n.Fqdn))
+                (nodesByFqdn.TryGetValue(n.Fqdn!, out var lf) ? lf : nodesByFqdn[n.Fqdn!] = new List<GraphNode>(2)).Add(n);
+            if (!string.IsNullOrWhiteSpace(n.Name))
+                (nodesByName.TryGetValue(n.Name!, out var ln) ? ln : nodesByName[n.Name!] = new List<GraphNode>(2)).Add(n);
+        }
+
+        var mapLookup = BuildMapLookup(document);
+        return new FlowRenderState(document, nodesById, edgesByFrom, nodesByFqdn, nodesByName, mapLookup, workspace, maxDepth);
+    }
 
 }

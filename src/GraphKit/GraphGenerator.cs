@@ -22,9 +22,7 @@ public sealed class GraphGenerator
             Console.WriteLine($"[graph] Analyzed project {project.AssemblyName} ({project.SourceFiles.Count} files). Nodes={analyzer.NodeCount} Edges={analyzer.EdgeCount} Mem={GC.GetTotalMemory(false)/1024/1024:F1}MB");
             // Opportunistic GC hint (non-filtering, full fidelity retained)
             if ((project.SourceFiles?.Count ?? 0) > 250)
-            {
-                GC.Collect();
-            }
+            { }
         }
 
         var document = analyzer.BuildDocument(AnalyzerVersion);

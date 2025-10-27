@@ -411,4 +411,12 @@ public static partial class FlowBuilder
         }
     }
 
+
+    // Unified allow-check for both engines (legacy via AllowedIds, turbo via same set)
+    public bool IsAllowedNode(GraphNode node)
+    {
+        if (AllowedIds is null) return true;
+        return state.IsAllowedNode(node.Id);
+    }
+
 }

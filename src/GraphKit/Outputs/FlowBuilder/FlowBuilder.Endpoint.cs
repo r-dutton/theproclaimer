@@ -12,7 +12,7 @@ namespace GraphKit.Outputs
     {
         public static void AppendEndpointFlow(StringBuilder builder, FlowRenderState state, GraphNode endpoint, int indent)
         {
-            if (state.AllowedIds != null && !state.AllowedIds.Contains(endpoint.Id))
+            if (!state.IsAllowedNode(endpoint.Id))
             {
                 return; // outside reachability scope
             }
@@ -87,7 +87,7 @@ namespace GraphKit.Outputs
                     {
                         continue;
                     }
-                    if (state.AllowedIds != null && !state.AllowedIds.Contains(configNode.Id)) continue;
+                    if (!state.IsAllowedNode(configNode.Id)) continue;
 
                     var key = configEdge.Props is { } cprops && cprops.TryGetValue("key", out var keyVal)
                         ? keyVal?.ToString()
