@@ -53,6 +53,7 @@ public sealed class TurboFlowEngine : IFlowEngine
             return Array.Empty<FlowNarrative>();
         }
 
+        var flowIndex = FlowGraphIndex.Build(document);
         var results = new List<FlowNarrative>(groups.Count);
 
         foreach (var (key, controllerActions) in groups)
@@ -98,7 +99,7 @@ public sealed class TurboFlowEngine : IFlowEngine
                 allowedIds.Add(action.Id);
             }
 
-            var state = FlowBuilder.CreateState(document, workspace, maxDepth);
+            var state = FlowBuilder.CreateState(flowIndex, workspace, maxDepth);
             var reachableIds = CollectReachableIds(actionNodes, state.EdgesByFrom, maxDepth);
             allowedIds.UnionWith(reachableIds);
             state.AllowedIds = allowedIds;

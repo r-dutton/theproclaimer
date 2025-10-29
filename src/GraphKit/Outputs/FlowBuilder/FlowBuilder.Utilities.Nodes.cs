@@ -362,6 +362,11 @@ namespace GraphKit.Outputs
                 // Sends / dispatches requests
                 foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
                 {
+                    if (FlowBuilder.ShouldSkipSyntheticDispatch(state, requestEdge))
+                    {
+                        continue;
+                    }
+
                     if (!state.NodesById.TryGetValue(requestEdge.To, out var requestNode)) continue;
                     var responseType = requestEdge.Props is { } rprops && rprops.TryGetValue("response_type", out var rt) ? rt?.ToString() : null;
                     var handlerName = string.Empty;
@@ -371,7 +376,7 @@ namespace GraphKit.Outputs
                     }
                     var handlerPart = string.IsNullOrWhiteSpace(handlerName) ? string.Empty : $" -> {handlerName}";
                     var responsePart = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" : {responseType}";
-                    var synthetic = string.Equals(requestEdge.Source, "synthetic", StringComparison.OrdinalIgnoreCase) && requestEdge.Transform?.Type == "requestprocessor.dispatch";
+                    var synthetic = FlowBuilder.IsSyntheticRequestProcessorDispatch(requestEdge);
                     var prefix = synthetic ? "dispatches" : "sends_request";
                     var requestKey = requestNode.Id + "::" + handlerName + "::" + responseType;
                     state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);

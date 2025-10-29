@@ -13,7 +13,7 @@ public static partial class FlowBuilder
 {
     public sealed class FlowRenderState
     {
-        public FlowRenderState(
+        internal FlowRenderState(
             GraphDocument document,
             IReadOnlyDictionary<string, GraphNode> nodesById,
             IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
@@ -21,7 +21,8 @@ public static partial class FlowBuilder
             IReadOnlyDictionary<string, IReadOnlyList<GraphNode>> nodesByName,
             IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> mapLookup,
             FlowWorkspaceIndex? workspace,
-            int? maxDepth)
+            int? maxDepth,
+            FlowGraphIndex? graphIndex = null)
         {
             Document = document;
             NodesById = nodesById;
@@ -31,6 +32,7 @@ public static partial class FlowBuilder
             MapLookup = mapLookup;
             Workspace = workspace;
             MaxDepth = maxDepth;
+            GraphIndex = graphIndex;
         }
 
         public GraphDocument Document { get; }
@@ -40,18 +42,20 @@ public static partial class FlowBuilder
         public IReadOnlyDictionary<string, IReadOnlyList<GraphNode>> NodesByName { get; }
         public IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> MapLookup { get; }
         public FlowWorkspaceIndex? Workspace { get; }
+        internal FlowGraphIndex? GraphIndex { get; }
         public HashSet<string> EndpointStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> HandlerStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> NotificationStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> TargetServiceVisited { get; } = new(StringComparer.Ordinal);
         public HashSet<string> ServiceStack { get; } = new(StringComparer.Ordinal);
         // Deduplication sets to suppress repeated request dispatch and handler expansion noise within a single flow render
-    public HashSet<string>? DedupRequests { get; set; }
-    public HashSet<string>? ExpandedImplementations { get; set; }
+        public HashSet<string>? DedupRequests { get; set; }
+        public HashSet<string>? ExpandedImplementations { get; set; }
         public HashSet<string>? RenderedEndpoints { get; set; }
         public HashSet<string> RemoteLookupKeys { get; } = new(StringComparer.Ordinal);
         // Track mapping edges printed: key format FromNodeId::ToNodeId::Variable(optional)
         public HashSet<string> PrintedMappings { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> RenderedSyntheticDispatches { get; } = new(StringComparer.Ordinal);
         public int? MaxDepth { get; }
         // Reachability filter: if populated, only nodes whose Id is contained will be expanded/emitted.
         public HashSet<string>? AllowedIds { get; set; }
@@ -70,6 +74,7 @@ public static partial class FlowBuilder
             RemoteLookupKeys.Clear();
             TargetServiceVisited.Clear();
             PrintedMappings.Clear();
+            RenderedSyntheticDispatches.Clear();
             HttpClientExpansionKeys.Clear();
             EndpointStack.Clear();
             HandlerStack.Clear();

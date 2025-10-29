@@ -1,4 +1,4 @@
-﻿using GraphKit.Graph;
+using GraphKit.Graph;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -978,6 +978,11 @@ namespace GraphKit.Outputs
 
                 foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
                 {
+                    if (FlowBuilder.ShouldSkipSyntheticDispatch(state, requestEdge))
+                    {
+                        continue;
+                    }
+
                     if (!state.NodesById.TryGetValue(requestEdge.To, out var requestNode))
                     {
                         continue;

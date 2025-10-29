@@ -463,6 +463,11 @@ namespace GraphKit.Outputs
 
                 foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
                 {
+                    if (ShouldSkipSyntheticDispatch(state, requestEdge))
+                    {
+                        continue;
+                    }
+
                     if (!state.NodesById.TryGetValue(requestEdge.To, out var requestNode)) continue;
 
                     // Skip duplicate sends/dispatch of same request at same line
@@ -478,7 +483,7 @@ namespace GraphKit.Outputs
                     }
                     var handlerPart = string.IsNullOrWhiteSpace(handlerName) ? string.Empty : $" -> {handlerName}";
                     var responsePart = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" ({responseType})";
-                    var synthetic = string.Equals(requestEdge.Source, "synthetic", StringComparison.OrdinalIgnoreCase) && requestEdge.Transform?.Type == "requestprocessor.dispatch";
+                    var synthetic = IsSyntheticRequestProcessorDispatch(requestEdge);
                     var prefix = synthetic ? "dispatches" : "sends_request";
                     var baseLabel = $"{prefix} {requestNode.Name}";
                     AppendIndented(builder, childIndent, $"{FormatLinkedCode(baseLabel, requestEdge.Transform?.Location)}{handlerPart}{responsePart}");
