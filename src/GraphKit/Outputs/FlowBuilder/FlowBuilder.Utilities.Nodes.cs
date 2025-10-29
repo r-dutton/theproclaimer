@@ -36,6 +36,52 @@ namespace GraphKit.Outputs
 
                 var printedServiceCallKeys = new HashSet<string>(StringComparer.Ordinal);
 
+                var clientEdges = edges.Where(e => e.Kind == "uses_client").ToList();
+                var serviceEdges = edges.Where(e => e.Kind == "uses_service" && EdgeMatchesMethod(invokedMethod, e)).ToList();
+
+                var serviceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var serviceEdge in serviceEdges)
+                {
+                    if (!state.NodesById.TryGetValue(serviceEdge.To, out var serviceNode))
+                    {
+                        continue;
+                    }
+
+                    if (IsInfrastructureNoiseService(serviceNode))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(serviceNode.Fqdn))
+                    {
+                        serviceKeys.Add(serviceNode.Fqdn);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(serviceNode.Name))
+                    {
+                        serviceKeys.Add(serviceNode.Name);
+                    }
+                }
+
+                var deferredClientEdges = new Dictionary<string, List<(GraphEdge Edge, GraphNode Node)>>(StringComparer.OrdinalIgnoreCase);
+
+                List<(GraphEdge Edge, GraphNode Node)>? TakeDeferredClients(GraphNode serviceNode)
+                {
+                    if (!string.IsNullOrWhiteSpace(serviceNode.Fqdn) && deferredClientEdges.TryGetValue(serviceNode.Fqdn, out var byFqdn))
+                    {
+                        deferredClientEdges.Remove(serviceNode.Fqdn);
+                        return byFqdn;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(serviceNode.Name) && deferredClientEdges.TryGetValue(serviceNode.Name, out var byName))
+                    {
+                        deferredClientEdges.Remove(serviceNode.Name);
+                        return byName;
+                    }
+
+                    return null;
+                }
+
                 // Configuration usages
                 foreach (var configEdge in edges.Where(e => e.Kind == "uses_configuration"))
                 {
@@ -111,23 +157,45 @@ namespace GraphKit.Outputs
                     FlowBuilder.AppendRepositoryFlow(builder, state, targetNode, indent + 1);
                 }
 
-                foreach (var clientEdge in edges.Where(e => e.Kind == "uses_client"))
+                foreach (var clientEdge in clientEdges)
                 {
-                    if (!EdgeMatchesMethod(invokedMethod, clientEdge)) continue;
+                    if (!EdgeMatchesMethod(invokedMethod, clientEdge))
+                    {
+                        continue;
+                    }
 
                     if (!state.NodesById.TryGetValue(clientEdge.To, out var clientNode))
                     {
                         continue;
                     }
 
+                    string? matchedKey = null;
+                    if (!string.IsNullOrWhiteSpace(clientNode.Fqdn) && serviceKeys.Contains(clientNode.Fqdn))
+                    {
+                        matchedKey = clientNode.Fqdn;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(clientNode.Name) && serviceKeys.Contains(clientNode.Name))
+                    {
+                        matchedKey = clientNode.Name;
+                    }
+
+                    if (matchedKey is not null)
+                    {
+                        if (!deferredClientEdges.TryGetValue(matchedKey, out var list))
+                        {
+                            list = new List<(GraphEdge Edge, GraphNode Node)>();
+                            deferredClientEdges[matchedKey] = list;
+                        }
+
+                        list.Add((clientEdge, clientNode));
+                        continue;
+                    }
+
                     FlowBuilder.AppendHttpClientUsage(builder, state, clientEdge, clientNode, indent);
                 }
 
-                foreach (var serviceEdge in edges.Where(e => e.Kind == "uses_service"))
+                foreach (var serviceEdge in serviceEdges)
                 {
-                    if (invokedMethod != null && !EdgeMatchesMethod(invokedMethod, serviceEdge)) continue;
-                    if (invokedMethod == null && !EdgeMatchesMethod(invokedMethod, serviceEdge)) continue;
-
                     if (!state.NodesById.TryGetValue(serviceEdge.To, out var serviceNode))
                     {
                         continue;
@@ -142,24 +210,60 @@ namespace GraphKit.Outputs
                         ? lifetimeValue?.ToString()
                         : null;
                     var suffix = string.IsNullOrWhiteSpace(lifetime) ? string.Empty : $" ({lifetime})";
-                    var serviceMethodName = serviceEdge.Props is { } serviceProps && serviceProps.TryGetValue("method", out var methodValue)
-                        ? methodValue?.ToString()
-                        : null;
+
+                    string? contractMethodName = null;
+                    string? callerMethodName = null;
+                    if (serviceEdge.Props is { } serviceProps)
+                    {
+                        if (serviceProps.TryGetValue("method", out var callerValue))
+                        {
+                            callerMethodName = ToStringValue(callerValue);
+                        }
+                        if (serviceProps.TryGetValue("invoked_method", out var invokedValue))
+                        {
+                            contractMethodName = ToStringValue(invokedValue);
+                        }
+                    }
+
+                    var methodLabelName = !string.IsNullOrWhiteSpace(callerMethodName)
+                        ? callerMethodName
+                        : contractMethodName;
+
                     var baseLabel = $"uses_service {serviceNode.Name}{suffix}";
                     var nextIndent = indent + 1;
-                    if (string.IsNullOrWhiteSpace(serviceMethodName))
+                    if (string.IsNullOrWhiteSpace(methodLabelName))
                     {
                         AppendIndented(builder, indent, FormatLinkedCode(baseLabel, serviceEdge.Transform?.Location));
                     }
                     else
                     {
                         AppendIndented(builder, indent, baseLabel);
-                        var methodLabel = $"method {serviceMethodName}";
+                        var methodLabel = $"method {methodLabelName}";
                         AppendIndented(builder, indent + 1, FormatLinkedCode(methodLabel, serviceEdge.Transform?.Location));
+                        if (!string.IsNullOrWhiteSpace(contractMethodName) &&
+                            !string.Equals(contractMethodName, methodLabelName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            AppendIndented(builder, indent + 1, FormatLinkedCode($"contract {contractMethodName}", serviceEdge.Transform?.Location));
+                        }
+
                         nextIndent = indent + 2;
                     }
 
-                    FlowBuilder.AppendServiceContractFlow(builder, state, node, serviceNode, serviceMethodName, nextIndent);
+                    var dispatchMethodName = contractMethodName ?? callerMethodName;
+
+                    if (TakeDeferredClients(serviceNode) is { Count: > 0 } linkedClients)
+                    {
+                        var httpClientIndent = string.IsNullOrWhiteSpace(methodLabelName)
+                            ? nextIndent
+                            : Math.Max(indent + 1, nextIndent - 1);
+
+                        foreach (var (clientEdge, clientNode) in linkedClients)
+                        {
+                            FlowBuilder.AppendHttpClientUsage(builder, state, clientEdge, clientNode, httpClientIndent);
+                        }
+                    }
+
+                    FlowBuilder.AppendServiceContractFlow(builder, state, node, serviceNode, dispatchMethodName, nextIndent, serviceEdge);
                 }
 
                 foreach (var storageEdge in edges.Where(e => e.Kind == "uses_storage"))

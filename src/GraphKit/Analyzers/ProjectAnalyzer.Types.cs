@@ -19,12 +19,17 @@ public sealed partial class ProjectAnalyzer
         public List<CacheInvocation> CacheInvocations { get; } = new();
         public List<OptionsUsage> OptionsUsages { get; } = new();
         public List<ControllerRepositoryInvocation> RepositoryInvocations { get; } = new();
+        public List<ControllerDomainInvocation> DomainInvocations { get; } = new();
+        public List<ControllerHelperInvocation> HelperInvocations { get; } = new();
+        public List<ControllerValidationCall> ValidationCalls { get; } = new();
         public List<ServiceUsage> ServiceUsages { get; } = new();
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
         public List<EndpointAuthorization> Authorizations { get; } = new();
         public bool AllowsAnonymous { get; set; }
         public HashSet<int> StatusCodes { get; } = new();
         public Dictionary<string, string> LocalStringValues { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> DomainLocalVariables { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> DomainLocalTypes { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
@@ -42,6 +47,9 @@ public sealed partial class ProjectAnalyzer
     private sealed record ControllerNotificationInvocation(string NotificationType, int Line);
 
     private sealed record ControllerRepositoryInvocation(string RepositoryType, string? EntityType, string Method, string Operation, int Line);
+    private sealed record ControllerDomainInvocation(string TargetType, string Method, int Line, string? Instance = null, string? AssignedVariable = null);
+    private sealed record ControllerHelperInvocation(string TargetKey, string HelperFqdn, int Line);
+    private sealed record ControllerValidationCall(string GuardType, string Method, int Line);
 
     private sealed record MinimalEndpointInfo(string Route, string HttpMethod, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
     {
@@ -51,7 +59,19 @@ public sealed partial class ProjectAnalyzer
         public bool AllowsAnonymous { get; set; }
     }
 
-    private sealed record RequestInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name);
+    private sealed record RequestInfo(
+        string Fqdn,
+        string Assembly,
+        string Project,
+        string FilePath,
+        GraphSpan Span,
+        string SymbolId,
+        string Name,
+        IReadOnlyCollection<string> ImplementedInterfaces,
+        string? ResponseType)
+    {
+        public IReadOnlyCollection<string> Interfaces { get; } = ImplementedInterfaces ?? Array.Empty<string>();
+    }
 
     private sealed record HandlerInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, string RequestType, string ResponseType)
     {
@@ -67,7 +87,29 @@ public sealed partial class ProjectAnalyzer
         public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
         public List<HandlerValidationCall> ValidationCalls { get; } = new();
         public List<HandlerLogInvocation> LogInvocations { get; } = new();
+        public List<RequestSignature> RequestSignatures { get; } = new();
+
+        public void RegisterRequestSignature(string requestType, string responseType)
+        {
+            if (string.IsNullOrWhiteSpace(requestType))
+            {
+                return;
+            }
+
+            foreach (var signature in RequestSignatures)
+            {
+                if (signature.RequestType.Equals(requestType, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(signature.ResponseType, responseType, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            RequestSignatures.Add(new RequestSignature(requestType, responseType));
+        }
     }
+
+    private sealed record RequestSignature(string RequestType, string ResponseType);
 
     private sealed record ServiceInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name)
     {
@@ -126,7 +168,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record HandlerDbAccess(string DbContextType, string Member, int Line);
 
-    private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType);
+    private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType, string? ContainingMember = null);
 
     private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
 
@@ -201,6 +243,17 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record MessageContractInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name);
 
+    private sealed record PublisherProxyInfo(
+        string Fqdn,
+        string Assembly,
+        string Project,
+        string FilePath,
+        GraphSpan Span,
+        string SymbolId,
+        string Name,
+        IReadOnlyCollection<string> ServiceContracts,
+        IReadOnlyCollection<HandlerPublisherCall> PublisherCalls);
+
     private sealed record MappingInfo(string MapId, string FilePath, GraphSpan Span, string ProfileFqdn, string MapName, string SourceType, string DestinationType);
 
     private sealed record RepositoryInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, IReadOnlyDictionary<string, FieldDescriptor> FieldTypes)
@@ -232,7 +285,7 @@ public sealed partial class ProjectAnalyzer
         string? DispatchKind = null,
         string? TargetType = null);
 
-    private sealed record FieldDescriptor(string Type, int Line);
+    private sealed record FieldDescriptor(string Type, int Line, bool IsReadOnly);
 
     private sealed record ServiceRegistrationInfo(string ServiceType, string ImplementationType, string Lifetime, string FilePath, GraphSpan Span, string Assembly, string Project);
 

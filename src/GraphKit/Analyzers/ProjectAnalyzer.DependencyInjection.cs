@@ -294,6 +294,12 @@ public sealed partial class ProjectAnalyzer
 
             if (!IsServiceRegistrationMethod(methodName))
             {
+                if (string.Equals(methodName, "Scan", StringComparison.Ordinal) &&
+                    TryCaptureServiceScan(project, tree, invocation))
+                {
+                    continue;
+                }
+
                 if (string.Equals(methodName, "AddHostedService", StringComparison.Ordinal) &&
                     TryRegisterHostedService(project, tree, invocation, memberAccess))
                 {
@@ -647,6 +653,62 @@ public sealed partial class ProjectAnalyzer
                 }
             }
         }
+    }
+
+    private bool TryCaptureServiceScan(ProjectInfo project, SyntaxTree tree, InvocationExpressionSyntax invocation)
+    {
+        var typeFilters = invocation
+            .DescendantNodes()
+            .OfType<TypeOfExpressionSyntax>()
+            .Select(expr => expr.Type.ToString())
+            .ToList();
+
+        if (!typeFilters.Any(type => type.StartsWith("IControlledRepository", StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        var span = ToGraphSpan(tree, invocation);
+        var filePath = GetRelativePath(tree.FilePath);
+        var registered = false;
+
+        foreach (var repository in _repositories.Values)
+        {
+            if (!string.Equals(repository.Assembly, project.AssemblyName, StringComparison.OrdinalIgnoreCase) ||
+                repository.ControlledEntities.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var entity in repository.ControlledEntities)
+            {
+                var trimmedEntity = TrimGlobalAlias(entity);
+                var simpleEntity = GetSimpleIdentifier(trimmedEntity);
+                if (string.IsNullOrWhiteSpace(simpleEntity))
+                {
+                    continue;
+                }
+
+                var variants = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    $"IControlledRepository<{simpleEntity}>"
+                };
+
+                if (!string.IsNullOrWhiteSpace(trimmedEntity) &&
+                    !string.Equals(trimmedEntity, simpleEntity, StringComparison.OrdinalIgnoreCase))
+                {
+                    variants.Add($"IControlledRepository<{trimmedEntity}>");
+                }
+
+                foreach (var variant in variants)
+                {
+                    RegisterServiceRegistration(variant, repository.Fqdn, "Scoped (scan)", filePath, span, project);
+                    registered = true;
+                }
+            }
+        }
+
+        return registered;
     }
 
     private bool TryCaptureAutofacRegistration(ProjectInfo project, SyntaxTree tree, InvocationExpressionSyntax registerInvocation, out List<ServiceRegistrationInfo> registrations)

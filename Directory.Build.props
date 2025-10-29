@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <_TempUser Condition="'$(USER)' != ''">$(USER)</_TempUser>
+    <_TempUser Condition="'$(_TempUser)' == '' and '$(USERNAME)' != ''">$(USERNAME)</_TempUser>
+
+    <_IntermediateRoot Condition="'$(TMPDIR)' != ''">$(TMPDIR)</_IntermediateRoot>
+    <_IntermediateRoot Condition="'$(_IntermediateRoot)' == '' and '$(Temp)' != ''">$(Temp)</_IntermediateRoot>
+    <_IntermediateRoot Condition="'$(_IntermediateRoot)' == '' and '$(TMP)' != ''">$(TMP)</_IntermediateRoot>
+    <_IntermediateRoot Condition="'$(_IntermediateRoot)' == '' and '$(OS)' == 'Windows_NT'">$([System.IO.Path]::Combine('$(LOCALAPPDATA)', 'Temp'))</_IntermediateRoot>
+    <_IntermediateRoot Condition="'$(_IntermediateRoot)' == ''">/tmp/</_IntermediateRoot>
+
+    <_IntermediateBase Condition="'$(_TempUser)' != ''">$([System.IO.Path]::Combine('$(_IntermediateRoot)', '$(_TempUser)', 'project', 'obj'))</_IntermediateBase>
+    <_IntermediateBase Condition="'$(_TempUser)' == ''">$([System.IO.Path]::Combine('$(_IntermediateRoot)', 'project', 'obj'))</_IntermediateBase>
+
+    <BaseIntermediateOutputPath>$(_IntermediateBase)$(MSBuildProjectName)$(DirectorySeparatorChar)</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+  </PropertyGroup>
+</Project>

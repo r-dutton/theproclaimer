@@ -13,6 +13,8 @@ public sealed partial class ProjectAnalyzer
 {
     private sealed record RouteHint(string Path, HashSet<string> QueryParameters);
 
+    private static readonly string[] HttpWrapperVerbs = { "Get", "Post", "Put", "Delete", "Patch", "Head", "Options" };
+
     private void AnalyzeHttpClient(ProjectInfo project, SyntaxTree tree, ClassDeclarationSyntax classDeclaration, string namespaceName, IReadOnlyDictionary<string, FieldDescriptor> fieldTypes)
     {
         var className = classDeclaration.Identifier.Text;
@@ -33,10 +35,102 @@ public sealed partial class ProjectAnalyzer
         {
             var routeHints = CollectRouteHints(tree, method);
 
+            var requestMessageHints = new Dictionary<string, (string? Method, RouteHint? Route)>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var creation in method.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+            {
+                if (!creation.Type.ToString().EndsWith("HttpRequestMessage", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string? resolvedMethod = null;
+                RouteHint? resolvedRoute = null;
+                if (creation.ArgumentList is { Arguments.Count: > 0 })
+                {
+                    var methodArgument = creation.ArgumentList.Arguments[0].Expression;
+                    resolvedMethod = TryResolveHttpMethod(methodArgument) ?? ExtractStringValue(methodArgument)?.ToUpperInvariant();
+
+                    if (creation.ArgumentList.Arguments.Count > 1)
+                    {
+                        var routeExpression = creation.ArgumentList.Arguments[1].Expression;
+                        resolvedRoute = TryResolveRouteHint(tree, routeExpression, routeHints);
+                    }
+                }
+
+                if (creation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
+                {
+                    requestMessageHints[declarator.Identifier.Text] = (resolvedMethod, resolvedRoute);
+                }
+                else if (creation.Parent is AssignmentExpressionSyntax assignment && assignment.Left is IdentifierNameSyntax identifier)
+                {
+                    requestMessageHints[identifier.Identifier.Text] = (resolvedMethod, resolvedRoute);
+                }
+            }
+
             var declaringMethod = method.Identifier.Text;
 
             foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
+                if (invocation.Expression is MemberAccessExpressionSyntax { Name: IdentifierNameSyntax sendName } sendAccess &&
+                    string.Equals(sendName.Identifier.Text, "SendAsync", StringComparison.OrdinalIgnoreCase))
+                {
+                    var arguments = invocation.ArgumentList.Arguments;
+                    if (arguments.Count > 0)
+                    {
+                        string? candidateMethod = null;
+                        RouteHint? candidateRoute = null;
+                        IReadOnlyCollection<string> queryParameters = Array.Empty<string>();
+                        var requestArgument = arguments[0].Expression;
+
+                        if (requestArgument is IdentifierNameSyntax requestIdentifier &&
+                            requestMessageHints.TryGetValue(requestIdentifier.Identifier.Text, out var hint))
+                        {
+                            candidateMethod = hint.Method;
+                            candidateRoute = hint.Route;
+                            if (candidateRoute is not null)
+                            {
+                                queryParameters = candidateRoute.QueryParameters.ToArray();
+                            }
+                        }
+                        else if (requestArgument is ObjectCreationExpressionSyntax inlineCreation &&
+                                 inlineCreation.Type.ToString().EndsWith("HttpRequestMessage", StringComparison.Ordinal))
+                        {
+                            if (inlineCreation.ArgumentList is { Arguments.Count: > 0 })
+                            {
+                                var inlineMethodExpression = inlineCreation.ArgumentList.Arguments[0].Expression;
+                                candidateMethod = TryResolveHttpMethod(inlineMethodExpression) ?? ExtractStringValue(inlineMethodExpression)?.ToUpperInvariant();
+
+                                if (inlineCreation.ArgumentList.Arguments.Count > 1)
+                                {
+                                    var inlineRouteExpression = inlineCreation.ArgumentList.Arguments[1].Expression;
+                                    candidateRoute = TryResolveRouteHint(tree, inlineRouteExpression, routeHints);
+                                    if (candidateRoute is not null)
+                                    {
+                                        queryParameters = candidateRoute.QueryParameters.ToArray();
+                                    }
+                                }
+                            }
+                        }
+
+                        if (candidateRoute is null)
+                        {
+                            queryParameters = Array.Empty<string>();
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(candidateMethod) || candidateRoute is not null)
+                        {
+                            var normalizedMethod = !string.IsNullOrWhiteSpace(candidateMethod)
+                                ? candidateMethod!
+                                : sendName.Identifier.Text.ToUpperInvariant();
+                            var formattedRoute = candidateRoute is null ? null : FormatRoute(candidateRoute);
+                            var line = GetLineNumber(tree, invocation);
+                            info.OutboundCalls.Add(new HttpClientCall(declaringMethod, normalizedMethod, formattedRoute, line, queryParameters));
+                            continue;
+                        }
+                    }
+                }
+
                 if (httpClientField is not null &&
                     invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax identifier } memberAccess &&
                     identifier.Identifier.Text.TrimStart('_') == httpClientField)
@@ -303,29 +397,67 @@ public sealed partial class ProjectAnalyzer
         out HttpClientCall call)
     {
         call = null!;
-        if (!IsRequestInvocation(invocation.Expression))
-        {
-            return false;
-        }
-
         var arguments = invocation.ArgumentList.Arguments;
-        if (arguments.Count < 2)
+        if (arguments.Count == 0)
         {
             return false;
         }
 
-        var httpMethodExpression = arguments[0].Expression;
-        var urlExpression = arguments[1].Expression;
-        var httpMethod = TryResolveHttpMethod(httpMethodExpression) ?? httpMethodExpression.ToString().ToUpperInvariant();
-        var hint = TryResolveRouteHint(tree, urlExpression, routeHints);
-        if (hint is null)
+        if (IsRequestInvocation(invocation.Expression))
+        {
+            if (arguments.Count < 2)
+            {
+                return false;
+            }
+
+            var httpMethodExpression = arguments[0].Expression;
+            var urlExpression = arguments[1].Expression;
+            var httpMethod = TryResolveHttpMethod(httpMethodExpression)
+                ?? ExtractStringValue(httpMethodExpression)?.ToUpperInvariant()
+                ?? httpMethodExpression.ToString().ToUpperInvariant();
+            var hint = TryResolveRouteHint(tree, urlExpression, routeHints);
+            if (hint is null)
+            {
+                return false;
+            }
+
+            var route = FormatRoute(hint);
+            var line = GetLineNumber(tree, invocation);
+            call = new HttpClientCall(declaringMethod, httpMethod, route, line, hint.QueryParameters.ToArray());
+            return true;
+        }
+
+        var invocationName = GetInvocationIdentifier(invocation.Expression);
+        if (string.IsNullOrWhiteSpace(invocationName))
         {
             return false;
         }
 
-        var route = FormatRoute(hint);
-        var line = GetLineNumber(tree, invocation);
-        call = new HttpClientCall(declaringMethod, httpMethod, route, line, hint.QueryParameters.ToArray());
+        var inferredHttpMethod = TryInferHttpMethodFromWrapperName(invocationName!);
+        if (string.IsNullOrWhiteSpace(inferredHttpMethod))
+        {
+            return false;
+        }
+
+        RouteHint? routeHint = null;
+        foreach (var argument in arguments)
+        {
+            var candidate = TryResolveRouteHint(tree, argument.Expression, routeHints);
+            if (candidate is not null)
+            {
+                routeHint = candidate;
+                break;
+            }
+        }
+
+        if (routeHint is null)
+        {
+            return false;
+        }
+
+        var formattedRoute = FormatRoute(routeHint);
+        var callLine = GetLineNumber(tree, invocation);
+        call = new HttpClientCall(declaringMethod, inferredHttpMethod!, formattedRoute, callLine, routeHint.QueryParameters.ToArray());
         return true;
     }
 
@@ -523,11 +655,16 @@ public sealed partial class ProjectAnalyzer
     private static bool IsRequestInvocation(SyntaxNode expression)
         => expression switch
         {
-            IdentifierNameSyntax identifier => identifier.Identifier.Text.Equals("Request", StringComparison.Ordinal),
-            GenericNameSyntax generic => generic.Identifier.Text.Equals("Request", StringComparison.Ordinal),
+            IdentifierNameSyntax identifier => IsRequestInvocationName(identifier.Identifier.Text),
+            GenericNameSyntax generic => IsRequestInvocationName(generic.Identifier.Text),
             MemberAccessExpressionSyntax member => IsRequestInvocation(member.Name),
             _ => false
         };
+
+    private static bool IsRequestInvocationName(string name)
+        => name.Equals("Request", StringComparison.Ordinal) ||
+           name.Equals("SendRequest", StringComparison.Ordinal) ||
+           name.Equals("SendRequestAsync", StringComparison.Ordinal);
 
     private static string? TryResolveHttpMethod(ExpressionSyntax expression)
     {
@@ -544,6 +681,55 @@ public sealed partial class ProjectAnalyzer
             default:
                 return null;
         }
+    }
+
+    private static string? TryInferHttpMethodFromWrapperName(string methodName)
+    {
+        if (!IsLikelyHttpWrapperName(methodName))
+        {
+            return null;
+        }
+
+        foreach (var verb in HttpWrapperVerbs)
+        {
+            if (methodName.StartsWith(verb, StringComparison.OrdinalIgnoreCase))
+            {
+                return verb.ToUpperInvariant();
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsLikelyHttpWrapperName(string methodName)
+    {
+        if (string.IsNullOrWhiteSpace(methodName))
+        {
+            return false;
+        }
+
+        if (IsRequestInvocationName(methodName))
+        {
+            return true;
+        }
+
+        foreach (var verb in HttpWrapperVerbs)
+        {
+            if (string.Equals(methodName, $"{verb}Async", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (methodName.StartsWith(verb, StringComparison.OrdinalIgnoreCase) &&
+                (methodName.Contains("Http", StringComparison.OrdinalIgnoreCase) ||
+                 methodName.Contains("Request", StringComparison.OrdinalIgnoreCase) ||
+                 methodName.Contains("Response", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string InferHttpVerb(string identifier)

@@ -18,7 +18,8 @@ public static partial class FlowBuilder
         GraphNode caller,
         GraphNode serviceNode,
         string? methodName,
-        int indent)
+        int indent,
+        GraphEdge? callEdge = null)
     {
         if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
         {
@@ -26,7 +27,23 @@ public static partial class FlowBuilder
             return;
         }
 
-        var stackKey = $"{serviceNode.Id}:{methodName ?? "*"}";
+        var callerKey = caller.Id;
+        if (string.IsNullOrWhiteSpace(callerKey))
+        {
+            callerKey = !string.IsNullOrWhiteSpace(caller.Fqdn)
+                ? caller.Fqdn!
+                : (!string.IsNullOrWhiteSpace(caller.Name) ? caller.Name! : "__unknown_caller__");
+        }
+
+        var serviceKey = serviceNode.Id;
+        if (string.IsNullOrWhiteSpace(serviceKey))
+        {
+            serviceKey = !string.IsNullOrWhiteSpace(serviceNode.Fqdn)
+                ? serviceNode.Fqdn!
+                : (!string.IsNullOrWhiteSpace(serviceNode.Name) ? serviceNode.Name! : "__unknown_service__");
+        }
+
+        var stackKey = $"{callerKey}->{serviceKey}:{methodName ?? "*"}";
         if (!state.ServiceStack.Add(stackKey))
         {
             AppendIndented(builder, indent, "... (service recursion detected)");
@@ -87,6 +104,7 @@ public static partial class FlowBuilder
                     {
                         foreach (var implEdge in innerEdges.Where(e => e.Kind == "implemented_by"))
                         {
+                            if (!IsMatchingImplementationEdge(innerNode, implEdge)) continue;
                             if (!state.NodesById.TryGetValue(implEdge.To, out var implNode)) continue;
                             if (!ShouldIncludeImplementation(caller, implNode)) continue;
                             if (seen.Add(implNode.Id)) candidateList.Add(implNode);
@@ -109,6 +127,7 @@ public static partial class FlowBuilder
             {
                 foreach (var implEdge in serviceEdges.Where(e => e.Kind == "implemented_by"))
                 {
+                    if (!IsMatchingImplementationEdge(serviceNode, implEdge)) continue;
                     if (!state.NodesById.TryGetValue(implEdge.To, out var implementation)) continue;
                     if (!ShouldIncludeImplementation(caller, implementation)) continue;
                     if (seen.Add(implementation.Id)) candidateList.Add(implementation);
@@ -195,7 +214,7 @@ public static partial class FlowBuilder
             {
                 var impl = candidateList[0];
                 // Print concrete implementation header (no separate service header already; parent line printed method)
-                AppendServiceImplementationFlow(builder, state, caller, impl, methodName, indent, heuristic: !state.EdgesByFrom.ContainsKey(impl.Id), suppressHeader: false);
+                AppendServiceImplementationFlow(builder, state, caller, impl, methodName, indent, heuristic: !state.EdgesByFrom.ContainsKey(impl.Id), suppressHeader: false, callEdge: callEdge);
                 return;
             }
 
@@ -217,7 +236,7 @@ public static partial class FlowBuilder
                     // Refined heuristic detection: only mark as heuristic when no outgoing edges AND no concrete file path (likely synthetic/external)
                     var hasEdges = state.EdgesByFrom.ContainsKey(impl.Id);
                     var implHeuristic = !hasEdges && (string.IsNullOrWhiteSpace(impl.FilePath) || impl.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase));
-                    AppendServiceImplementationFlow(builder, state, caller, impl, methodName, indent, heuristic: implHeuristic);
+                    AppendServiceImplementationFlow(builder, state, caller, impl, methodName, indent, heuristic: implHeuristic, callEdge: callEdge);
                 }
             }
         }
@@ -362,7 +381,8 @@ public static partial class FlowBuilder
         string? invokedMethod,
         int indent,
         bool heuristic = false,
-        bool suppressHeader = false) // heuristic flag retained for future conditional formatting
+        bool suppressHeader = false,
+        GraphEdge? callEdge = null) // heuristic flag retained for future conditional formatting
     {
         if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
         {
@@ -371,10 +391,41 @@ public static partial class FlowBuilder
         }
 
         state.ExpandedImplementations ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         var identity = !string.IsNullOrWhiteSpace(implementation.Fqdn)
             ? implementation.Fqdn!
             : (!string.IsNullOrWhiteSpace(implementation.Name) ? implementation.Name! : implementation.Id);
-        var expansionKey = identity + "::" + (invokedMethod ?? "*");
+
+        var callerKey = caller.Id;
+        if (string.IsNullOrWhiteSpace(callerKey))
+        {
+            callerKey = !string.IsNullOrWhiteSpace(caller.Fqdn)
+                ? caller.Fqdn!
+                : (!string.IsNullOrWhiteSpace(caller.Name) ? caller.Name! : "__unknown_caller__");
+        }
+
+        string? callSiteKey = null;
+        if (callEdge is not null)
+        {
+            if (callEdge.Transform?.Location is { } location)
+            {
+                callSiteKey = location.File + ":" + location.Line.ToString(CultureInfo.InvariantCulture);
+            }
+            else if (callEdge.Props is { } edgeProps && edgeProps.TryGetValue("method", out var methodValue) && methodValue is not null)
+            {
+                callSiteKey = callEdge.From + "->" + callEdge.To + ":" + methodValue;
+            }
+            else
+            {
+                callSiteKey = callEdge.From + "->" + callEdge.To + ":" + callEdge.Source;
+            }
+        }
+
+        var expansionKey = callerKey + "->" + identity + "::" + (invokedMethod ?? "*");
+        if (!string.IsNullOrWhiteSpace(callSiteKey))
+        {
+            expansionKey += "@" + callSiteKey;
+        }
         var alreadyExpanded = state.ExpandedImplementations.Contains(expansionKey);
 
         var methodSuffix = string.IsNullOrWhiteSpace(invokedMethod) ? string.Empty : $".{invokedMethod}";
@@ -408,28 +459,43 @@ public static partial class FlowBuilder
 
         var childIndent = suppressHeader ? indent : indent + 1;
 
-        // If a specific method was invoked on an interface/service, attempt to expand only edges whose method prop matches invokedMethod
-        if (!string.IsNullOrWhiteSpace(invokedMethod) && state.EdgesByFrom.TryGetValue(implementation.Id, out var methodImplEdges))
+        // Special-case: MediatR request processors deserve their richer narrative before generic method filtering kicks in.
+        if (!string.IsNullOrWhiteSpace(invokedMethod) &&
+            string.Equals(invokedMethod, "ProcessAsync", StringComparison.OrdinalIgnoreCase))
         {
-            var filtered = methodImplEdges.Where(e => EdgeMatchesMethod(invokedMethod, e)).ToList();
-            if (filtered.Count > 0)
-            {
-                // Narrow expansion strictly to edges tagged with the invoked method
-                AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
-                return; // Avoid double-expansion via switch below
-            }
+            var processorName = !string.IsNullOrWhiteSpace(implementation.Fqdn)
+                ? implementation.Fqdn!
+                : implementation.Name ?? string.Empty;
 
-            // Fallback: no tagged edges for the method; allow a broader expansion (untagged internal edges) so we don't show an empty block
-            AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
-            return;
+            if (!string.IsNullOrWhiteSpace(processorName) &&
+                (processorName.EndsWith("RequestProcessor", StringComparison.Ordinal) ||
+                 processorName.EndsWith("SimpleRequestProcessor", StringComparison.Ordinal)))
+            {
+                AppendRequestProcessorFlow(builder, state, caller, childIndent);
+                return;
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(implementation.Fqdn) &&
-            string.Equals(invokedMethod, "ProcessAsync", StringComparison.OrdinalIgnoreCase) &&
-            (implementation.Fqdn.EndsWith(".RequestProcessor", StringComparison.Ordinal) ||
-             implementation.Fqdn.EndsWith(".SimpleRequestProcessor", StringComparison.Ordinal)))
+        // If a specific method was invoked on an interface/service, attempt to expand only edges whose method prop matches invokedMethod
+        if (!string.IsNullOrWhiteSpace(invokedMethod))
         {
-            AppendRequestProcessorFlow(builder, state, caller, childIndent);
+            if (state.EdgesByFrom.TryGetValue(implementation.Id, out var methodImplEdges))
+            {
+                var filtered = methodImplEdges.Where(e => EdgeMatchesMethod(invokedMethod, e)).ToList();
+                if (filtered.Count > 0)
+                {
+                    // Narrow expansion strictly to edges tagged with the invoked method
+                    AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
+                    return; // Avoid double-expansion via switch below
+                }
+
+                // Fallback: no tagged edges for the method; allow a broader expansion (untagged internal edges) so we don't show an empty block
+                AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
+                return;
+            }
+
+            // Without known edges we still emit a shell expansion so the caller sees the invocation.
+            AppendGenericServiceNode(builder, state, implementation, invokedMethod, childIndent, suppressSelfHeuristic: true);
             return;
         }
 
@@ -457,7 +523,7 @@ public static partial class FlowBuilder
                             if (!state.NodesById.TryGetValue(innerService.To, out var innerNode)) continue;
                             if (IsInfrastructureNoiseService(innerNode)) continue;
                             AppendIndented(builder, childIndent, $"uses_service {innerNode.Name}");
-                            AppendServiceContractFlow(builder, state, implementation, innerNode, innerService.Props is { } sp && sp.TryGetValue("method", out var mv) ? mv?.ToString() : null, childIndent + 1);
+                            AppendServiceContractFlow(builder, state, implementation, innerNode, innerService.Props is { } sp && sp.TryGetValue("method", out var mv) ? mv?.ToString() : null, childIndent + 1, innerService);
                         }
                     }
                     break;
@@ -469,4 +535,193 @@ public static partial class FlowBuilder
         }
     }
 
+    private static bool IsMatchingImplementationEdge(GraphNode contractNode, GraphEdge edge)
+    {
+        if (!string.Equals(edge.Kind, "implemented_by", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var transformType = edge.Transform?.Type;
+        if (!string.Equals(transformType, "generic.closure", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var contractSignature = contractNode.Fqdn ?? contractNode.Name;
+        if (string.IsNullOrWhiteSpace(contractSignature))
+        {
+            return false;
+        }
+
+        var closureOf = TryGetEdgeProp(edge, "closure_of");
+        if (string.IsNullOrWhiteSpace(closureOf))
+        {
+            return false;
+        }
+
+        return GenericSignaturesMatch(contractSignature!, closureOf!);
+    }
+
+    private static string? TryGetEdgeProp(GraphEdge edge, string key)
+    {
+        if (edge.Props is null)
+        {
+            return null;
+        }
+
+        if (!edge.Props.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string s => s,
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static bool GenericSignaturesMatch(string left, string right)
+    {
+        var leftType = ExtractGenericTypeName(left);
+        var rightType = ExtractGenericTypeName(right);
+        if (!string.Equals(leftType, rightType, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var leftArgs = ExtractGenericArguments(left);
+        var rightArgs = ExtractGenericArguments(right);
+        if (leftArgs.Count != rightArgs.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < leftArgs.Count; i++)
+        {
+            if (!string.Equals(leftArgs[i], rightArgs[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string ExtractGenericTypeName(string signature)
+    {
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = signature.Trim();
+        var genericStart = trimmed.IndexOf('<');
+        var typePortion = genericStart >= 0 ? trimmed[..genericStart] : trimmed;
+        var lastDot = typePortion.LastIndexOf('.');
+        return lastDot >= 0 ? typePortion[(lastDot + 1)..] : typePortion;
+    }
+
+    private static List<string> ExtractGenericArguments(string signature)
+    {
+        var args = new List<string>();
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return args;
+        }
+
+        var trimmed = signature.Trim();
+        var start = trimmed.IndexOf('<');
+        var end = trimmed.LastIndexOf('>');
+        if (start < 0 || end <= start)
+        {
+            return args;
+        }
+
+        var inner = trimmed.Substring(start + 1, end - start - 1);
+        var segments = SplitTopLevelArguments(inner);
+        foreach (var segment in segments)
+        {
+            var normalized = NormalizeGenericIdentifier(segment);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                args.Add(normalized);
+            }
+        }
+
+        return args;
+    }
+
+    private static List<string> SplitTopLevelArguments(string argumentList)
+    {
+        var results = new List<string>();
+        if (string.IsNullOrWhiteSpace(argumentList))
+        {
+            return results;
+        }
+
+        var current = new StringBuilder(argumentList.Length);
+        var depth = 0;
+        foreach (var ch in argumentList)
+        {
+            switch (ch)
+            {
+                case '<':
+                    depth++;
+                    current.Append(ch);
+                    break;
+                case '>':
+                    depth = Math.Max(0, depth - 1);
+                    current.Append(ch);
+                    break;
+                case ',' when depth == 0:
+                    var segment = current.ToString().Trim();
+                    if (segment.Length > 0)
+                    {
+                        results.Add(segment);
+                    }
+                    current.Clear();
+                    break;
+                default:
+                    current.Append(ch);
+                    break;
+            }
+        }
+
+        var tail = current.ToString().Trim();
+        if (tail.Length > 0)
+        {
+            results.Add(tail);
+        }
+
+        return results;
+    }
+
+    private static string NormalizeGenericIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+
+        // Drop variance modifiers and nullable suffixes
+        if (trimmed.StartsWith("in ", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[3..];
+        }
+        else if (trimmed.StartsWith("out ", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[4..];
+        }
+
+        trimmed = trimmed.TrimEnd('?');
+
+        var lastDot = trimmed.LastIndexOf('.');
+        var simple = lastDot >= 0 ? trimmed[(lastDot + 1)..] : trimmed;
+
+        return simple.Trim();
+    }
 }

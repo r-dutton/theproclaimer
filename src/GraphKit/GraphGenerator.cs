@@ -16,14 +16,11 @@ public sealed class GraphGenerator
     Console.WriteLine($"[graph] Loaded {projects.Count} projects. Memory={GC.GetTotalMemory(false)/1024/1024:F1}MB");
 
         var analyzer = new ProjectAnalyzer(options.WorkspacePath);
-        foreach (var project in projects)
+        await Parallel.ForEachAsync(projects, cancellationToken, async (project, ct) =>
         {
             await analyzer.AnalyzeProjectAsync(project, cancellationToken);
-            Console.WriteLine($"[graph] Analyzed project {project.AssemblyName} ({project.SourceFiles.Count} files). Nodes={analyzer.NodeCount} Edges={analyzer.EdgeCount} Mem={GC.GetTotalMemory(false)/1024/1024:F1}MB");
-            // Opportunistic GC hint (non-filtering, full fidelity retained)
-            if ((project.SourceFiles?.Count ?? 0) > 250)
-            { }
-        }
+            Console.WriteLine($"[graph] Analyzed project {project.AssemblyName} ({project.SourceFiles.Count} files). Nodes={analyzer.NodeCount} Edges={analyzer.EdgeCount} Mem={GC.GetTotalMemory(false) / 1024 / 1024:F1}MB");
+        });
 
         var document = analyzer.BuildDocument(AnalyzerVersion);
     Console.WriteLine($"[graph] Built document. Nodes={document.Nodes.Count} Edges={document.Edges.Count} Mem={GC.GetTotalMemory(false)/1024/1024:F1}MB");

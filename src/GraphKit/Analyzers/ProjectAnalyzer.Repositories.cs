@@ -140,7 +140,7 @@ public sealed partial class ProjectAnalyzer
                     if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
                     {
                         var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup, project.AssemblyName, project.RelativeDirectory);
                         if (!string.IsNullOrWhiteSpace(destination))
                         {
                             var line = GetLineNumber(tree, invocation);
@@ -150,7 +150,7 @@ public sealed partial class ProjectAnalyzer
                     else if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectByIdAsync" } projectById)
                     {
                         var destination = projectById.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                        var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup, project.AssemblyName, project.RelativeDirectory);
                         if (!string.IsNullOrWhiteSpace(destination))
                         {
                             var line = GetLineNumber(tree, invocation);

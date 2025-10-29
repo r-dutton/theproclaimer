@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace GraphKit.Graph;
@@ -47,7 +48,12 @@ public sealed class SccIndex
 
     private static int[] Tarjan(List<int>[] adj)
     {
-        int n = adj?.Length ?? 0, idx = 0, comp = 0;
+        if (adj is null)
+        {
+            return Array.Empty<int>();
+        }
+
+        int n = adj.Length, idx = 0, comp = 0;
         var ids = new int[n]; for (int i=0;i<n;i++) ids[i] = -1;
         var low = new int[n];
         var st = new Stack<int>(n);
@@ -87,7 +93,18 @@ public sealed class SccIndex
     {
         var indeg = new int[count];
         for (int v=0; v<count; v++)
-            if (dag[v] != null) foreach (var u in dag[v]) indeg[u]++;
+        {
+            var edges = dag[v];
+            if (edges is null)
+            {
+                continue;
+            }
+
+            foreach (var u in edges)
+            {
+                indeg[u]++;
+            }
+        }
 
         var q = new Queue<int>();
         for (int v=0; v<count; v++) if (indeg[v]==0) q.Enqueue(v);

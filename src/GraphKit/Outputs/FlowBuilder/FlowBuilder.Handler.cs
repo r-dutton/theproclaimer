@@ -30,6 +30,8 @@ public static partial class FlowBuilder
 				return;
 			}
 
+			var entityExpansionKeys = new HashSet<string>(StringComparer.Ordinal);
+
 			// Configuration for handler
 			foreach (var configEdge in edges.Where(e => e.Kind == "uses_configuration"))
 			{
@@ -135,8 +137,7 @@ public static partial class FlowBuilder
 					? $"{file}:{line}"
 					: string.Empty;
 				var dedupKey = $"{handler.Id}::{dataEdge.To}::{label}::{locationSignature}";
-				state.DedupHandlers ??= new HashSet<string>(StringComparer.Ordinal);
-				if (!state.DedupHandlers.Add("DB::" + dedupKey))
+				if (!entityExpansionKeys.Add("DB::" + dedupKey))
 				{
 					continue;
 				}
@@ -223,7 +224,7 @@ public static partial class FlowBuilder
 					nextIndent = indent + 2;
 				}
 
-				AppendServiceContractFlow(builder, state, handler, serviceNode, serviceMethodName, nextIndent);
+								AppendServiceContractFlow(builder, state, handler, serviceNode, serviceMethodName, nextIndent, service);
 			}
 
 			foreach (var storageEdge in edges.Where(e => e.Kind == "uses_storage"))

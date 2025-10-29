@@ -395,6 +395,7 @@ public static partial class FlowBuilder
         {
             for (var i = 0; i < actions.Count; i++)
             {
+                state.ResetPerFlowState();
                 AppendEndpointFlow(builder, state, actions[i], indent: 0);
                 if (i < actions.Count - 1)
                 {
@@ -712,10 +713,16 @@ public static partial class FlowBuilder
             return;
         }
 
+        string? GetProp(string key) => props.TryGetValue(key, out var value) ? value?.ToString() : null;
+
         // Route/verb extracted regardless of target_service so we can attempt global matching.
-        var route = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
-        var verb = props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null;
-        var baseUrl = props.TryGetValue("base_url", out var baseValue) ? baseValue?.ToString() : null;
+        var route = GetProp("route") ?? GetProp("relative_path");
+        var verb = GetProp("verb") ?? GetProp("method");
+        var baseUrl = GetProp("base_url");
+        var canonicalRoute = CanonicalizeRoute(route);
+        var routeForMatching = !string.IsNullOrWhiteSpace(canonicalRoute) && !canonicalRoute.Contains('*', StringComparison.Ordinal)
+            ? route
+            : null;
 
         // If target_service is present we use existing assembly mapping logic; otherwise attempt global match.
         var serviceName = props.TryGetValue("target_service", out var serviceValue) ? serviceValue?.ToString() : null;
@@ -734,7 +741,7 @@ public static partial class FlowBuilder
         if (string.IsNullOrWhiteSpace(serviceName))
         {
             // No explicit target service; if we have route/verb attempt a global endpoint match.
-            if (string.IsNullOrWhiteSpace(route) && string.IsNullOrWhiteSpace(verb))
+            if (routeForMatching is null && string.IsNullOrWhiteSpace(verb))
             {
                 return; // Nothing to resolve.
             }
@@ -749,10 +756,20 @@ public static partial class FlowBuilder
                 return;
             }
 
+            if (routeForMatching is null)
+            {
+                var hostSuffix = string.IsNullOrWhiteSpace(host) ? string.Empty : $" host={host}";
+                var reason = string.IsNullOrWhiteSpace(route)
+                    ? "route metadata missing"
+                    : "route pattern ambiguous";
+                AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}{hostSuffix} ({reason})");
+                return;
+            }
+
             var globalCandidates = state.Document.Nodes
                 .Where(n => n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api")
                 .ToList();
-            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
+            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, routeForMatching, verb);
             var lookupHost = string.IsNullOrWhiteSpace(host) ? string.Empty : $" host={host}";
             AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}{lookupHost}");
             if (globalMatched.Count == 0)
@@ -774,10 +791,19 @@ public static partial class FlowBuilder
             // provide value even before workspace config is completed.
             AppendIndented(builder, indent, $"target_service {serviceName}");
 
+            if (routeForMatching is null)
+            {
+                var reason = string.IsNullOrWhiteSpace(route)
+                    ? "route metadata missing"
+                    : "route pattern ambiguous";
+                AppendIndented(builder, indent + 1, $"fallback_global_endpoint_match suppressed ({reason})");
+                return;
+            }
+
             var globalCandidates = state.Document.Nodes
                 .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api"))
                 .ToList();
-            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
+            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, routeForMatching, verb);
             if (globalMatched.Count > 0)
             {
                 AppendIndented(builder, indent + 1, "fallback_global_endpoint_match (no assemblies mapped)");
@@ -797,7 +823,8 @@ public static partial class FlowBuilder
             ? set
             : new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
 
-        var key = $"{callEdge.From}->{serviceName}:{route}:{verb}";
+        var keyRoute = routeForMatching ?? route ?? string.Empty;
+        var key = $"{callEdge.From}->{serviceName}:{keyRoute}:{verb}";
         if (!state.TargetServiceVisited.Add(key))
         {
             // Summarize rather than fully re-expand
@@ -815,6 +842,15 @@ public static partial class FlowBuilder
             : $"target_service {serviceName} (host={host})";
         AppendIndented(builder, indent, targetHeader);
 
+        if (routeForMatching is null)
+        {
+            var reason = string.IsNullOrWhiteSpace(route)
+                ? "route metadata missing"
+                : "route pattern ambiguous";
+            AppendIndented(builder, indent + 1, $"remote_endpoint_lookup suppressed ({reason})");
+            return;
+        }
+
         if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
         {
             AppendIndented(builder, indent + 1, "... (max depth reached)");
@@ -827,14 +863,14 @@ public static partial class FlowBuilder
             return;
         }
 
-        var matched = FilterEndpointsByRouteAndVerb(candidates, route, verb);
+        var matched = FilterEndpointsByRouteAndVerb(candidates, routeForMatching, verb);
         if (matched.Count == 0)
         {
             // Fallback: global search across all endpoints if specific assembly match failed
             var globalCandidates = state.Document.Nodes
                 .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api"))
                 .ToList();
-            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
+            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, routeForMatching, verb);
             if (globalMatched.Count > 0)
             {
                 AppendIndented(builder, indent + 1, "fallback_global_endpoint_match");
@@ -927,6 +963,7 @@ public static partial class FlowBuilder
         {
             foreach (var edge in edges.Where(e => e.Kind == "implemented_by"))
             {
+                if (!IsMatchingImplementationEdge(serviceNode, edge)) continue;
                 if (!state.NodesById.TryGetValue(edge.To, out var impl)) continue;
                 if (!ShouldIncludeImplementation(caller, impl)) continue;
                 if (seen.Add(impl.Id)) candidates.Add(impl);
@@ -1203,17 +1240,54 @@ public static partial class FlowBuilder
 
 
 
-    public static IEnumerable<(string Key, List<ControllerAction> Actions)> GroupControllers(GraphDocument document)
+    public static IEnumerable<(string Key, List<ControllerAction> Actions)> GroupControllers(
+        GraphDocument document,
+        Func<GraphNode, bool>? controllerPredicate = null)
     {
-        var groups = new Dictionary<string, List<ControllerAction>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var node in document.Nodes)
+        controllerPredicate ??= static _ => true;
+
+        var actionNodes = document.Nodes
+            .Where(n => string.Equals(n.Type, "endpoint.controller", StringComparison.OrdinalIgnoreCase) && controllerPredicate(n))
+            .OrderBy(n => n.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (actionNodes.Count == 0)
         {
-            if (!string.Equals(node.Type, "controller_action", StringComparison.OrdinalIgnoreCase)) continue;
+            yield break;
+        }
+
+        var groups = new Dictionary<string, List<ControllerAction>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in actionNodes)
+        {
             var action = new ControllerAction(node);
-            var key = ResolveControllerDisplayName(action, action.Name ?? action.Id);
+            var key = ResolveControllerKey(node);
             (groups.TryGetValue(key, out var list) ? list : groups[key] = new()).Add(action);
         }
-        return groups.Select(kv => (kv.Key, kv.Value.OrderBy(a => a.Fqdn ?? a.Name, StringComparer.OrdinalIgnoreCase).ToList()));
+
+        foreach (var kv in groups.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return (kv.Key, kv.Value.OrderBy(a => a.Fqdn ?? a.Name, StringComparer.OrdinalIgnoreCase).ToList());
+        }
+    }
+
+    public sealed record ControllerAction
+    {
+        public ControllerAction(GraphNode node)
+        {
+            Node = node ?? throw new ArgumentNullException(nameof(node));
+            Id = node.Id;
+            Name = node.Name;
+            Fqdn = node.Fqdn;
+            Route = GetNodeProp(node, "route");
+            HttpMethod = GetNodeProp(node, "http_method") ?? GetNodeProp(node, "method");
+        }
+
+        public GraphNode Node { get; }
+        public string Id { get; }
+        public string? Name { get; }
+        public string? Fqdn { get; }
+        public string? Route { get; }
+        public string? HttpMethod { get; }
     }
 
     public static FlowRenderState CreateState(GraphDocument document, FlowWorkspaceIndex? workspace, int? maxDepth)
@@ -1229,17 +1303,19 @@ public static partial class FlowBuilder
             list.Add(e);
         }
 
-        var nodesByFqdn = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
-        var nodesByName = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
+        var nodesByFqdnLookup = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
+        var nodesByNameLookup = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in document.Nodes)
         {
             if (!string.IsNullOrWhiteSpace(n.Fqdn))
-                (nodesByFqdn.TryGetValue(n.Fqdn!, out var lf) ? lf : nodesByFqdn[n.Fqdn!] = new List<GraphNode>(2)).Add(n);
+                (nodesByFqdnLookup.TryGetValue(n.Fqdn!, out var lf) ? lf : nodesByFqdnLookup[n.Fqdn!] = new List<GraphNode>(2)).Add(n);
             if (!string.IsNullOrWhiteSpace(n.Name))
-                (nodesByName.TryGetValue(n.Name!, out var ln) ? ln : nodesByName[n.Name!] = new List<GraphNode>(2)).Add(n);
+                (nodesByNameLookup.TryGetValue(n.Name!, out var ln) ? ln : nodesByNameLookup[n.Name!] = new List<GraphNode>(2)).Add(n);
         }
 
         var mapLookup = BuildMapLookup(document);
+        var nodesByFqdn = nodesByFqdnLookup.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<GraphNode>)kv.Value, StringComparer.OrdinalIgnoreCase);
+        var nodesByName = nodesByNameLookup.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<GraphNode>)kv.Value, StringComparer.OrdinalIgnoreCase);
         return new FlowRenderState(document, nodesById, edgesByFrom, nodesByFqdn, nodesByName, mapLookup, workspace, maxDepth);
     }
 

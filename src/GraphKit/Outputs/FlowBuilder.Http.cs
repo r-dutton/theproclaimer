@@ -303,13 +303,28 @@ namespace GraphKit.Outputs
             var metadataEdges = directCallEdges.Count > 0 ? directCallEdges : allCallEdges;
             var anyCallEdges = metadataEdges.Count > 0;
             var anyCallWithMetadata = metadataEdges.Any(e => e.Props is { } cp && (cp.ContainsKey("route") || cp.ContainsKey("verb")));
-            if (!anyCallEdges || !anyCallWithMetadata)
+
+            var metadataParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(clientVerbHint)) metadataParts.Add($"verb={clientVerbHint}");
+            if (!string.IsNullOrWhiteSpace(clientRouteHint)) metadataParts.Add($"route={clientRouteHint}");
+            if (!string.IsNullOrWhiteSpace(clientTargetService)) metadataParts.Add($"target={clientTargetService}");
+            if (!string.IsNullOrWhiteSpace(clientBaseUrl)) metadataParts.Add($"base={clientBaseUrl}");
+            if (!string.IsNullOrWhiteSpace(clientConfigKey)) metadataParts.Add($"config={clientConfigKey}");
+
+            if (!anyCallEdges)
             {
-                var metadataParts = new List<string>();
-                if (!string.IsNullOrWhiteSpace(clientVerbHint)) metadataParts.Add($"verb={clientVerbHint}");
-                if (!string.IsNullOrWhiteSpace(clientRouteHint)) metadataParts.Add($"route={clientRouteHint}");
-                if (!string.IsNullOrWhiteSpace(clientTargetService)) metadataParts.Add($"target={clientTargetService}");
-                if (!string.IsNullOrWhiteSpace(clientBaseUrl)) metadataParts.Add($"base={clientBaseUrl}");
+                if (metadataParts.Count > 0)
+                {
+                    var metadataSuffix = $" [{string.Join(", ", metadataParts)}]";
+                    AppendIndented(builder, indent + 1, $"remote_endpoint_summary (no downstream call edges captured){metadataSuffix}");
+                }
+                else
+                {
+                    AppendIndented(builder, indent + 1, "remote_endpoint_metadata_missing (no downstream call edges captured)");
+                }
+            }
+            else if (!anyCallWithMetadata)
+            {
                 var metadataSuffix = metadataParts.Count > 0 ? $" [{string.Join(", ", metadataParts)}]" : string.Empty;
                 AppendIndented(builder, indent + 1, $"remote_endpoint_metadata_missing (no route/verb captured for client calls){metadataSuffix}");
             }

@@ -46,9 +46,8 @@ public static partial class FlowBuilder
         public HashSet<string> TargetServiceVisited { get; } = new(StringComparer.Ordinal);
         public HashSet<string> ServiceStack { get; } = new(StringComparer.Ordinal);
         // Deduplication sets to suppress repeated request dispatch and handler expansion noise within a single flow render
-        public HashSet<string>? DedupRequests { get; set; }
-        public HashSet<string>? DedupHandlers { get; set; }
-        public HashSet<string>? ExpandedImplementations { get; set; }
+    public HashSet<string>? DedupRequests { get; set; }
+    public HashSet<string>? ExpandedImplementations { get; set; }
         public HashSet<string>? RenderedEndpoints { get; set; }
         public HashSet<string> RemoteLookupKeys { get; } = new(StringComparer.Ordinal);
         // Track mapping edges printed: key format FromNodeId::ToNodeId::Variable(optional)
@@ -62,6 +61,21 @@ public static partial class FlowBuilder
         public ImpactAccumulator? CurrentImpact => _impactStack.Count > 0 ? _impactStack.Peek() : null;
         public void PushImpact(ImpactAccumulator impact) => _impactStack.Push(impact);
         public ImpactAccumulator? PopImpact() => _impactStack.Count > 0 ? _impactStack.Pop() : null;
+
+        public void ResetPerFlowState()
+        {
+            DedupRequests = null;
+            ExpandedImplementations = null;
+            RenderedEndpoints = null;
+            RemoteLookupKeys.Clear();
+            TargetServiceVisited.Clear();
+            PrintedMappings.Clear();
+            HttpClientExpansionKeys.Clear();
+            EndpointStack.Clear();
+            HandlerStack.Clear();
+            NotificationStack.Clear();
+            ServiceStack.Clear();
+        }
 
         public IEnumerable<GraphNode> FindCandidateImplementations(GraphNode serviceNode)
         {
@@ -165,6 +179,18 @@ public static partial class FlowBuilder
                     if (yielded.Add(impl.Id)) yield return impl;
                 }
             }
+        }
+
+        public bool IsAllowedNode(string nodeId)
+        {
+            if (AllowedIds is null) return true;
+            return AllowedIds.Contains(nodeId);
+        }
+
+        public bool IsAllowedNode(GraphNode node)
+        {
+            if (node?.Id is null) return false;
+            return IsAllowedNode(node.Id);
         }
     }
 
@@ -410,13 +436,4 @@ public static partial class FlowBuilder
             }
         }
     }
-
-
-    // Unified allow-check for both engines (legacy via AllowedIds, turbo via same set)
-    public bool IsAllowedNode(GraphNode node)
-    {
-        if (AllowedIds is null) return true;
-        return state.IsAllowedNode(node.Id);
-    }
-
 }

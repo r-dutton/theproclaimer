@@ -17,7 +17,9 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, ControllerActionInfo> _controllerActions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, MinimalEndpointInfo> _minimalEndpoints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RequestInfo> _requests = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, RequestInfo>> _requestsByInterfaceType = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HandlerInfo> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, HandlerInfo> _handlersByRequestType = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ServiceInfo> _services = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _serviceHttpClientTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, PipelineBehaviorInfo> _pipelineBehaviors = new(StringComparer.OrdinalIgnoreCase);
@@ -34,6 +36,8 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentBag<HttpCallInfo> _httpCalls = new();
     private readonly ConcurrentDictionary<string, PublisherInfo> _publishers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, MessageContractInfo> _messageContracts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, PublisherProxyInfo> _publisherProxies = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _publisherProxyContracts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<DerivedRequestCandidate> _derivedRequestCandidates = new();
     private readonly ConcurrentDictionary<string, ConcurrentBag<ServiceRegistrationInfo>> _serviceRegistrations = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConfigurationValue> _configurationValues = new(StringComparer.OrdinalIgnoreCase);
@@ -117,6 +121,7 @@ public sealed partial class ProjectAnalyzer
         EmitEntities();
         EmitMappings();
         EmitHttpClients();
+        PropagateServicePublisherCalls();
         EmitPublishers();
         EmitServices();
         EmitServiceRegistrations();
