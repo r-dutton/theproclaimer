@@ -137,7 +137,7 @@ public sealed partial class ProjectAnalyzer
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var localStringValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -159,7 +159,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var assignment in method.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            foreach (var assignment in Descendants<AssignmentExpressionSyntax>(method))
             {
                 if (assignment.Left is IdentifierNameSyntax left &&
                     ResolveStringValue(assignment.Right) is { } assignedValue)
@@ -170,7 +170,7 @@ public sealed partial class ProjectAnalyzer
 
             var routeHints = CollectRouteHints(tree, method);
 
-            foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var memberAccess in Descendants<MemberAccessExpressionSyntax>(method))
             {
                 if (!TryResolveFieldDescriptor(memberAccess.Expression, fieldLookup, out var descriptor, out _))
                 {
@@ -331,7 +331,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            foreach (var elementAccess in Descendants<ElementAccessExpressionSyntax>(method))
             {
                 if (!TryResolveFieldDescriptor(elementAccess.Expression, fieldLookup, out var descriptor, out _))
                 {
@@ -350,7 +350,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess &&
                     extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
@@ -806,7 +806,7 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var invocation in service.BaseServiceClientInvocations)
         {
-            foreach (var clientType in ResolveClientTypesForService(invocation.BaseServiceType))
+            foreach (var clientType in ResolveClientTypesForService(invocation.BaseServiceType, invocation.ServiceAssembly))
             {
                 service.HttpClientInvocations.Add(new HandlerClientInvocation(
                     clientType,
@@ -845,10 +845,22 @@ public sealed partial class ProjectAnalyzer
             (relativePath, queryParameters) = ResolveRouteDetails(tree, invocation, routeHints, localStringValues);
         }
 
-        var targetService = ResolveClientTargetService(clientType);
+        var resolvedClientType = clientType;
+        if (TryResolveHttpClient(clientType, out var resolvedClient))
+        {
+            resolvedClientType = resolvedClient.Fqdn;
+        }
+
+        var targetService = ResolveClientTargetService(resolvedClientType);
+        var hasRouteMetadata = !string.IsNullOrWhiteSpace(relativePath) || queryParameters is { Count: > 0 };
+
+        if (resolvedClient is null && string.IsNullOrWhiteSpace(targetService) && !hasRouteMetadata)
+        {
+            return;
+        }
 
         serviceInfo.HttpClientInvocations.Add(new HandlerClientInvocation(
-            clientType,
+            resolvedClientType,
             httpMethod,
             relativePath,
             line,
@@ -857,7 +869,7 @@ public sealed partial class ProjectAnalyzer
             queryParameters,
             declaringMethod));
 
-        RecordServiceClientType(serviceInfo, clientType);
+        RecordServiceClientType(serviceInfo, resolvedClientType);
     }
 
     private (string? Route, IReadOnlyCollection<string>? QueryParameters) ResolveRouteDetails(
@@ -916,6 +928,7 @@ public sealed partial class ProjectAnalyzer
         var normalizedBaseType = GetTypeNameWithoutGenerics(baseServiceType);
         serviceInfo.BaseServiceClientInvocations.Add(new BaseServiceClientInvocation(
             normalizedBaseType,
+            serviceInfo.Assembly,
             invokedMethod,
             httpCall.HttpMethod,
             httpCall.Route,
@@ -936,17 +949,30 @@ public sealed partial class ProjectAnalyzer
                 continue;
             }
 
-            var map = _serviceHttpClientTypes.GetOrAdd(key, _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
+            var compositeKey = BuildServiceHttpClientKey(serviceInfo.Assembly, key);
+            var map = _serviceHttpClientTypes.GetOrAdd(compositeKey, _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
             map[normalizedClientType] = 0;
         }
     }
 
-    private IEnumerable<string> ResolveClientTypesForService(string baseServiceType)
+    private static string BuildServiceHttpClientKey(string? assembly, string key)
+    {
+        var assemblyPart = string.IsNullOrWhiteSpace(assembly) ? string.Empty : assembly.Trim();
+        return $"{assemblyPart}|{key}";
+    }
+
+    private IEnumerable<string> ResolveClientTypesForService(string baseServiceType, string? serviceAssembly)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in EnumerateTypeKeys(baseServiceType))
         {
-            if (!_serviceHttpClientTypes.TryGetValue(key, out var clients))
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            var compositeKey = BuildServiceHttpClientKey(serviceAssembly, key);
+            if (!_serviceHttpClientTypes.TryGetValue(compositeKey, out var clients))
             {
                 continue;
             }
@@ -1173,8 +1199,3 @@ public sealed partial class ProjectAnalyzer
     }
 
 }
-
-
-
-
-

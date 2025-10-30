@@ -101,7 +101,7 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
-            foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var memberAccess in Descendants<MemberAccessExpressionSyntax>(method))
             {
                 if (memberAccess.Expression is not IdentifierNameSyntax identifier)
                 {

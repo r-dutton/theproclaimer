@@ -61,13 +61,10 @@ namespace GraphKit.Outputs
 
             if (!string.IsNullOrWhiteSpace(clientTargetService))
             {
-                headerDetails.Add($"target={clientTargetService}");
-            }
+            headerDetails.Add($"target={clientTargetService}");
+        }
 
-            var detailSuffix = headerDetails.Count > 0 ? $" ({string.Join(", ", headerDetails)})" : string.Empty;
-            var baseLabel = $"uses_client {clientDisplay}{detailSuffix}";
-            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, clientEdge.Transform?.Location));
-            state.CurrentImpact?.RecordClient(clientDisplay);
+        var detailSuffix = headerDetails.Count > 0 ? $" ({string.Join(", ", headerDetails)})" : string.Empty;
 
             static bool IsHttpVerbCandidate(string? value)
             {
@@ -199,6 +196,22 @@ namespace GraphKit.Outputs
                     if (nearLine.Count > 0) allCallEdges = nearLine;
                 }
             }
+
+            var isLikelyLocal = allCallEdges.Count == 0 &&
+                                string.IsNullOrWhiteSpace(clientRouteHint) &&
+                                string.IsNullOrWhiteSpace(clientTargetService) &&
+                                string.IsNullOrWhiteSpace(clientBaseUrl);
+
+            var baseLabel = $"uses_client {clientDisplay}{detailSuffix}";
+            if (isLikelyLocal)
+            {
+                var serviceLabel = $"uses_service {clientDisplay}";
+                AppendIndented(builder, indent, FormatLinkedCode(serviceLabel, clientEdge.Transform?.Location));
+                return;
+            }
+
+            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, clientEdge.Transform?.Location));
+            state.CurrentImpact?.RecordClient(clientDisplay);
 
             // Distinct by method + verb + route + target_service to collapse duplicates
             var distinctCalls = allCallEdges

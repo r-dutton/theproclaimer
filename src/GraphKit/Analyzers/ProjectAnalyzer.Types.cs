@@ -129,6 +129,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record BaseServiceClientInvocation(
         string BaseServiceType,
+        string ServiceAssembly,
         string InvokedMethod,
         string HttpMethod,
         string? Route,
@@ -339,6 +340,5 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record AuthorizationMetadata(List<EndpointAuthorization> Requirements, bool AllowsAnonymous);
 }
-
 
 

@@ -769,19 +769,16 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
-        return typeDeclaration.DescendantNodes()
-            .OfType<ObjectCreationExpressionSyntax>()
+        return Descendants<ObjectCreationExpressionSyntax>(typeDeclaration)
             .Any(creation => creation.Type.ToString().EndsWith("UrlBuilder", StringComparison.Ordinal));
     }
 
     private static bool HasHttpWrapperInvocation(ClassDeclarationSyntax typeDeclaration)
     {
-        var hasUrlBuilder = typeDeclaration
-            .DescendantNodes()
-            .OfType<ObjectCreationExpressionSyntax>()
+        var hasUrlBuilder = Descendants<ObjectCreationExpressionSyntax>(typeDeclaration)
             .Any(creation => creation.Type.ToString().EndsWith("UrlBuilder", StringComparison.Ordinal));
 
-        foreach (var invocation in typeDeclaration.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(typeDeclaration))
         {
             var methodName = GetInvocationIdentifier(invocation.Expression);
             if (string.IsNullOrWhiteSpace(methodName))

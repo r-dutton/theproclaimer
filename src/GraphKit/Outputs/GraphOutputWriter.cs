@@ -15,6 +15,10 @@ public sealed class GraphOutputWriter
     private readonly string _workspaceRoot;
     private readonly string _outputDirectory;
     private readonly FlowWorkspaceIndex _workspaceIndex;
+    private static readonly JsonSerializerOptions CypherSerializerOptions = new()
+    {
+        WriteIndented = false
+    };
 
     public GraphOutputWriter(string workspaceRoot, string outputDirectory)
     {
@@ -201,21 +205,56 @@ public sealed class GraphOutputWriter
 
     private async Task WriteGraphCypherAsync(GraphDocument document, CancellationToken cancellationToken)
     {
-        var builder = new StringBuilder();
+        var cypherPath = Path.Combine(_outputDirectory, "graph.cypher");
+        await using var stream = new FileStream(cypherPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await using var writer = new StreamWriter(stream, Encoding.UTF8);
+        var line = new StringBuilder(512);
+
         foreach (var node in document.Nodes)
         {
-            builder.Append("MERGE (n:" + node.Type.Replace('.', '_') + " { id: '" + node.Id + "' })\n");
-            builder.Append("SET n += " + JsonSerializer.Serialize(node) + "\n");
+            cancellationToken.ThrowIfCancellationRequested();
+
+            line.Clear();
+            line.Append("MERGE (n:")
+                .Append(node.Type.Replace('.', '_'))
+                .Append(" { id: '")
+                .Append(node.Id)
+                .Append("' })");
+            await writer.WriteLineAsync(line.ToString());
+
+            var nodeJson = JsonSerializer.Serialize(node, CypherSerializerOptions);
+            line.Clear();
+            line.Append("SET n += ").Append(nodeJson);
+            await writer.WriteLineAsync(line.ToString());
         }
 
         foreach (var edge in document.Edges)
         {
-            builder.Append("MATCH (a { id: '" + edge.From + "' }), (b { id: '" + edge.To + "' })\n");
-            builder.Append("MERGE (a)-[r:" + edge.Kind.Replace('.', '_').ToUpperInvariant() + " { id: '" + ComputeEdgeId(edge) + "' }]->(b)\n");
-            builder.Append("SET r += " + JsonSerializer.Serialize(edge) + "\n");
+            cancellationToken.ThrowIfCancellationRequested();
+
+            line.Clear();
+            line.Append("MATCH (a { id: '")
+                .Append(edge.From)
+                .Append("' }), (b { id: '")
+                .Append(edge.To)
+                .Append("' })");
+            await writer.WriteLineAsync(line.ToString());
+
+            line.Clear();
+            line.Append("MERGE (a)-[r:")
+                .Append(edge.Kind.Replace('.', '_').ToUpperInvariant())
+                .Append(" { id: '")
+                .Append(ComputeEdgeId(edge))
+                .Append("' }]->(b)");
+            await writer.WriteLineAsync(line.ToString());
+
+            var edgeJson = JsonSerializer.Serialize(edge, CypherSerializerOptions);
+            line.Clear();
+            line.Append("SET r += ").Append(edgeJson);
+            await writer.WriteLineAsync(line.ToString());
         }
 
-        await File.WriteAllTextAsync(Path.Combine(_outputDirectory, "graph.cypher"), builder.ToString(), cancellationToken);
+        await writer.FlushAsync();
     }
 
     private async Task WriteGraphMarkdownAsync(GraphDocument document, string analyzerVersion, CancellationToken cancellationToken)
