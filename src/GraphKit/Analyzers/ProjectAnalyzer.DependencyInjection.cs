@@ -259,7 +259,8 @@ public sealed partial class ProjectAnalyzer
 
     private void AnalyzeServiceRegistrations(ProjectInfo project, SyntaxTree tree)
     {
-        foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+        var root = tree.GetRoot();
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(root))
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
             {
@@ -446,7 +447,8 @@ public sealed partial class ProjectAnalyzer
 
     private void AnalyzeHttpClientRegistrations(ProjectInfo project, SyntaxTree tree)
     {
-        foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+        var root = tree.GetRoot();
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(root))
         {
             // IServiceProvider.GetRequiredService<T>() or GetService<T>() detection (service locator usage)
             if (invocation.Expression is MemberAccessExpressionSyntax mas)
@@ -526,7 +528,7 @@ public sealed partial class ProjectAnalyzer
         string? explicitUrl = null;
         string? configurationKey = null;
 
-        foreach (var literal in invocation.DescendantNodes().OfType<LiteralExpressionSyntax>())
+        foreach (var literal in Descendants<LiteralExpressionSyntax>(invocation))
         {
             if (!literal.IsKind(SyntaxKind.StringLiteralExpression))
             {
@@ -657,9 +659,7 @@ public sealed partial class ProjectAnalyzer
 
     private bool TryCaptureServiceScan(ProjectInfo project, SyntaxTree tree, InvocationExpressionSyntax invocation)
     {
-        var typeFilters = invocation
-            .DescendantNodes()
-            .OfType<TypeOfExpressionSyntax>()
+        var typeFilters = Descendants<TypeOfExpressionSyntax>(invocation)
             .Select(expr => expr.Type.ToString())
             .ToList();
 
@@ -879,7 +879,7 @@ public sealed partial class ProjectAnalyzer
             case ExpressionSyntax expr:
                 return TryExtractTypeFromLambdaExpression(expr);
             case BlockSyntax block:
-                foreach (var returnStatement in block.DescendantNodes().OfType<ReturnStatementSyntax>())
+                foreach (var returnStatement in Descendants<ReturnStatementSyntax>(block))
                 {
                     var returned = TryExtractTypeFromLambdaExpression(returnStatement.Expression);
                     if (!string.IsNullOrWhiteSpace(returned))
@@ -888,13 +888,13 @@ public sealed partial class ProjectAnalyzer
                     }
                 }
 
-                var creation = block.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().FirstOrDefault();
+                var creation = Descendants<ObjectCreationExpressionSyntax>(block).FirstOrDefault();
                 if (creation is not null)
                 {
                     return creation.Type.ToString();
                 }
 
-                var invocation = block.DescendantNodes().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+                var invocation = Descendants<InvocationExpressionSyntax>(block).FirstOrDefault();
                 if (invocation is not null)
                 {
                     return TryExtractTypeFromLambdaExpression(invocation);

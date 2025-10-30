@@ -64,7 +64,7 @@ public sealed partial class ProjectAnalyzer
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -81,7 +81,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
                 {
@@ -170,7 +170,7 @@ public sealed partial class ProjectAnalyzer
         string? queueOrTopic = null;
         string? subject = null;
 
-        foreach (var invocation in classDeclaration.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(classDeclaration))
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax { Name.Identifier.Text: var name })
             {
@@ -185,7 +185,7 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
-        foreach (var creation in classDeclaration.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+        foreach (var creation in Descendants<ObjectCreationExpressionSyntax>(classDeclaration))
         {
             if (!creation.Type.ToString().Contains("ServiceBusMessage", StringComparison.Ordinal))
             {

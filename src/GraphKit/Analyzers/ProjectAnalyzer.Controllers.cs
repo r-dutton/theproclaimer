@@ -112,7 +112,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -151,7 +151,7 @@ public sealed partial class ProjectAnalyzer
             }
 
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 // Detect status code via common MVC helper methods inside return statements
                 if (invocation.Expression is MemberAccessExpressionSyntax statusAccess)
@@ -421,7 +421,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            foreach (var elementAccess in Descendants<ElementAccessExpressionSyntax>(method))
             {
                 if (elementAccess.Expression is not IdentifierNameSyntax identifier)
                 {
@@ -445,7 +445,7 @@ public sealed partial class ProjectAnalyzer
                     info.ConfigurationUsages.Add(configurationUsage);
                 }
             }
-            foreach (var binary in method.DescendantNodes().OfType<BinaryExpressionSyntax>())
+            foreach (var binary in Descendants<BinaryExpressionSyntax>(method))
             {
                 if (binary.IsKind(SyntaxKind.AsExpression) && binary.Right is TypeSyntax asType)
                 {
@@ -479,7 +479,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var pattern in method.DescendantNodes().OfType<IsPatternExpressionSyntax>())
+            foreach (var pattern in Descendants<IsPatternExpressionSyntax>(method))
             {
                 var corePattern = pattern.Pattern is UnaryPatternSyntax unary ? unary.Pattern : pattern.Pattern;
 
@@ -2971,7 +2971,7 @@ public sealed partial class ProjectAnalyzer
 
     private void AnalyzeMinimalApiFromClass(ProjectInfo project, SyntaxTree tree, ClassDeclarationSyntax classDeclaration, string namespaceName)
     {
-        foreach (var invocation in classDeclaration.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(classDeclaration))
         {
             if (invocation.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: var methodName } memberAccess &&
                 methodName.StartsWith("Map", StringComparison.Ordinal))
@@ -2995,7 +2995,7 @@ public sealed partial class ProjectAnalyzer
 
     private void AnalyzeMinimalApiFromProgramFile(ProjectInfo project, SyntaxTree tree, CompilationUnitSyntax root)
     {
-        foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(root))
         {
             if (invocation.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: var methodName } memberAccess &&
                 methodName.StartsWith("Map", StringComparison.Ordinal))

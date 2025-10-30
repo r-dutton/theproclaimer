@@ -1476,11 +1476,11 @@ public sealed partial class ProjectAnalyzer
                 variable.Identifier.Text.Equals("SectionName", StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static int LongestCommonPrefixLength(string a, string b)
+private static int LongestCommonPrefixLength(string a, string b)
+{
+    if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
     {
-        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
-        {
-            return 0;
+        return 0;
         }
 
         var max = Math.Min(a.Length, b.Length);
@@ -1488,15 +1488,49 @@ public sealed partial class ProjectAnalyzer
         for (; i < max; i++)
         {
             if (a[i] != b[i]) break;
-        }
-        return i;
+    }
+    return i;
+}
+
+private static string? GetNamespaceRoot(string? typeName)
+{
+    if (string.IsNullOrWhiteSpace(typeName))
+    {
+        return null;
     }
 
-    private static string GetAssemblyRoot(string? assembly)
+    var ns = GetTypeNamespace(typeName);
+    if (string.IsNullOrWhiteSpace(ns))
     {
-        if (string.IsNullOrWhiteSpace(assembly))
-        {
-            return string.Empty;
+        return null;
+    }
+
+    var separatorIndex = ns.IndexOf('.');
+    return separatorIndex >= 0 ? ns[..separatorIndex] : ns;
+}
+
+private static bool NamespaceRootMatches(string candidateType, string referenceType)
+{
+    var referenceRoot = GetNamespaceRoot(referenceType);
+    if (string.IsNullOrWhiteSpace(referenceRoot))
+    {
+        return true;
+    }
+
+    var candidateRoot = GetNamespaceRoot(candidateType);
+    if (string.IsNullOrWhiteSpace(candidateRoot))
+    {
+        return false;
+    }
+
+    return string.Equals(candidateRoot, referenceRoot, StringComparison.OrdinalIgnoreCase);
+}
+
+private static string GetAssemblyRoot(string? assembly)
+{
+    if (string.IsNullOrWhiteSpace(assembly))
+    {
+        return string.Empty;
         }
 
         var separatorIndex = assembly.IndexOf('.');
@@ -1636,5 +1670,4 @@ public sealed partial class ProjectAnalyzer
                simple.Contains("DocumentStore", StringComparison.OrdinalIgnoreCase);
     }
 }
-
 

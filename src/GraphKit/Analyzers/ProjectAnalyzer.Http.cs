@@ -37,7 +37,7 @@ public sealed partial class ProjectAnalyzer
 
             var requestMessageHints = new Dictionary<string, (string? Method, RouteHint? Route)>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var creation in method.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+            foreach (var creation in Descendants<ObjectCreationExpressionSyntax>(method))
             {
                 if (!creation.Type.ToString().EndsWith("HttpRequestMessage", StringComparison.Ordinal))
                 {
@@ -70,7 +70,7 @@ public sealed partial class ProjectAnalyzer
 
             var declaringMethod = method.Identifier.Text;
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (invocation.Expression is MemberAccessExpressionSyntax { Name: IdentifierNameSyntax sendName } sendAccess &&
                     string.Equals(sendName.Identifier.Text, "SendAsync", StringComparison.OrdinalIgnoreCase))
@@ -360,7 +360,7 @@ public sealed partial class ProjectAnalyzer
     {
         var hints = new Dictionary<string, RouteHint>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+        foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
         {
             foreach (var variable in local.Declaration.Variables)
             {
@@ -377,7 +377,7 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
-        foreach (var assignment in method.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+        foreach (var assignment in Descendants<AssignmentExpressionSyntax>(method))
         {
             if (assignment.Left is IdentifierNameSyntax identifier &&
                 TryResolveRouteHint(tree, assignment.Right, hints) is { } hint)

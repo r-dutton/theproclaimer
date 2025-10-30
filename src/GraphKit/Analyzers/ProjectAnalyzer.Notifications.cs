@@ -50,7 +50,7 @@ public sealed partial class ProjectAnalyzer
                 .ToDictionary(p => p.Identifier.Text, p => p.Type?.ToString(), StringComparer.OrdinalIgnoreCase);
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -66,7 +66,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var memberAccess in Descendants<MemberAccessExpressionSyntax>(method))
             {
                 if (memberAccess.Expression is not IdentifierNameSyntax identifier)
                 {
@@ -187,7 +187,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            foreach (var elementAccess in Descendants<ElementAccessExpressionSyntax>(method))
             {
                 if (elementAccess.Expression is not IdentifierNameSyntax identifier)
                 {
@@ -212,7 +212,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (invocation.Expression is not MemberAccessExpressionSyntax extensionAccess)
                 {

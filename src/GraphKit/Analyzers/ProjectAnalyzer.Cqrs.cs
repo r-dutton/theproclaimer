@@ -80,7 +80,7 @@ public sealed partial class ProjectAnalyzer
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var localStringValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -120,7 +120,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var assignment in method.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            foreach (var assignment in Descendants<AssignmentExpressionSyntax>(method))
             {
                 if (assignment.Left is IdentifierNameSyntax left &&
                     ResolveStringValue(assignment.Right) is { } assignedValue)
@@ -129,7 +129,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var memberAccess in Descendants<MemberAccessExpressionSyntax>(method))
             {
                 if (memberAccess.Expression is IdentifierNameSyntax identifier)
                 {
@@ -402,7 +402,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            foreach (var elementAccess in Descendants<ElementAccessExpressionSyntax>(method))
             {
                 if (elementAccess.Expression is not IdentifierNameSyntax identifier)
                 {
@@ -427,7 +427,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (invocation.Expression is not MemberAccessExpressionSyntax extensionAccess)
                 {
@@ -456,7 +456,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (!TryGetHelperMethodName(invocation.Expression, out var helperName))
                 {
@@ -1167,7 +1167,7 @@ public sealed partial class ProjectAnalyzer
                     StringComparer.OrdinalIgnoreCase);
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var local in helper.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(helper))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -1202,7 +1202,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in helper.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(helper))
             {
                 if (invocation.Expression is MemberAccessExpressionSyntax accessExpression)
                 {
@@ -1472,12 +1472,65 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
+        var simpleNamespaceMap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            var root = GetNamespaceRoot(candidate);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                continue;
+            }
+
+            var simple = GetTopLevelSimpleIdentifier(candidate);
+            if (string.IsNullOrWhiteSpace(simple))
+            {
+                continue;
+            }
+
+            if (!simpleNamespaceMap.TryGetValue(simple, out var roots))
+            {
+                roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                simpleNamespaceMap[simple] = roots;
+            }
+            roots.Add(root);
+
+            if (simple.Length > 1 && simple[0] == 'I' && char.IsUpper(simple[1]))
+            {
+                var trimmed = simple[1..];
+                if (!string.IsNullOrWhiteSpace(trimmed))
+                {
+                    if (!simpleNamespaceMap.TryGetValue(trimmed, out var trimmedRoots))
+                    {
+                        trimmedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        simpleNamespaceMap[trimmed] = trimmedRoots;
+                    }
+
+                    trimmedRoots.Add(root);
+                }
+            }
+        }
+
+        var matches = new List<(HttpClientInfo Client, string Source, bool Exact)>();
+        var seenMatches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddMatch(HttpClientInfo info, string source, bool exact)
+        {
+            if (seenMatches.Add(info.Fqdn))
+            {
+                matches.Add((info, source, exact));
+            }
+        }
+
         foreach (var candidate in candidates)
         {
             if (_httpClients.TryGetValue(candidate, out var resolved))
             {
-                client = resolved;
-                return true;
+                AddMatch(resolved, candidate, true);
             }
         }
 
@@ -1485,42 +1538,126 @@ public sealed partial class ProjectAnalyzer
         {
             if (_httpClients.TryGetValue(simple, out var resolved))
             {
-                client = resolved;
-                return true;
+                AddMatch(resolved, simple, false);
             }
         }
 
         foreach (var candidate in candidates)
         {
             var simple = GetTopLevelSimpleIdentifier(candidate);
-            var match = _httpClients.Values.FirstOrDefault(c =>
-                c.Fqdn.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
-                c.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
-                (!string.IsNullOrWhiteSpace(simple) &&
-                 (c.Fqdn.Equals(simple, StringComparison.OrdinalIgnoreCase) ||
-                  c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))));
+            var matched = _httpClients.Values.Where(c =>
+                    c.Fqdn.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                    c.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrWhiteSpace(simple) &&
+                     (c.Fqdn.Equals(simple, StringComparison.OrdinalIgnoreCase) ||
+                      c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))))
+                .ToList();
 
-            if (match is not null)
+            foreach (var match in matched)
             {
-                client = match;
-                return true;
+                AddMatch(match, candidate, false);
             }
         }
 
         foreach (var simple in simpleCandidates)
         {
-            var match = _httpClients.Values.FirstOrDefault(c =>
-                c.Fqdn.Equals(simple, StringComparison.OrdinalIgnoreCase) ||
-                c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
+            var matched = _httpClients.Values.Where(c =>
+                    c.Fqdn.Equals(simple, StringComparison.OrdinalIgnoreCase) ||
+                    c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
-            if (match is not null)
+            foreach (var match in matched)
             {
-                client = match;
-                return true;
+                AddMatch(match, simple, false);
             }
         }
 
-        client = null;
-        return false;
+        foreach (var (simple, roots) in simpleNamespaceMap)
+        {
+            foreach (var info in _httpClients.Values)
+            {
+                if (!EndsWithHttpClient(info))
+                {
+                    continue;
+                }
+
+                var infoSimple = GetTopLevelSimpleIdentifier(info.Fqdn);
+                if (!infoSimple.StartsWith(simple, StringComparison.OrdinalIgnoreCase) &&
+                    !info.Name.StartsWith(simple, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var infoRoot = GetNamespaceRoot(info.Fqdn);
+                if (roots.Count > 0 && (string.IsNullOrWhiteSpace(infoRoot) || !roots.Contains(infoRoot)))
+                {
+                    continue;
+                }
+
+                AddMatch(info, simple, false);
+            }
+        }
+
+        if (matches.Count == 0)
+        {
+            client = null;
+            return false;
+        }
+
+        static bool EndsWithHttpClient(HttpClientInfo info)
+            => info.Name.EndsWith("HttpClient", StringComparison.OrdinalIgnoreCase) ||
+               info.Fqdn.EndsWith("HttpClient", StringComparison.OrdinalIgnoreCase);
+
+        HttpClientInfo? best = null;
+        var bestScore = int.MinValue;
+
+        foreach (var (match, source, exact) in matches)
+        {
+            var score = 0;
+
+            if (exact)
+            {
+                score += 500;
+            }
+
+            if (string.Equals(match.Fqdn, clientType, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 1_000;
+            }
+
+            if (EndsWithHttpClient(match))
+            {
+                score += 350;
+            }
+
+            if (!string.IsNullOrWhiteSpace(source))
+            {
+                score += LongestCommonPrefixLength(source, match.Fqdn);
+                if (NamespaceRootMatches(match.Fqdn, source))
+                {
+                    score += 200;
+                }
+            }
+
+            var sourceSimple = GetTopLevelSimpleIdentifier(source);
+            if (!string.IsNullOrWhiteSpace(sourceSimple) &&
+                simpleNamespaceMap.TryGetValue(sourceSimple, out var desiredRoots) && desiredRoots.Count > 0)
+            {
+                var candidateRoot = GetNamespaceRoot(match.Fqdn);
+                if (!string.IsNullOrWhiteSpace(candidateRoot) && desiredRoots.Contains(candidateRoot))
+                {
+                    score += 150;
+                }
+            }
+
+            if (best is null || score > bestScore)
+            {
+                best = match;
+                bestScore = score;
+            }
+        }
+
+        client = best ?? matches[0].Client;
+        return true;
     }
 }
