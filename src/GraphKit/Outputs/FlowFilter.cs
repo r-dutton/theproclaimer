@@ -2,82 +2,82 @@ using System;
 using System.Collections.Generic;
 using System.IO.Enumeration;
 using System.Linq;
-using GraphKit.Graph;
+using GraphKit.Outputs.FlowBuilder;
 
-namespace GraphKit.Outputs;
-
-public static class FlowFilter
+namespace GraphKit.Outputs
 {
-    public static Func<GraphNode, bool> BuildPredicate(IEnumerable<string> patterns)
+    public static class FlowFilter
     {
-        var normalized = patterns
-            ?.SelectMany(p => (p ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Select(p => p.Trim())
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray() ?? Array.Empty<string>();
-
-        if (normalized.Length == 0)
+        public static Func<FlowNode, bool> BuildPredicate(IEnumerable<string> patterns)
         {
-            return _ => false;
+            var normalized = patterns
+                ?.SelectMany(p => (p ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Select(p => p.Trim())
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray() ?? Array.Empty<string>();
+
+            if (normalized.Length == 0)
+            {
+                return _ => false;
+            }
+
+            if (normalized.Any(IsMatchAll))
+            {
+                return _ => true;
+            }
+
+            return node => normalized.Any(pattern => Matches(node, pattern));
         }
 
-        if (normalized.Any(IsMatchAll))
+        public static bool Matches(FlowNode node, string pattern)
         {
-            return _ => true;
-        }
+            if (node is null)
+            {
+                throw new ArgumentNullException(nameof(node));
+            }
 
-        return controller => normalized.Any(pattern => Matches(controller, pattern));
-    }
+            if (string.IsNullOrWhiteSpace(pattern))
+            {
+                return false;
+            }
 
-    public static bool Matches(GraphNode controller, string pattern)
-    {
-        if (controller is null)
-        {
-            throw new ArgumentNullException(nameof(controller));
-        }
+            pattern = pattern.Trim();
+            if (IsMatchAll(pattern))
+            {
+                return true;
+            }
 
-        if (string.IsNullOrWhiteSpace(pattern))
-        {
-            return false;
-        }
+            bool MatchesText(string? text)
+                => !string.IsNullOrWhiteSpace(text) && FileSystemName.MatchesSimpleExpression(pattern, text, ignoreCase: true);
 
-        pattern = pattern.Trim();
-        if (IsMatchAll(pattern))
-        {
-            return true;
-        }
+            if (MatchesText(node.Id) || MatchesText(node.GetString("name")) || MatchesText(node.GetString("fqdn")))
+            {
+                return true;
+            }
 
-        bool MatchesText(string? text) =>
-            !string.IsNullOrWhiteSpace(text) &&
-            FileSystemName.MatchesSimpleExpression(pattern, text, ignoreCase: true);
+            foreach (var tag in node.GetStringList("tags"))
+            {
+                if (MatchesText(tag))
+                {
+                    return true;
+                }
+            }
 
-        if (MatchesText(controller.Id) || MatchesText(controller.Name) || MatchesText(controller.Fqdn))
-        {
-            return true;
-        }
-
-        if (controller.Tags.Any(MatchesText))
-        {
-            return true;
-        }
-
-        if (controller.Props is { Count: > 0 })
-        {
-            foreach (var value in controller.Props.Values)
+            foreach (var value in node.Props.Values)
             {
                 if (MatchesText(value?.ToString()))
                 {
                     return true;
                 }
             }
+
+            return false;
         }
 
-        return false;
+        private static bool IsMatchAll(string pattern)
+            => string.Equals(pattern, "*", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(pattern, "**", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(pattern, "all", StringComparison.OrdinalIgnoreCase);
     }
-
-    private static bool IsMatchAll(string pattern)
-        => string.Equals(pattern, "*", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(pattern, "**", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(pattern, "all", StringComparison.OrdinalIgnoreCase);
 }
