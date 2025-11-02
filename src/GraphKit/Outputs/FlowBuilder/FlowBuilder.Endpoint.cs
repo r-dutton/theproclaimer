@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 using static GraphKit.Outputs.Utilities;
@@ -12,7 +13,7 @@ namespace GraphKit.Outputs
     {
         public static void AppendEndpointFlow(StringBuilder builder, FlowRenderState state, GraphNode endpoint, int indent)
         {
-            if (state.AllowedIds != null && !state.AllowedIds.Contains(endpoint.Id))
+            if (!state.IsAllowedNode(endpoint.Id))
             {
                 return; // outside reachability scope
             }
@@ -80,6 +81,48 @@ namespace GraphKit.Outputs
 
                 var childIndent = indent <= 0 ? 1 : indent + 1;
 
+                var domainEdgesByLine = new SortedDictionary<int, List<GraphEdge>>();
+                var domainEdgesWithoutLine = new List<GraphEdge>();
+                foreach (var domainEdge in edges.Where(e => e.Kind == "invokes_domain"))
+                {
+                    var line = domainEdge.Transform?.Location?.Line;
+                    if (line.HasValue)
+                    {
+                        if (!domainEdgesByLine.TryGetValue(line.Value, out var bucket))
+                        {
+                            bucket = new List<GraphEdge>();
+                            domainEdgesByLine[line.Value] = bucket;
+                        }
+                        bucket.Add(domainEdge);
+                    }
+                    else
+                    {
+                        domainEdgesWithoutLine.Add(domainEdge);
+                    }
+                }
+
+                var domainCallsByLine = new SortedDictionary<int, List<(string? Type, string? Method, int? Line, string? Variable)>>();
+                var domainCallsWithoutLine = new List<(string? Type, string? Method, int? Line, string? Variable)>();
+                if (endpoint.Props is { } endpointProps && endpointProps.TryGetValue("domain_calls", out var domainCallsValue))
+                {
+                    foreach (var call in EnumerateDomainCalls(domainCallsValue))
+                    {
+                        if (call.Line.HasValue)
+                        {
+                            if (!domainCallsByLine.TryGetValue(call.Line.Value, out var list))
+                            {
+                                list = new List<(string? Type, string? Method, int? Line, string? Variable)>();
+                                domainCallsByLine[call.Line.Value] = list;
+                            }
+                            list.Add(call);
+                        }
+                        else
+                        {
+                            domainCallsWithoutLine.Add(call);
+                        }
+                    }
+                }
+
                 // Configuration usages (uses_configuration edges)
                 foreach (var configEdge in edges.Where(e => e.Kind == "uses_configuration"))
                 {
@@ -87,7 +130,7 @@ namespace GraphKit.Outputs
                     {
                         continue;
                     }
-                    if (state.AllowedIds != null && !state.AllowedIds.Contains(configNode.Id)) continue;
+                    if (!state.IsAllowedNode(configNode.Id)) continue;
 
                     var key = configEdge.Props is { } cprops && cprops.TryGetValue("key", out var keyVal)
                         ? keyVal?.ToString()
@@ -110,6 +153,7 @@ namespace GraphKit.Outputs
                 foreach (var mapEdge in edges.Where(e => e.Kind == "maps_to"))
                 {
                     AppendMappingEdge(builder, state, mapEdge, childIndent);
+                    AppendDomainCallsForLine(builder, state, endpoint, domainEdgesByLine, domainCallsByLine, mapEdge.Transform?.Location?.Line, childIndent + 1);
                 }
 
                 foreach (var castEdge in edges.Where(e => e.Kind == "casts_to"))
@@ -118,6 +162,7 @@ namespace GraphKit.Outputs
                         ? castValue?.ToString()
                         : null;
                     AppendMappingEdge(builder, state, castEdge, childIndent, label: "casts_to", annotation: annotation, includeAutomapper: false);
+                    AppendDomainCallsForLine(builder, state, endpoint, domainEdgesByLine, domainCallsByLine, castEdge.Transform?.Location?.Line, childIndent + 1);
                 }
 
                 foreach (var clientEdge in edges.Where(e => e.Kind == "uses_client"))
@@ -207,6 +252,7 @@ namespace GraphKit.Outputs
                         var serviceMethodText = string.IsNullOrWhiteSpace(callMethod) ? string.Empty : $".{callMethod}";
                         var label = $"calls {targetNode.Name}{serviceMethodText}";
                         AppendIndented(builder, childIndent, FormatLinkedCode(label, callEdge.Transform?.Location));
+                        AppendDomainCallsForLine(builder, state, endpoint, domainEdgesByLine, domainCallsByLine, callEdge.Transform?.Location?.Line, childIndent + 1);
                         if (targetNode.Type == "app.repository" || targetNode.Type == "repository")
                         {
                             AppendRepositoryFlow(builder, state, targetNode, childIndent + 1);
@@ -244,6 +290,8 @@ namespace GraphKit.Outputs
                             : label;
                         AppendIndented(builder, childIndent, linked);
                     }
+                    var domainLine = firstLine ?? callEdge.Transform?.Location?.Line;
+                    AppendDomainCallsForLine(builder, state, endpoint, domainEdgesByLine, domainCallsByLine, domainLine, childIndent + 1);
                     AppendRepositoryFlow(builder, state, targetNode, childIndent + 1);
                 }
 
@@ -257,6 +305,7 @@ namespace GraphKit.Outputs
                     var label = ExtractOperationLabel(dataEdge);
                     var baseLabel = $"{label} {entityNode.Name}";
                     AppendIndented(builder, childIndent, FormatLinkedCode(baseLabel, dataEdge.Transform?.Location));
+                    AppendDomainCallsForLine(builder, state, endpoint, domainEdgesByLine, domainCallsByLine, dataEdge.Transform?.Location?.Line, childIndent + 1);
                     state.CurrentImpact?.RecordEntityOperation(GetDisplayName(entityNode), dataEdge.Kind);
 
                     if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
@@ -316,6 +365,7 @@ namespace GraphKit.Outputs
                                 var repoLabel = $"calls {repoImpl.Name}{repoMethodSuffix}";
                                 AppendIndented(builder, childIndent, FormatLinkedCode(repoLabel, location));
                             }
+                            AppendDomainCallsForLine(builder, state, endpoint, domainEdgesByLine, domainCallsByLine, serviceEdge.Transform?.Location?.Line, childIndent + 1);
                             AppendRepositoryFlow(builder, state, repoImpl, childIndent + 1);
                             continue; // Skip generic service expansion path
                         }
@@ -413,6 +463,11 @@ namespace GraphKit.Outputs
 
                 foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
                 {
+                    if (ShouldSkipSyntheticDispatch(state, requestEdge))
+                    {
+                        continue;
+                    }
+
                     if (!state.NodesById.TryGetValue(requestEdge.To, out var requestNode)) continue;
 
                     // Skip duplicate sends/dispatch of same request at same line
@@ -428,7 +483,7 @@ namespace GraphKit.Outputs
                     }
                     var handlerPart = string.IsNullOrWhiteSpace(handlerName) ? string.Empty : $" -> {handlerName}";
                     var responsePart = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" ({responseType})";
-                    var synthetic = string.Equals(requestEdge.Source, "synthetic", StringComparison.OrdinalIgnoreCase) && requestEdge.Transform?.Type == "requestprocessor.dispatch";
+                    var synthetic = IsSyntheticRequestProcessorDispatch(requestEdge);
                     var prefix = synthetic ? "dispatches" : "sends_request";
                     var baseLabel = $"{prefix} {requestNode.Name}";
                     AppendIndented(builder, childIndent, $"{FormatLinkedCode(baseLabel, requestEdge.Transform?.Location)}{handlerPart}{responsePart}");
@@ -460,11 +515,295 @@ namespace GraphKit.Outputs
                     state.CurrentImpact?.RecordNotification(GetDisplayName(notificationNode));
                     AppendNotificationFlow(builder, state, notificationNode, childIndent + 1);
                 }
+
+                AppendRemainingDomainCalls(builder, state, endpoint, domainEdgesByLine, domainEdgesWithoutLine, domainCallsByLine, domainCallsWithoutLine, childIndent);
             }
             finally
             {
                 state.EndpointStack.Remove(endpoint.Id);
             }
         }
+
+        private static string NormalizeLocalMethodName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = value.Trim();
+            if (trimmed.EndsWith("Async", StringComparison.OrdinalIgnoreCase) && trimmed.Length > 5)
+            {
+                trimmed = trimmed[..^5];
+            }
+
+            return trimmed;
+        }
+
+        private static void AppendDomainCallsForLine(
+            StringBuilder builder,
+            FlowRenderState state,
+            GraphNode endpoint,
+            SortedDictionary<int, List<GraphEdge>> domainEdgesByLine,
+            SortedDictionary<int, List<(string? Type, string? Method, int? Line, string? Variable)>> domainCallsByLine,
+            int? line,
+            int indent)
+        {
+            if (!line.HasValue)
+            {
+                return;
+            }
+
+            var actualLine = line.Value;
+            if (domainEdgesByLine.TryGetValue(actualLine, out var edgesAtLine))
+            {
+                AppendDomainEdges(builder, state, edgesAtLine, indent);
+                domainEdgesByLine.Remove(actualLine);
+            }
+
+            if (domainCallsByLine.TryGetValue(actualLine, out var callsAtLine))
+            {
+                AppendDomainFallbacks(builder, state, endpoint, callsAtLine, indent);
+                domainCallsByLine.Remove(actualLine);
+            }
+        }
+
+        private static void AppendDomainEdges(StringBuilder builder, FlowRenderState state, IReadOnlyList<GraphEdge> edges, int indent)
+        {
+            if (edges.Count == 0)
+            {
+                return;
+            }
+
+            state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var domainEdge in edges)
+            {
+                var methodName = domainEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
+                    ? methodValue?.ToString()
+                    : null;
+                var variableName = domainEdge.Props is { } varProps && varProps.TryGetValue("variable", out var variableValue)
+                    ? variableValue?.ToString()
+                    : null;
+
+                string? targetDisplay = null;
+                if (!string.IsNullOrWhiteSpace(domainEdge.To) && state.NodesById.TryGetValue(domainEdge.To!, out var domainNode))
+                {
+                    targetDisplay = GetDisplayName(domainNode);
+                }
+                else if (domainEdge.Props is { } targetProps)
+                {
+                    if (targetProps.TryGetValue("target_type", out var targetTypeValue))
+                    {
+                        targetDisplay = targetTypeValue?.ToString();
+                    }
+                    else if (targetProps.TryGetValue("type", out var typeValue))
+                    {
+                        targetDisplay = typeValue?.ToString();
+                    }
+                }
+
+                string? normalizedTarget = null;
+                if (!string.IsNullOrWhiteSpace(targetDisplay))
+                {
+                    normalizedTarget = GetSimpleType(targetDisplay!);
+                }
+
+                var labelTarget = string.IsNullOrWhiteSpace(normalizedTarget) ? "domain" : normalizedTarget!;
+                var dedupTarget = string.IsNullOrWhiteSpace(normalizedTarget) ? string.Empty : normalizedTarget!;
+                var dedupKey = $"DOMAIN::{dedupTarget}::{methodName ?? string.Empty}::{variableName ?? string.Empty}::{domainEdge.Transform?.Location?.Line ?? -1}";
+                if (!state.DedupRequests.Add(dedupKey))
+                {
+                    continue;
+                }
+
+                var methodPart = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{NormalizeLocalMethodName(methodName!)}";
+                var variablePart = string.IsNullOrWhiteSpace(variableName) ? string.Empty : $" ({variableName})";
+                var baseLabel = $"domain {labelTarget}{methodPart}{variablePart}";
+                AppendIndented(builder, indent, FormatLinkedCode(baseLabel, domainEdge.Transform?.Location));
+            }
+        }
+
+        private static void AppendDomainFallbacks(
+            StringBuilder builder,
+            FlowRenderState state,
+            GraphNode endpoint,
+            IReadOnlyList<(string? Type, string? Method, int? Line, string? Variable)> calls,
+            int indent)
+        {
+            if (calls.Count == 0)
+            {
+                return;
+            }
+
+            state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var call in calls)
+            {
+                var methodName = call.Method;
+                var variableName = call.Variable;
+                var typeName = call.Type;
+                string? normalizedTarget = null;
+                if (!string.IsNullOrWhiteSpace(typeName))
+                {
+                    normalizedTarget = GetSimpleType(typeName!);
+                }
+
+                var labelTarget = string.IsNullOrWhiteSpace(normalizedTarget) ? "domain" : normalizedTarget!;
+                var dedupTarget = string.IsNullOrWhiteSpace(normalizedTarget) ? string.Empty : normalizedTarget!;
+                var dedupKey = $"DOMAIN::{dedupTarget}::{methodName ?? string.Empty}::{variableName ?? string.Empty}::{call.Line ?? -1}";
+                if (!state.DedupRequests.Add(dedupKey))
+                {
+                    continue;
+                }
+
+                var methodPart = string.IsNullOrWhiteSpace(methodName) ? string.Empty : $".{NormalizeLocalMethodName(methodName!)}";
+                var variablePart = string.IsNullOrWhiteSpace(variableName) ? string.Empty : $" ({variableName})";
+
+                GraphLocation? location = null;
+                if (call.Line.HasValue && !string.IsNullOrWhiteSpace(endpoint.FilePath))
+                {
+                    location = new GraphLocation
+                    {
+                        File = endpoint.FilePath,
+                        Line = call.Line.Value
+                    };
+                }
+
+                var baseLabel = $"domain {labelTarget}{methodPart}{variablePart}";
+                AppendIndented(builder, indent, FormatLinkedCode(baseLabel, location));
+            }
+        }
+
+        private static void AppendRemainingDomainCalls(
+            StringBuilder builder,
+            FlowRenderState state,
+            GraphNode endpoint,
+            SortedDictionary<int, List<GraphEdge>> domainEdgesByLine,
+            List<GraphEdge> domainEdgesWithoutLine,
+            SortedDictionary<int, List<(string? Type, string? Method, int? Line, string? Variable)>> domainCallsByLine,
+            List<(string? Type, string? Method, int? Line, string? Variable)> domainCallsWithoutLine,
+            int indent)
+        {
+            if (domainEdgesByLine.Count > 0 || domainCallsByLine.Count > 0)
+            {
+                var remainingLines = domainEdgesByLine.Keys
+                    .Concat(domainCallsByLine.Keys)
+                    .Distinct()
+                    .OrderBy(line => line)
+                    .ToList();
+
+                foreach (var remainingLine in remainingLines)
+                {
+                    AppendDomainCallsForLine(builder, state, endpoint, domainEdgesByLine, domainCallsByLine, remainingLine, indent);
+                }
+            }
+
+            if (domainEdgesWithoutLine.Count > 0)
+            {
+                AppendDomainEdges(builder, state, domainEdgesWithoutLine, indent);
+                domainEdgesWithoutLine.Clear();
+            }
+
+            if (domainCallsWithoutLine.Count > 0)
+            {
+                AppendDomainFallbacks(builder, state, endpoint, domainCallsWithoutLine, indent);
+                domainCallsWithoutLine.Clear();
+            }
+        }
+
+        private static IEnumerable<(string? Type, string? Method, int? Line, string? Variable)> EnumerateDomainCalls(object? value)
+        {
+            if (value is null)
+            {
+                yield break;
+            }
+
+            if (value is JsonElement element)
+            {
+                foreach (var tuple in EnumerateDomainCalls(element))
+                {
+                    yield return tuple;
+                }
+
+                yield break;
+            }
+
+            if (value is IEnumerable<object> list)
+            {
+                foreach (var item in list)
+                {
+                    foreach (var tuple in EnumerateDomainCalls(item))
+                    {
+                        yield return tuple;
+                    }
+                }
+
+                yield break;
+            }
+
+            if (value is Dictionary<string, object> dict)
+            {
+                yield return (
+                    dict.TryGetValue("type", out var typeValue) ? typeValue?.ToString() : null,
+                    dict.TryGetValue("method", out var methodValue) ? methodValue?.ToString() : null,
+                    dict.TryGetValue("line", out var lineValue) && int.TryParse(lineValue?.ToString(), out var parsedLine) ? parsedLine : (int?)null,
+                    dict.TryGetValue("variable", out var variableValue) ? variableValue?.ToString() : null);
+
+                yield break;
+            }
+
+            if (value is string or int or bool)
+            {
+                yield break;
+            }
+        }
+
+        private static IEnumerable<(string? Type, string? Method, int? Line, string? Variable)> EnumerateDomainCalls(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in element.EnumerateArray())
+                {
+                    foreach (var tuple in EnumerateDomainCalls(item))
+                    {
+                        yield return tuple;
+                    }
+                }
+
+                yield break;
+            }
+
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                string? type = null;
+                string? method = null;
+                int? line = null;
+                string? variable = null;
+
+                if (element.TryGetProperty("type", out var typeProp))
+                {
+                    type = typeProp.ValueKind == JsonValueKind.Null ? null : typeProp.GetString();
+                }
+
+                if (element.TryGetProperty("method", out var methodProp))
+                {
+                    method = methodProp.ValueKind == JsonValueKind.Null ? null : methodProp.GetString();
+                }
+
+                if (element.TryGetProperty("line", out var lineProp) && lineProp.ValueKind == JsonValueKind.Number && lineProp.TryGetInt32(out var parsedLine))
+                {
+                    line = parsedLine;
+                }
+
+                if (element.TryGetProperty("variable", out var variableProp))
+                {
+                    variable = variableProp.ValueKind == JsonValueKind.Null ? null : variableProp.GetString();
+                }
+
+                yield return (type, method, line, variable);
+            }
+        }
+
     }
 }

@@ -214,66 +214,263 @@ public sealed partial class ProjectAnalyzer
 
     private HandlerInfo? FindHandlerForRequest(string requestType)
     {
-        if (_handlers.TryGetValue(requestType, out var handler))
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return null;
+        }
+
+        if (_handlersByRequestType.TryGetValue(requestType, out var handler))
+        {
+            return handler;
+        }
+
+        if (_handlers.TryGetValue(requestType, out handler))
         {
             return handler;
         }
 
         var simple = GetSimpleIdentifier(requestType);
 
-        var matches = _handlers.Values
-            .Where(h =>
-                h.RequestType.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
-                GetSimpleIdentifier(h.RequestType).Equals(simple, StringComparison.OrdinalIgnoreCase))
+        var matches = _handlersByRequestType
+            .Where(kv => GetSimpleIdentifier(kv.Key).Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .Select(kv => kv.Value)
+            .Distinct()
             .ToList();
 
-        return matches.Count == 1 ? matches[0] : null;
-    }
-
-    private RequestInfo? FindRequestByType(string requestType)
-    {
-        if (_requests.TryGetValue(requestType, out var request))
-        {
-            return request;
-        }
-
-        var simple = GetSimpleIdentifier(requestType);
-
-        var matches = _requests.Values
-            .Where(r =>
-                r.Fqdn.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
-                r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
-            .ToList();
         if (matches.Count == 1)
         {
             return matches[0];
         }
 
-        // Heuristic fallback: if multiple matches share the same simple name (common when the same
-        // request type exists in different namespaces), attempt to disambiguate by preferring the
-        // one whose namespace shares the longest common prefix with the incoming requestType.
-        if (matches.Count > 1 && !string.IsNullOrWhiteSpace(requestType))
+        matches = _handlers.Values
+            .Where(h => h.RequestSignatures.Any(sig =>
+                sig.RequestType.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
+                GetSimpleIdentifier(sig.RequestType).Equals(simple, StringComparison.OrdinalIgnoreCase)))
+            .Distinct()
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    private RequestInfo? FindRequestByType(string requestType, string? preferredAssembly = null, string? preferredProject = null, string? serviceType = null)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
         {
-            var requestNamespace = GetTypeNamespace(requestType);
-            if (!string.IsNullOrWhiteSpace(requestNamespace))
+            return null;
+        }
+
+        if (_requests.TryGetValue(requestType, out var request))
+        {
+            return request;
+        }
+
+        var candidates = new Dictionary<string, RequestInfo>(StringComparer.OrdinalIgnoreCase);
+        var simple = GetSimpleIdentifier(requestType);
+
+        foreach (var match in _requests.Values.Where(r =>
+                     r.Fqdn.Equals(requestType, StringComparison.OrdinalIgnoreCase) ||
+                     r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)))
+        {
+            candidates[match.Fqdn] = match;
+        }
+
+        foreach (var match in FindRequestsByInterface(requestType))
+        {
+            candidates[match.Fqdn] = match;
+        }
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        if (candidates.Count == 1)
+        {
+            return candidates.Values.First();
+        }
+
+        var candidateList = candidates.Values.ToList();
+
+        if (!string.IsNullOrWhiteSpace(serviceType))
+        {
+            var serviceRoot = GetTypeAssemblyRoot(serviceType);
+            if (!string.IsNullOrWhiteSpace(serviceRoot))
             {
-                var ordered = matches
-                    .Select(r => new { Item = r, Score = LongestCommonPrefixLength(requestNamespace, r.Fqdn) })
-                    .OrderByDescending(x => x.Score)
-                    .ThenBy(x => x.Item.Fqdn, StringComparer.OrdinalIgnoreCase)
+                var serviceMatches = candidateList
+                    .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), serviceRoot, StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                if (ordered.Count > 0 && ordered[0].Score > 0)
+
+                if (serviceMatches.Count == 1)
                 {
-                    // Additional tie-break: if top two have equal score, abandon to avoid incorrect binding.
-                    if (ordered.Count == 1 || ordered[0].Score > ordered[1].Score)
+                    return serviceMatches[0];
+                }
+
+                if (serviceMatches.Count > 1)
+                {
+                    candidateList = serviceMatches;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(preferredAssembly))
+        {
+            var assemblyMatches = candidateList
+                .Where(r => string.Equals(r.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (assemblyMatches.Count == 1)
+            {
+                return assemblyMatches[0];
+            }
+
+            if (assemblyMatches.Count > 1)
+            {
+                candidateList = assemblyMatches;
+            }
+
+            if (assemblyMatches.Count == 0)
+            {
+                var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                if (!string.IsNullOrWhiteSpace(preferredRoot))
+                {
+                    var rootMatches = candidateList
+                        .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    if (rootMatches.Count == 1)
                     {
-                        return ordered[0].Item;
+                        return rootMatches[0];
+                    }
+
+                    if (rootMatches.Count > 1)
+                    {
+                        candidateList = rootMatches;
                     }
                 }
             }
         }
 
-        return null;
+        if (!string.IsNullOrWhiteSpace(preferredProject))
+        {
+            var projectMatches = candidateList
+                .Where(r => string.Equals(r.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (projectMatches.Count == 1)
+            {
+                return projectMatches[0];
+            }
+
+            if (projectMatches.Count > 1)
+            {
+                candidateList = projectMatches;
+            }
+        }
+
+        var interfaceKeys = new HashSet<string>(DeriveInterfaceLookupKeys(requestType), StringComparer.OrdinalIgnoreCase);
+        if (interfaceKeys.Count > 0)
+        {
+            var interfaceMatches = new List<RequestInfo>();
+            foreach (var candidate in candidateList)
+            {
+                if (candidate.Interfaces.Count == 0)
+                {
+                    continue;
+                }
+
+                var matched = false;
+                foreach (var implemented in candidate.Interfaces)
+                {
+                    foreach (var key in DeriveInterfaceLookupKeys(implemented))
+                    {
+                        if (!string.IsNullOrWhiteSpace(key) && interfaceKeys.Contains(key))
+                        {
+                            interfaceMatches.Add(candidate);
+                            matched = true;
+                            break;
+                        }
+                    }
+
+                    if (matched)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (interfaceMatches.Count == 1)
+            {
+                return interfaceMatches[0];
+            }
+
+            if (interfaceMatches.Count > 1)
+            {
+                candidateList = interfaceMatches;
+            }
+        }
+
+        var requestNamespace = GetTypeNamespace(requestType);
+        if (!string.IsNullOrWhiteSpace(requestNamespace))
+        {
+            var ordered = candidateList
+                .Select(r => new { Item = r, Score = LongestCommonPrefixLength(requestNamespace, r.Fqdn) })
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => x.Item.Fqdn, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ordered.Count > 0 && ordered[0].Score > 0)
+            {
+                var nextScore = ordered.ElementAtOrDefault(1)?.Score ?? int.MinValue;
+                if (ordered.Count == 1 || ordered[0].Score > nextScore)
+                {
+                    return ordered[0].Item;
+                }
+            }
+        }
+
+        var nonTest = candidateList
+            .Where(r => !r.Assembly.Contains(".Tests", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (nonTest.Count == 1)
+        {
+            return nonTest[0];
+        }
+
+        return candidateList
+            .OrderBy(r => r.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private IReadOnlyList<RequestInfo> FindRequestsByInterface(string interfaceType)
+    {
+        if (string.IsNullOrWhiteSpace(interfaceType))
+        {
+            return Array.Empty<RequestInfo>();
+        }
+
+        var keys = DeriveInterfaceLookupKeys(interfaceType);
+        if (keys.Count == 0)
+        {
+            return Array.Empty<RequestInfo>();
+        }
+
+        var matches = new Dictionary<string, RequestInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in keys)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            if (_requestsByInterfaceType.TryGetValue(key, out var lookup))
+            {
+                foreach (var pair in lookup)
+                {
+                    matches[pair.Key] = pair.Value;
+                }
+            }
+        }
+
+        return matches.Count == 0 ? Array.Empty<RequestInfo>() : matches.Values.ToList();
     }
 
     private PipelineBehaviorInfo? FindPipelineBehavior(string behaviorType)
@@ -519,9 +716,9 @@ public sealed partial class ProjectAnalyzer
         return serviceType;
     }
 
-    private string? TryResolveProjectionSource(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables, IReadOnlyDictionary<string, FieldDescriptor> fieldLookup)
+    private string? TryResolveProjectionSource(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables, IReadOnlyDictionary<string, FieldDescriptor> fieldLookup, string? preferredAssembly = null, string? preferredProject = null)
     {
-        var resolved = TryResolveExpressionType(expression, parameterTypes, localVariables);
+        var resolved = TryResolveExpressionType(expression, parameterTypes, localVariables, preferredAssembly, preferredProject, fieldLookup);
         if (!string.IsNullOrWhiteSpace(resolved))
         {
             return ExtractInnermostGenericType(resolved);
@@ -552,7 +749,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            var nested = TryResolveProjectionSource(member.Expression, parameterTypes, localVariables, fieldLookup);
+            var nested = TryResolveProjectionSource(member.Expression, parameterTypes, localVariables, fieldLookup, preferredAssembly, preferredProject);
             if (!string.IsNullOrWhiteSpace(nested))
             {
                 return nested;
@@ -561,7 +758,7 @@ public sealed partial class ProjectAnalyzer
 
         if (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax invocationAccess)
         {
-            var nested = TryResolveProjectionSource(invocationAccess.Expression, parameterTypes, localVariables, fieldLookup);
+            var nested = TryResolveProjectionSource(invocationAccess.Expression, parameterTypes, localVariables, fieldLookup, preferredAssembly, preferredProject);
             if (!string.IsNullOrWhiteSpace(nested))
             {
                 return nested;
@@ -571,29 +768,153 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private string? TryResolveExpressionType(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables)
+    private string? TryResolveExpressionType(
+        ExpressionSyntax expression,
+        IReadOnlyDictionary<string, string?> parameterTypes,
+        Dictionary<string, string> localVariables,
+        string? preferredAssembly = null,
+        string? preferredProject = null,
+        IReadOnlyDictionary<string, FieldDescriptor>? fieldLookup = null)
     {
         if (expression is IdentifierNameSyntax identifier)
         {
             if (localVariables.TryGetValue(identifier.Identifier.Text, out var localType) && !string.Equals(localType, "var", StringComparison.OrdinalIgnoreCase))
             {
-                return QualifyTypeName(localType);
+                return QualifyTypeName(localType, preferredAssembly, preferredProject);
             }
 
             if (parameterTypes.TryGetValue(identifier.Identifier.Text, out var parameterType) && !string.IsNullOrWhiteSpace(parameterType))
             {
-                return QualifyTypeName(parameterType);
+                return QualifyTypeName(parameterType, preferredAssembly, preferredProject);
+            }
+
+            if (fieldLookup is not null)
+            {
+                var normalized = identifier.Identifier.Text.TrimStart('_');
+                if (fieldLookup.TryGetValue(normalized, out var descriptor))
+                {
+                    return QualifyTypeName(descriptor.Type, preferredAssembly, preferredProject);
+                }
+            }
+        }
+
+        if (expression is InvocationExpressionSyntax invocation)
+        {
+            var returnType = TryResolveInvocationReturnType(
+                invocation,
+                parameterTypes,
+                localVariables,
+                preferredAssembly,
+                preferredProject,
+                fieldLookup);
+
+            if (!string.IsNullOrWhiteSpace(returnType))
+            {
+                return QualifyTypeName(returnType!, preferredAssembly, preferredProject);
             }
         }
 
         if (expression is ObjectCreationExpressionSyntax creation)
         {
-            return QualifyTypeName(creation.Type.ToString());
+            return QualifyTypeName(creation.Type.ToString(), preferredAssembly, preferredProject);
+        }
+
+        if (expression is MemberAccessExpressionSyntax memberAccess && fieldLookup is not null)
+        {
+            if (memberAccess.Expression is IdentifierNameSyntax identifierExpression)
+            {
+                var normalized = identifierExpression.Identifier.Text.TrimStart('_');
+                if (fieldLookup.TryGetValue(normalized, out var descriptor))
+                {
+                    return QualifyTypeName(descriptor.Type, preferredAssembly, preferredProject);
+                }
+            }
         }
 
         return null;
     }
 
+    private string? TryResolveInvocationReturnType(
+        InvocationExpressionSyntax invocation,
+        IReadOnlyDictionary<string, string?> parameterTypes,
+        Dictionary<string, string> localVariables,
+        string? preferredAssembly,
+        string? preferredProject,
+        IReadOnlyDictionary<string, FieldDescriptor>? fieldLookup)
+    {
+        if (invocation.Expression is MemberAccessExpressionSyntax access)
+        {
+            var methodName = GetMemberName(access.Name);
+            if (string.IsNullOrWhiteSpace(methodName))
+            {
+                return null;
+            }
+
+            var factoryType = TryResolveExpressionType(
+                access.Expression,
+                parameterTypes,
+                localVariables,
+                preferredAssembly,
+                preferredProject,
+                fieldLookup);
+
+            if (string.IsNullOrWhiteSpace(factoryType) && access.Expression is IdentifierNameSyntax identifier && fieldLookup is not null)
+            {
+                var normalized = identifier.Identifier.Text.TrimStart('_');
+                if (fieldLookup.TryGetValue(normalized, out var descriptor))
+                {
+                    factoryType = QualifyTypeName(descriptor.Type, preferredAssembly, preferredProject);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(factoryType))
+            {
+                var guessed = GuessServiceTypeFromFactory(factoryType, methodName);
+                if (!string.IsNullOrWhiteSpace(guessed))
+                {
+                    return guessed;
+                }
+
+                foreach (var key in GetFactoryLookupKeys(factoryType!))
+                {
+                    if (_interfaceMethodReturnTypes.TryGetValue(key, out var methodMap) &&
+                        methodMap.TryGetValue(methodName!, out var mappedReturn) &&
+                        !string.IsNullOrWhiteSpace(mappedReturn))
+                    {
+                        return mappedReturn;
+                    }
+                }
+            }
+
+            var fallbackGuess = GuessServiceTypeFromFactory(null, methodName);
+            if (!string.IsNullOrWhiteSpace(fallbackGuess))
+            {
+                var qualifiedFallback = QualifyTypeName(fallbackGuess, preferredAssembly, preferredProject);
+                if (!string.IsNullOrWhiteSpace(qualifiedFallback) &&
+                    !string.Equals(qualifiedFallback, fallbackGuess, StringComparison.Ordinal))
+                {
+                    return qualifiedFallback;
+                }
+            }
+
+            return null;
+        }
+
+        if (invocation.Expression is IdentifierNameSyntax identifierName)
+        {
+            if (localVariables.TryGetValue(identifierName.Identifier.Text, out var localType) && !string.IsNullOrWhiteSpace(localType))
+            {
+                return localType;
+            }
+
+            if (parameterTypes.TryGetValue(identifierName.Identifier.Text, out var parameterType) && !string.IsNullOrWhiteSpace(parameterType))
+            {
+                return parameterType;
+            }
+        }
+
+        return null;
+    }
     private string QualifyTypeName(string typeName, string? preferredAssembly = null, string? preferredProject = null)
     {
         if (string.IsNullOrWhiteSpace(typeName))
@@ -826,6 +1147,18 @@ public sealed partial class ProjectAnalyzer
         => typeName.StartsWith("global::", StringComparison.Ordinal)
             ? typeName["global::".Length..]
             : typeName;
+
+    private static string? GetInvocationIdentifier(SyntaxNode expression)
+    {
+        return expression switch
+        {
+            IdentifierNameSyntax identifier => identifier.Identifier.Text,
+            GenericNameSyntax generic => generic.Identifier.Text,
+            MemberAccessExpressionSyntax member => GetMemberName(member.Name),
+            MemberBindingExpressionSyntax binding => GetMemberName(binding.Name),
+            _ => null
+        };
+    }
 
     private static string GetSimpleIdentifier(string typeName)
     {
@@ -1143,11 +1476,11 @@ public sealed partial class ProjectAnalyzer
                 variable.Identifier.Text.Equals("SectionName", StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static int LongestCommonPrefixLength(string a, string b)
+private static int LongestCommonPrefixLength(string a, string b)
+{
+    if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
     {
-        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
-        {
-            return 0;
+        return 0;
         }
 
         var max = Math.Min(a.Length, b.Length);
@@ -1155,15 +1488,49 @@ public sealed partial class ProjectAnalyzer
         for (; i < max; i++)
         {
             if (a[i] != b[i]) break;
-        }
-        return i;
+    }
+    return i;
+}
+
+private static string? GetNamespaceRoot(string? typeName)
+{
+    if (string.IsNullOrWhiteSpace(typeName))
+    {
+        return null;
     }
 
-    private static string GetAssemblyRoot(string? assembly)
+    var ns = GetTypeNamespace(typeName);
+    if (string.IsNullOrWhiteSpace(ns))
     {
-        if (string.IsNullOrWhiteSpace(assembly))
-        {
-            return string.Empty;
+        return null;
+    }
+
+    var separatorIndex = ns.IndexOf('.');
+    return separatorIndex >= 0 ? ns[..separatorIndex] : ns;
+}
+
+private static bool NamespaceRootMatches(string candidateType, string referenceType)
+{
+    var referenceRoot = GetNamespaceRoot(referenceType);
+    if (string.IsNullOrWhiteSpace(referenceRoot))
+    {
+        return true;
+    }
+
+    var candidateRoot = GetNamespaceRoot(candidateType);
+    if (string.IsNullOrWhiteSpace(candidateRoot))
+    {
+        return false;
+    }
+
+    return string.Equals(candidateRoot, referenceRoot, StringComparison.OrdinalIgnoreCase);
+}
+
+private static string GetAssemblyRoot(string? assembly)
+{
+    if (string.IsNullOrWhiteSpace(assembly))
+    {
+        return string.Empty;
         }
 
         var separatorIndex = assembly.IndexOf('.');
@@ -1190,6 +1557,85 @@ public sealed partial class ProjectAnalyzer
         }
 
         return null;
+    }
+
+    private static string? NormalizeTypeToken(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return typeName;
+        }
+
+        var trimmed = TrimGlobalAlias(typeName.Trim());
+        var genericArguments = SplitGenericArguments(trimmed);
+        if (genericArguments.Count == 0)
+        {
+            return NormalizeTopLevelIdentifier(trimmed);
+        }
+
+        var baseTypeEnd = trimmed.IndexOf('<');
+        var baseType = baseTypeEnd >= 0 ? trimmed[..baseTypeEnd] : trimmed;
+        var builder = new StringBuilder();
+        builder.Append(NormalizeTopLevelIdentifier(baseType));
+        builder.Append('<');
+
+        for (var i = 0; i < genericArguments.Count; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(',');
+            }
+
+            var normalizedArgument = NormalizeTypeToken(genericArguments[i]) ?? NormalizeTopLevelIdentifier(genericArguments[i]);
+            builder.Append(string.IsNullOrWhiteSpace(normalizedArgument)
+                ? genericArguments[i].Trim()
+                : normalizedArgument);
+        }
+
+        builder.Append('>');
+        return builder.ToString();
+    }
+
+    private IReadOnlyList<string> DeriveInterfaceLookupKeys(string? interfaceType)
+    {
+        if (string.IsNullOrWhiteSpace(interfaceType))
+        {
+            return Array.Empty<string>();
+        }
+
+        var keys = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            var trimmedKey = value.Trim();
+            if (seen.Add(trimmedKey))
+            {
+                keys.Add(trimmedKey);
+            }
+        }
+
+        Add(interfaceType);
+
+        var trimmed = TrimGlobalAlias(interfaceType.Trim());
+        if (!string.Equals(trimmed, interfaceType, StringComparison.Ordinal))
+        {
+            Add(trimmed);
+        }
+
+        Add(NormalizeTypeToken(interfaceType));
+        Add(NormalizeTypeToken(trimmed));
+
+        var qualified = QualifyTypeName(trimmed);
+        Add(qualified);
+        Add(NormalizeTypeToken(qualified));
+
+        return keys.Count == 0 ? Array.Empty<string>() : keys;
     }
 
     private static bool IsGuardInvocation(MemberAccessExpressionSyntax access)
@@ -1224,5 +1670,4 @@ public sealed partial class ProjectAnalyzer
                simple.Contains("DocumentStore", StringComparison.OrdinalIgnoreCase);
     }
 }
-
 

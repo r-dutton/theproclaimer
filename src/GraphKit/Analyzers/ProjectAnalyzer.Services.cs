@@ -20,6 +20,55 @@ public sealed partial class ProjectAnalyzer
         "ExecuteRequest"
     };
 
+    private static readonly string[] LikelyServiceSuffixes =
+    {
+        "Service",
+        "Services",
+        "Provider",
+        "Client",
+        "Repository",
+        "Manager",
+        "Factory",
+        "Context",
+        "Accessor",
+        "Handler",
+        "Processor",
+        "Publisher",
+        "Bus",
+        "Store",
+        "Dispatcher",
+        "Cache"
+    };
+
+    private static readonly HashSet<string> KnownServiceNameHints = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Mediator",
+        "IMediator",
+        "ISender",
+        "IPublisher",
+        "IServiceProvider",
+        "IServiceScopeFactory",
+        "ILogger",
+        "ILoggerFactory",
+        "IMapper",
+        "IMemoryCache",
+        "IDistributedCache",
+        "IHttpContextAccessor",
+        "IOptions",
+        "IOptionsSnapshot",
+        "IOptionsMonitor",
+        "IOptionsFactory",
+        "IConfiguration",
+        "IConfigurationRoot",
+        "IConfigurationSection",
+        "IHttpClientFactory",
+        "IDbContextFactory",
+        "DbContext",
+        "IUnitOfWork",
+        "IValidator",
+        "IBackgroundJobClient"
+    };
+
     private static bool IsServiceClass(ClassDeclarationSyntax classDeclaration, string filePath, IReadOnlyDictionary<string, FieldDescriptor> fieldTypes)
     {
         var className = classDeclaration.Identifier.Text;
@@ -88,7 +137,7 @@ public sealed partial class ProjectAnalyzer
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var localStringValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -110,7 +159,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var assignment in method.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            foreach (var assignment in Descendants<AssignmentExpressionSyntax>(method))
             {
                 if (assignment.Left is IdentifierNameSyntax left &&
                     ResolveStringValue(assignment.Right) is { } assignedValue)
@@ -121,7 +170,7 @@ public sealed partial class ProjectAnalyzer
 
             var routeHints = CollectRouteHints(tree, method);
 
-            foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var memberAccess in Descendants<MemberAccessExpressionSyntax>(method))
             {
                 if (!TryResolveFieldDescriptor(memberAccess.Expression, fieldLookup, out var descriptor, out _))
                 {
@@ -239,10 +288,14 @@ public sealed partial class ProjectAnalyzer
                     recordedUsage = true;
                 }
 
-                if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                if (IsRepositoryType(resolvedType) || IsRepositoryType(typeName))
                 {
+                    var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : typeName;
                     var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                    serviceInfo.RepositoryCalls.Add(new HandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
+                    if (!string.IsNullOrWhiteSpace(repositoryType))
+                    {
+                        serviceInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType!, methodName ?? string.Empty, line, operation));
+                    }
                     continue;
                 }
 
@@ -260,13 +313,25 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var normalizedServiceType = NormalizeServiceType(resolvedType ?? typeName);
-                if (!recordedUsage || !normalizedServiceType.EndsWith("Repository", StringComparison.Ordinal))
+                var normalizedSimple = GetTopLevelSimpleIdentifier(normalizedServiceType);
+                var shouldSkipServiceUsage = !descriptor.IsReadOnly &&
+                    !IsLikelyInjectedServiceType(typeName) &&
+                    !IsLikelyInjectedServiceType(resolvedType) &&
+                    !IsLikelyInjectedServiceType(normalizedServiceType);
+                var isSelfReference =
+                    string.Equals(normalizedServiceType, serviceInfo.Fqdn, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(normalizedSimple, serviceInfo.Name, StringComparison.OrdinalIgnoreCase);
+
+                if (!isSelfReference && (!recordedUsage || !IsRepositoryType(normalizedServiceType)))
                 {
-                    serviceInfo.ServiceUsages.Add(new ServiceUsage(normalizedServiceType, line, serviceMethodName, methodName));
+                    if (!shouldSkipServiceUsage)
+                    {
+                        serviceInfo.ServiceUsages.Add(new ServiceUsage(normalizedServiceType, line, serviceMethodName, methodName));
+                    }
                 }
             }
 
-            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            foreach (var elementAccess in Descendants<ElementAccessExpressionSyntax>(method))
             {
                 if (!TryResolveFieldDescriptor(elementAccess.Expression, fieldLookup, out var descriptor, out _))
                 {
@@ -285,13 +350,13 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess &&
                     extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
                 {
                     var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup, project.AssemblyName, project.RelativeDirectory);
                     if (!string.IsNullOrWhiteSpace(destination))
                     {
                         serviceInfo.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, GetLineNumber(tree, invocation)));
@@ -741,7 +806,7 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var invocation in service.BaseServiceClientInvocations)
         {
-            foreach (var clientType in ResolveClientTypesForService(invocation.BaseServiceType))
+            foreach (var clientType in ResolveClientTypesForService(invocation.BaseServiceType, invocation.ServiceAssembly))
             {
                 service.HttpClientInvocations.Add(new HandlerClientInvocation(
                     clientType,
@@ -780,10 +845,22 @@ public sealed partial class ProjectAnalyzer
             (relativePath, queryParameters) = ResolveRouteDetails(tree, invocation, routeHints, localStringValues);
         }
 
-        var targetService = ResolveClientTargetService(clientType);
+        var resolvedClientType = clientType;
+        if (TryResolveHttpClient(clientType, out var resolvedClient))
+        {
+            resolvedClientType = resolvedClient.Fqdn;
+        }
+
+        var targetService = ResolveClientTargetService(resolvedClientType);
+        var hasRouteMetadata = !string.IsNullOrWhiteSpace(relativePath) || queryParameters is { Count: > 0 };
+
+        if (resolvedClient is null && string.IsNullOrWhiteSpace(targetService) && !hasRouteMetadata)
+        {
+            return;
+        }
 
         serviceInfo.HttpClientInvocations.Add(new HandlerClientInvocation(
-            clientType,
+            resolvedClientType,
             httpMethod,
             relativePath,
             line,
@@ -792,7 +869,7 @@ public sealed partial class ProjectAnalyzer
             queryParameters,
             declaringMethod));
 
-        RecordServiceClientType(serviceInfo, clientType);
+        RecordServiceClientType(serviceInfo, resolvedClientType);
     }
 
     private (string? Route, IReadOnlyCollection<string>? QueryParameters) ResolveRouteDetails(
@@ -851,6 +928,7 @@ public sealed partial class ProjectAnalyzer
         var normalizedBaseType = GetTypeNameWithoutGenerics(baseServiceType);
         serviceInfo.BaseServiceClientInvocations.Add(new BaseServiceClientInvocation(
             normalizedBaseType,
+            serviceInfo.Assembly,
             invokedMethod,
             httpCall.HttpMethod,
             httpCall.Route,
@@ -871,17 +949,30 @@ public sealed partial class ProjectAnalyzer
                 continue;
             }
 
-            var map = _serviceHttpClientTypes.GetOrAdd(key, _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
+            var compositeKey = BuildServiceHttpClientKey(serviceInfo.Assembly, key);
+            var map = _serviceHttpClientTypes.GetOrAdd(compositeKey, _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
             map[normalizedClientType] = 0;
         }
     }
 
-    private IEnumerable<string> ResolveClientTypesForService(string baseServiceType)
+    private static string BuildServiceHttpClientKey(string? assembly, string key)
+    {
+        var assemblyPart = string.IsNullOrWhiteSpace(assembly) ? string.Empty : assembly.Trim();
+        return $"{assemblyPart}|{key}";
+    }
+
+    private IEnumerable<string> ResolveClientTypesForService(string baseServiceType, string? serviceAssembly)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in EnumerateTypeKeys(baseServiceType))
         {
-            if (!_serviceHttpClientTypes.TryGetValue(key, out var clients))
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            var compositeKey = BuildServiceHttpClientKey(serviceAssembly, key);
+            if (!_serviceHttpClientTypes.TryGetValue(compositeKey, out var clients))
             {
                 continue;
             }
@@ -973,6 +1064,69 @@ public sealed partial class ProjectAnalyzer
         return true;
     }
 
+    private static bool IsLikelyInjectedServiceType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        if (IsLikelyServiceSimpleName(GetTopLevelSimpleIdentifier(typeName)))
+        {
+            return true;
+        }
+
+        foreach (var argument in SplitGenericArguments(typeName))
+        {
+            if (IsLikelyServiceSimpleName(GetTopLevelSimpleIdentifier(argument)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsLikelyServiceSimpleName(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        if (KnownServiceNameHints.Contains(candidate))
+        {
+            return true;
+        }
+
+        foreach (var suffix in LikelyServiceSuffixes)
+        {
+            if (candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        if (candidate.Length > 1 && candidate[0] == 'I' && char.IsUpper(candidate[1]))
+        {
+            var trimmed = candidate[1..];
+            if (KnownServiceNameHints.Contains(trimmed))
+            {
+                return true;
+            }
+
+            foreach (var suffix in LikelyServiceSuffixes)
+            {
+                if (trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static bool TryGetInvocationName(SyntaxNode expression, out string name)
     {
         switch (expression)
@@ -1045,8 +1199,3 @@ public sealed partial class ProjectAnalyzer
     }
 
 }
-
-
-
-
-

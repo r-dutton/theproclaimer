@@ -1,0 +1,6 @@
+<Project>
+  <Target Name="EnsureIntermediateDirectories" BeforeTargets="Restore;PrepareForBuild">
+    <MakeDir Directories="$(BaseIntermediateOutputPath)"
+             Condition="'$(BaseIntermediateOutputPath)' != ''" />
+  </Target>
+</Project>

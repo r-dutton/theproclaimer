@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 using GraphKit.Graph;
@@ -53,109 +52,79 @@ public static partial class FlowBuilder
 
     public static string BuildFlows(GraphDocument document, Func<GraphNode, bool> controllerPredicate, FlowWorkspaceIndex? workspace = null, int? maxDepth = null)
     {
-        // Core node index (unique IDs)
-        var nodesById = new Dictionary<string, GraphNode>(document.Nodes.Count, StringComparer.Ordinal);
-        foreach (var n in document.Nodes)
-        {
-            nodesById[n.Id] = n;
-        }
+        ArgumentNullException.ThrowIfNull(document);
+        controllerPredicate ??= static _ => true;
 
-        // Build outgoing adjacency without LINQ GroupBy to reduce transient allocations
-        var edgesByFrom = new Dictionary<string, List<GraphEdge>>(StringComparer.Ordinal);
-        foreach (var e in document.Edges)
-        {
-            if (!edgesByFrom.TryGetValue(e.From, out var listFrom))
-            {
-                listFrom = new List<GraphEdge>(4);
-                edgesByFrom[e.From] = listFrom;
-            }
-            listFrom.Add(e);
-        }
-
-        // Retain name/fqdn lookups (needed for implementation heuristics)
-        var nodesByFqdn = new Dictionary<string, IReadOnlyList<GraphNode>>(StringComparer.OrdinalIgnoreCase);
-        var fqdnGroups = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var n in document.Nodes)
-        {
-            if (string.IsNullOrWhiteSpace(n.Fqdn)) continue;
-            if (!fqdnGroups.TryGetValue(n.Fqdn!, out var list))
-            {
-                list = new List<GraphNode>(1);
-                fqdnGroups[n.Fqdn!] = list;
-            }
-            list.Add(n);
-        }
-        foreach (var kv in fqdnGroups)
-        {
-            nodesByFqdn[kv.Key] = kv.Value;
-        }
-
-        var nodesByName = new Dictionary<string, IReadOnlyList<GraphNode>>(StringComparer.OrdinalIgnoreCase);
-        var nameGroups = new Dictionary<string, List<GraphNode>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var n in document.Nodes)
-        {
-            if (string.IsNullOrWhiteSpace(n.Name)) continue;
-            if (!nameGroups.TryGetValue(n.Name!, out var list))
-            {
-                list = new List<GraphNode>(1);
-                nameGroups[n.Name!] = list;
-            }
-            list.Add(n);
-        }
-        foreach (var kv in nameGroups)
-        {
-            nodesByName[kv.Key] = kv.Value;
-        }
-
-        var mapLookup = BuildMapLookup(document);
-
-        var actionNodes = document.Nodes
-            .Where(n => n.Type == "endpoint.controller" && controllerPredicate(n))
-            .OrderBy(n => n.Fqdn, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (actionNodes.Count == 0)
+        var groups = GroupControllers(document, controllerPredicate).ToList();
+        if (groups.Count == 0)
         {
             return string.Empty;
         }
 
-        var builder = new StringBuilder();
-        var grouped = actionNodes
-            .GroupBy(action => ResolveControllerKey(action))
-            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+        var index = FlowGraphIndex.Build(document);
+        var builder = new StringBuilder(groups.Count * 512);
 
-        foreach (var group in grouped)
+        foreach (var (key, controllerActions) in groups)
         {
-            var actions = group
-                .OrderBy(a => a.Fqdn, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (actions.Count == 0)
+            if (controllerActions is null || controllerActions.Count == 0)
             {
                 continue;
             }
 
-            var allowed = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var action in actions)
+            var actionNodes = controllerActions
+                .Select(static action => action.Node)
+                .ToList();
+
+            if (actionNodes.Count == 0)
             {
-                var outward = CollectReachable(action.Id, edgesByFrom);
-                foreach (var id in outward)
-                {
-                    allowed.Add(id);
-                }
+                continue;
             }
 
-            var state = new FlowRenderState(document, nodesById, edgesByFrom, nodesByFqdn, nodesByName, mapLookup, workspace, maxDepth)
-            {
-                AllowedIds = allowed
-            };
-            var displayName = ResolveControllerDisplayName(actions[0], group.Key);
-            AppendControllerFlow(builder, state, displayName, actions);
+            var allowed = CollectReachable(actionNodes.Select(static n => n.Id), index.EdgesByFrom, maxDepth);
+            var state = CreateState(index, workspace, maxDepth);
+            state.AllowedIds = allowed;
+
+            var displayName = ResolveControllerDisplayName(actionNodes[0], key);
+            AppendControllerFlow(builder, state, displayName, actionNodes);
             builder.AppendLine();
         }
 
         return builder.ToString();
     }
+    /// <summary>
+    /// Breadth-first reachability from a set of start node IDs.
+    /// Avoids repeated traversals across convergent flows.
+    /// </summary>
+    private static HashSet<string> CollectReachable(IEnumerable<string> startIds,
+                                                    IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
+                                                    int? maxDepth = null,
+                                                    System.Threading.CancellationToken ct = default)
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal);
+        var q = new Queue<(string Id, int Depth)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var s in startIds)
+        {
+            if (string.IsNullOrWhiteSpace(s)) continue;
+            if (seen.Add(s)) q.Enqueue((s, 0));
+        }
+        while (q.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (id, d) = q.Dequeue();
+            allowed.Add(id);
+            if (maxDepth.HasValue && d >= maxDepth.Value) continue;
+            if (!edgesByFrom.TryGetValue(id, out var outs) || outs is null) continue;
+            foreach (var e in outs)
+            {
+                var to = e.To;
+                if (to is null) continue;
+                if (seen.Add(to)) q.Enqueue((to, d + 1));
+            }
+        }
+        return allowed;
+    }
+
 
     private static string ResolveControllerKey(GraphNode action)
     {
@@ -178,7 +147,7 @@ public static partial class FlowBuilder
         return action.Name ?? action.Id;
     }
 
-    private static string ResolveControllerDisplayName(GraphNode action, string controllerKey)
+    public static string ResolveControllerDisplayName(GraphNode action, string controllerKey)
     {
         var fromProps = GetNodeProp(action, "controller_name");
         if (!string.IsNullOrWhiteSpace(fromProps))
@@ -197,21 +166,6 @@ public static partial class FlowBuilder
         => !string.Equals(verb, "GET", StringComparison.OrdinalIgnoreCase)
            && !string.Equals(verb, "HEAD", StringComparison.OrdinalIgnoreCase)
            && !string.Equals(verb, "OPTIONS", StringComparison.OrdinalIgnoreCase);
-
-    public static string? ExtractHost(string? baseUrl, string? route)
-    {
-        if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri))
-        {
-            return baseUri.Host.ToLowerInvariant();
-        }
-
-        if (!string.IsNullOrWhiteSpace(route) && Uri.TryCreate(route, UriKind.Absolute, out var routeUri))
-        {
-            return routeUri.Host.ToLowerInvariant();
-        }
-
-        return null;
-    }
 
     // Extract core entity name from possible service / repository contract names.
     private static string ExtractEntityName(string? serviceName)
@@ -298,595 +252,48 @@ public static partial class FlowBuilder
         return ordered[0];
     }
 
-    public static string DetermineRemoteScope(string? host, string label, string callerRoot)
+    internal static bool IsSyntheticRequestProcessorDispatch(GraphEdge edge)
     {
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            return string.Equals(label, callerRoot, StringComparison.OrdinalIgnoreCase) ? "internal" : "service";
-        }
-
-        var lowered = host.ToLowerInvariant();
-        if (lowered.Contains("localhost", StringComparison.Ordinal) ||
-            lowered.StartsWith("127.", StringComparison.Ordinal) ||
-            lowered.StartsWith("10.", StringComparison.Ordinal) ||
-            lowered.StartsWith("192.168.", StringComparison.Ordinal) ||
-            IsPrivate172(lowered))
-        {
-            return "internal";
-        }
-
-        if (lowered.EndsWith(".internal", StringComparison.Ordinal) ||
-            lowered.EndsWith(".local", StringComparison.Ordinal) ||
-            lowered.EndsWith(".svc", StringComparison.Ordinal))
-        {
-            return "internal";
-        }
-
-        if (!string.IsNullOrWhiteSpace(callerRoot) && lowered.Contains(callerRoot.ToLowerInvariant(), StringComparison.Ordinal))
-        {
-            return "internal";
-        }
-
-        return "external";
-    }
-
-    public static bool IsPrivate172(string host)
-    {
-        if (!host.StartsWith("172.", StringComparison.Ordinal))
+        if (!string.Equals(edge.Kind, "sends_request", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        var parts = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2)
+        if (!string.Equals(edge.Source, "synthetic", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        if (int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var secondOctet))
-        {
-            return secondOctet >= 16 && secondOctet <= 31;
-        }
-
-        return false;
+        return string.Equals(edge.Transform?.Type, "requestprocessor.dispatch", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static void AppendControllerFlow(StringBuilder builder, FlowRenderState state, string controllerName, IReadOnlyList<GraphNode> actions)
+    private static string BuildSyntheticDispatchKey(GraphEdge edge)
     {
-        if (!string.IsNullOrWhiteSpace(controllerName))
-        {
-            builder.AppendLine($"## {controllerName}");
-            builder.AppendLine();
-        }
-
-    var primaryAction = actions.Count > 0 ? actions[0] : null;
-    var impact = new ImpactAccumulator(GetAssemblyRoot(primaryAction?.Assembly ?? string.Empty));
-        state.PushImpact(impact);
-        try
-        {
-            for (var i = 0; i < actions.Count; i++)
-            {
-                AppendEndpointFlow(builder, state, actions[i], indent: 0);
-                if (i < actions.Count - 1)
-                {
-                    builder.AppendLine();
-                }
-            }
-            AppendImpactSummary(builder, impact);
-        }
-        finally
-        {
-            state.PopImpact();
-        }
+        var file = edge.Transform?.Location?.File ?? string.Empty;
+        var line = edge.Transform?.Location?.Line ?? -1;
+        return $"{edge.From}::{edge.To}::{file}::{line}";
     }
 
-
-    public static void AppendRepositoryFlow(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphNode repository,
-        int indent)
+    internal static void MarkSyntheticDispatchRendered(FlowRenderState state, GraphEdge edge)
     {
-        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
-        {
-            AppendIndented(builder, indent, "... (max depth reached)");
-            return;
-        }
-        if (!state.EdgesByFrom.TryGetValue(repository.Id, out var edges))
+        if (!IsSyntheticRequestProcessorDispatch(edge))
         {
             return;
         }
 
-        foreach (var mapping in edges.Where(e => e.Kind == "maps_to"))
-        {
-            AppendMappingEdge(builder, state, mapping, indent);
-        }
-
-        // Transaction inference: if multiple write operations, annotate transaction
-        var writeKinds = new HashSet<string>(new[] { "writes_to", "inserts_into", "updates", "deletes_from", "upserts" }, StringComparer.Ordinal);
-        var writeOps = edges.Where(e => writeKinds.Contains(e.Kind)).ToList();
-        if (writeOps.Count > 1)
-        {
-            AppendIndented(builder, indent, $"transaction (writes={writeOps.Count})");
-        }
-
-        foreach (var write in edges.Where(e => e.Kind is "writes_to" or "queries" or "inserts_into" or "updates" or "deletes_from" or "upserts"))
-        {
-            if (!state.NodesById.TryGetValue(write.To, out var entityNode))
-            {
-                continue;
-            }
-
-            var operation = ExtractOperationLabel(write);
-            var baseLabel = $"{operation} {entityNode.Name}";
-            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, write.Transform?.Location));
-            state.CurrentImpact?.RecordRepositoryOperation(GetDisplayName(repository), write.Kind, GetDisplayName(entityNode));
-            if (Utilities.IsEntityNode(entityNode) || Utilities.IsLikelyEntity(entityNode))
-            {
-                AppendEntityFlow(builder, state, entityNode, indent + 1, write.Kind);
-            }
-        }
-
-        foreach (var cacheEdge in edges.Where(e => e.Kind == "uses_cache"))
-        {
-            if (!state.NodesById.TryGetValue(cacheEdge.To, out var cacheNode))
-            {
-                continue;
-            }
-
-            var cacheMethod = cacheEdge.Props is { } props && props.TryGetValue("method", out var methodValue)
-                ? methodValue?.ToString()
-                : null;
-            var operation = cacheEdge.Props is { } opProps && opProps.TryGetValue("operation", out var opValue)
-                ? opValue?.ToString()
-                : null;
-            var key = cacheEdge.Props is { } keyProps && keyProps.TryGetValue("key", out var keyValue)
-                ? keyValue?.ToString()
-                : null;
-            var methodPart = string.IsNullOrWhiteSpace(cacheMethod) ? string.Empty : $".{cacheMethod}";
-            var opPart = string.IsNullOrWhiteSpace(operation) ? string.Empty : $" [{operation}]";
-            var keyPart = string.IsNullOrWhiteSpace(key) ? string.Empty : $" (key={key})";
-            var cacheKey = cacheEdge.From + "::" + cacheEdge.To + "::" + cacheMethod + "::" + operation + "::" + key;
-            state.DedupRequests ??= new HashSet<string>(StringComparer.Ordinal);
-            if (!state.DedupRequests.Add("CACHE::" + cacheKey)) continue;
-            var baseLabel = $"uses_cache {cacheNode.Name}{methodPart}";
-            AppendIndented(builder, indent, $"{FormatLinkedCode(baseLabel, cacheEdge.Transform?.Location)}{opPart}{keyPart}");
-            state.CurrentImpact?.RecordCache(GetDisplayName(cacheNode));
-        }
-
-        foreach (var optionsEdge in edges.Where(e => e.Kind == "uses_options"))
-        {
-            if (!state.NodesById.TryGetValue(optionsEdge.To, out var optionsNode))
-            {
-                continue;
-            }
-
-            var section = GetNodeProp(optionsNode, "section");
-            var sectionText = string.IsNullOrWhiteSpace(section) ? string.Empty : $" ({section})";
-            var baseLabel = $"uses_options {optionsNode.Name}{sectionText}";
-            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, optionsEdge.Transform?.Location));
-            state.CurrentImpact?.RecordOption(GetDisplayName(optionsNode));
-        }
+        var key = BuildSyntheticDispatchKey(edge);
+        state.RenderedSyntheticDispatches.Add(key);
     }
 
-    public static void AppendEntityFlow(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphNode entity,
-        int indent,
-        string? operationFilter = null)
+    internal static bool ShouldSkipSyntheticDispatch(FlowRenderState state, GraphEdge edge)
     {
-        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+        if (!IsSyntheticRequestProcessorDispatch(edge))
         {
-            AppendIndented(builder, indent, "... (max depth reached)");
-            return;
-        }
-        if (!state.EdgesByFrom.TryGetValue(entity.Id, out var edges))
-        {
-            return;
+            return false;
         }
 
-        var candidateEdges = edges
-            .Where(e => e.Kind is "writes_to" or "reads_from" or "queries" or "inserts_into" or "updates" or "deletes_from" or "upserts")
-            .ToList();
-
-        if (!string.IsNullOrWhiteSpace(operationFilter))
-        {
-            var filtered = candidateEdges
-                .Where(e => string.Equals(e.Kind, operationFilter, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (filtered.Count > 0)
-            {
-                candidateEdges = filtered;
-            }
-        }
-
-        foreach (var tableEdge in candidateEdges)
-        {
-            if (!state.NodesById.TryGetValue(tableEdge.To, out var tableNode))
-            {
-                continue;
-            }
-
-            var transform = tableEdge.Kind == "reads_from"
-                ? "reads_from"
-                : ExtractOperationLabel(tableEdge);
-            var baseLabel = $"{transform} {tableNode.Name}";
-            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, tableEdge.Transform?.Location));
-        }
-
-        foreach (var mapEdge in edges.Where(e => e.Kind == "maps_to"))
-        {
-            AppendMappingEdge(builder, state, mapEdge, indent);
-        }
-    }
-
-    public static void AppendConversion(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphEdge edge,
-        int indent)
-    {
-        if (!state.NodesById.TryGetValue(edge.To, out var destination))
-        {
-            return;
-        }
-
-        var baseLabel = $"converts_to {destination.Name}";
-        AppendIndented(builder, indent, FormatLinkedCode(baseLabel, edge.Transform?.Location));
-        AppendAutomapperRegistrations(builder, state, edge, indent + 1);
-    }
-
-    public static void AppendAutomapperRegistrations(
-        StringBuilder builder,
-        FlowRenderState state,
-        GraphEdge edge,
-        int indent)
-    {
-        if (edge.Props is null)
-        {
-            return;
-        }
-
-        edge.Props.TryGetValue("source_type", out var sourceObj);
-        edge.Props.TryGetValue("destination_type", out var destinationObj);
-        var source = sourceObj?.ToString();
-        var destination = destinationObj?.ToString();
-        if (string.IsNullOrWhiteSpace(destination))
-        {
-            return;
-        }
-
-        var key = (GetSimpleType(source), GetSimpleType(destination));
-        if (!state.MapLookup.TryGetValue(key, out var maps))
-        {
-            return;
-        }
-
-        // Determine caller root (edge.From is the node performing mapping)
-        string? callerRoot = null;
-        if (state.NodesById.TryGetValue(edge.From, out var callerNode))
-        {
-            callerRoot = GetAssemblyRoot(callerNode.Assembly);
-        }
-
-        IEnumerable<GraphNode> filtered = maps;
-        if (!string.IsNullOrWhiteSpace(callerRoot))
-        {
-            var sameRoot = maps.Where(m => string.Equals(GetAssemblyRoot(m.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (sameRoot.Count > 0)
-            {
-                filtered = sameRoot;
-            }
-            else
-            {
-                // Fallback: keep those with concrete source files
-                var withFiles = maps.Where(m => !string.IsNullOrWhiteSpace(m.FilePath) && !m.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase)).ToList();
-                if (withFiles.Count > 0)
-                {
-                    filtered = withFiles;
-                }
-            }
-        }
-
-        var filteredSet = new HashSet<string>(filtered.Select(f => f.Id));
-        var elided = maps.Where(m => !filteredSet.Contains(m.Id)).ToList();
-
-        foreach (var mapNode in filtered.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            var profileName = ResolveProfileName(state, mapNode);
-            var mapLabel = mapNode.Props is { } props && props.TryGetValue("map", out var mapValue)
-                ? mapValue?.ToString()
-                : mapNode.Name;
-            var baseLabel = $"automapper.registration {profileName} ({mapLabel})";
-            AppendIndented(builder, indent, FormatLinkedCode(baseLabel, mapNode));
-        }
-
-        if (elided.Count > 0)
-        {
-            var elidedRoots = elided
-                .Select(e => GetAssemblyRoot(e.Assembly))
-                .Where(r => !string.IsNullOrWhiteSpace(r))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(r => r, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var rootSummary = elidedRoots.Count > 0 ? $" ({string.Join(", ", elidedRoots)})" : string.Empty;
-            // Disabled AppendIndented(builder, indent, $"automapper.registrations_elided {elided.Count}{rootSummary}");
-        }
-    }
-
-    public static string ResolveProfileName(FlowRenderState state, GraphNode mapNode)
-    {
-        foreach (var edge in state.Document.Edges.Where(e => e.From == mapNode.Id && e.Kind == "generated_from"))
-        {
-            if (state.NodesById.TryGetValue(edge.To, out var profileNode))
-            {
-                return profileNode.Name;
-            }
-
-            profileNode = state.Document.Nodes.FirstOrDefault(n => n.Id == edge.To);
-            if (profileNode is not null)
-            {
-                return profileNode.Name;
-            }
-        }
-
-        return mapNode.Name;
-    }
-
-    public static IReadOnlyDictionary<(string Source, string Destination), List<GraphNode>> BuildMapLookup(GraphDocument document)
-    {
-        var lookup = new Dictionary<(string Source, string Destination), List<GraphNode>>();
-        foreach (var node in document.Nodes.Where(n => n.Type == "mapping.automapper.map"))
-        {
-            var source = node.Props is { } props && props.TryGetValue("source_type", out var sourceValue)
-                ? GetSimpleType(sourceValue?.ToString())
-                : string.Empty;
-            var destination = node.Props is { } props2 && props2.TryGetValue("destination_type", out var destinationValue)
-                ? GetSimpleType(destinationValue?.ToString())
-                : string.Empty;
-
-            if (string.IsNullOrWhiteSpace(destination))
-            {
-                continue;
-            }
-
-            var key = (source, destination);
-            if (!lookup.TryGetValue(key, out var list))
-            {
-                list = new List<GraphNode>();
-                lookup[key] = list;
-            }
-
-            list.Add(node);
-        }
-
-        return lookup;
-    }
-
-
-    public static string? ExtractProp(GraphEdge edge, string key)
-    {
-        if (edge.Props is not { } props) return null;
-        return props.TryGetValue(key, out var value) ? value?.ToString() : null;
-    }
-
-    public static void AppendTargetServiceFlow(StringBuilder builder, FlowRenderState state, GraphEdge callEdge, int indent, string? fallbackTargetService = null)
-    {
-        if (state.Workspace is null)
-        {
-            return;
-        }
-
-        if (callEdge.Props is not { } props)
-        {
-            return;
-        }
-
-        // Route/verb extracted regardless of target_service so we can attempt global matching.
-        var route = props.TryGetValue("route", out var routeValue) ? routeValue?.ToString() : null;
-        var verb = props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null;
-        var baseUrl = props.TryGetValue("base_url", out var baseValue) ? baseValue?.ToString() : null;
-
-        // If target_service is present we use existing assembly mapping logic; otherwise attempt global match.
-        var serviceName = props.TryGetValue("target_service", out var serviceValue) ? serviceValue?.ToString() : null;
-
-        if (string.IsNullOrWhiteSpace(serviceName) && !string.IsNullOrWhiteSpace(fallbackTargetService))
-        {
-            serviceName = fallbackTargetService;
-        }
-
-        var host = ExtractHost(baseUrl, route);
-        if (string.IsNullOrWhiteSpace(serviceName) && state.Workspace.TryResolveServiceByHost(host, out var hostService))
-        {
-            serviceName = hostService;
-        }
-
-        if (string.IsNullOrWhiteSpace(serviceName))
-        {
-            // No explicit target service; if we have route/verb attempt a global endpoint match.
-            if (string.IsNullOrWhiteSpace(route) && string.IsNullOrWhiteSpace(verb))
-            {
-                return; // Nothing to resolve.
-            }
-
-            var routeText = route ?? string.Empty;
-            var verbText = verb ?? string.Empty;
-            var lookupKey = $"lookup::{callEdge.From}::{verbText}::{routeText}";
-            if (!state.RemoteLookupKeys.Add(lookupKey))
-            {
-                var hostSuffix = string.IsNullOrWhiteSpace(host) ? string.Empty : $" host={host}";
-                AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}{hostSuffix} (see previous lookup)");
-                return;
-            }
-
-            var globalCandidates = state.Document.Nodes
-                .Where(n => n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api")
-                .ToList();
-            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
-            var lookupHost = string.IsNullOrWhiteSpace(host) ? string.Empty : $" host={host}";
-            AppendIndented(builder, indent, $"remote_endpoint_lookup route={routeText} verb={verbText}{lookupHost}");
-            if (globalMatched.Count == 0)
-            {
-                AppendIndented(builder, indent + 1, $"unmatched_endpoint route={routeText} verb={verbText}");
-                return;
-            }
-
-            foreach (var endpoint in globalMatched)
-            {
-                AppendEndpointFlow(builder, state, endpoint, indent + 1);
-            }
-            return;
-        }
-
-        if (!state.Workspace.TryGetAssemblies(serviceName, out var assemblies) || assemblies.Count == 0)
-        {
-            // No explicit assemblies mapped. Still attempt a global endpoint match so we can
-            // provide value even before workspace config is completed.
-            AppendIndented(builder, indent, $"target_service {serviceName}");
-
-            var globalCandidates = state.Document.Nodes
-                .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api"))
-                .ToList();
-            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
-            if (globalMatched.Count > 0)
-            {
-                AppendIndented(builder, indent + 1, "fallback_global_endpoint_match (no assemblies mapped)");
-                foreach (var endpoint in globalMatched)
-                {
-                    AppendEndpointFlow(builder, state, endpoint, indent + 2);
-                }
-            }
-            else
-            {
-                AppendIndented(builder, indent + 1, "unresolved_target_service (no assemblies mapped)");
-            }
-            return;
-        }
-
-        var assemblySet = assemblies is HashSet<string> set
-            ? set
-            : new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
-
-        var key = $"{callEdge.From}->{serviceName}:{route}:{verb}";
-        if (!state.TargetServiceVisited.Add(key))
-        {
-            // Summarize rather than fully re-expand
-            AppendIndented(builder, indent, $"target_service {serviceName} (see previous expansion)");
-            return;
-        }
-
-        var candidates = state.Document.Nodes
-            .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api")
-                        && assemblySet.Contains(n.Assembly))
-            .ToList();
-
-        var targetHeader = string.IsNullOrWhiteSpace(host)
-            ? $"target_service {serviceName}"
-            : $"target_service {serviceName} (host={host})";
-        AppendIndented(builder, indent, targetHeader);
-
-        if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
-        {
-            AppendIndented(builder, indent + 1, "... (max depth reached)");
-            return;
-        }
-
-        if (candidates.Count == 0)
-        {
-            AppendIndented(builder, indent + 1, "unresolved_target_service (no endpoints in mapped assemblies)");
-            return;
-        }
-
-        var matched = FilterEndpointsByRouteAndVerb(candidates, route, verb);
-        if (matched.Count == 0)
-        {
-            // Fallback: global search across all endpoints if specific assembly match failed
-            var globalCandidates = state.Document.Nodes
-                .Where(n => (n.Type == "endpoint.controller" || n.Type == "endpoint.minimal_api"))
-                .ToList();
-            var globalMatched = FilterEndpointsByRouteAndVerb(globalCandidates, route, verb);
-            if (globalMatched.Count > 0)
-            {
-                AppendIndented(builder, indent + 1, "fallback_global_endpoint_match");
-                foreach (var endpoint in globalMatched)
-                {
-                    AppendEndpointFlow(builder, state, endpoint, indent + 2);
-                }
-                return;
-            }
-
-            AppendIndented(builder, indent + 1, $"unmatched_endpoint route={route} verb={verb}");
-            return;
-        }
-
-        if (state.AllowedIds is { } allowed)
-        {
-            foreach (var endpoint in matched)
-            {
-                // Remote targets can sit outside the controller's initial reachability set.
-                allowed.Add(endpoint.Id);
-            }
-        }
-
-        foreach (var endpoint in matched)
-        {
-            AppendEndpointFlow(builder, state, endpoint, indent + 1);
-        }
-    }
-
-    public static IReadOnlyList<GraphNode> FilterEndpointsByRouteAndVerb(
-        List<GraphNode> candidates,
-        string? route,
-        string? verb)
-    {
-        static bool MatchesRoute(string? callRoute, string? endpointRoute)
-        {
-            var callCanonical = CanonicalizeRoute(callRoute);
-            var endpointCanonical = CanonicalizeRoute(endpointRoute);
-            return !string.IsNullOrWhiteSpace(callCanonical) &&
-                   !string.IsNullOrWhiteSpace(endpointCanonical) &&
-                   string.Equals(callCanonical, endpointCanonical, StringComparison.OrdinalIgnoreCase);
-        }
-
-        static bool MatchesVerb(string? expected, string? actual)
-            => !string.IsNullOrWhiteSpace(expected) && !string.IsNullOrWhiteSpace(actual)
-               && string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
-
-        if (!string.IsNullOrWhiteSpace(route) && !string.IsNullOrWhiteSpace(verb))
-        {
-            var both = candidates
-                .Where(n => MatchesRoute(route, GetNodeProp(n, "route")) && MatchesVerb(verb, GetNodeProp(n, "http_method")))
-                .ToList();
-            if (both.Count > 0)
-            {
-                return both;
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(route))
-        {
-            var routeOnly = candidates
-                .Where(n => MatchesRoute(route, GetNodeProp(n, "route")))
-                .ToList();
-            if (routeOnly.Count > 0)
-            {
-                return routeOnly;
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(verb))
-        {
-            var verbOnly = candidates
-                .Where(n => MatchesVerb(verb, GetNodeProp(n, "http_method")))
-                .ToList();
-            if (verbOnly.Count > 0)
-            {
-                return verbOnly;
-            }
-        }
-
-        return candidates;
+        var key = BuildSyntheticDispatchKey(edge);
+        return state.RenderedSyntheticDispatches.Contains(key);
     }
 
     public static GraphNode? TryResolveSingleImplementation(FlowRenderState state, GraphNode caller, GraphNode serviceNode)
@@ -898,6 +305,7 @@ public static partial class FlowBuilder
         {
             foreach (var edge in edges.Where(e => e.Kind == "implemented_by"))
             {
+                if (!IsMatchingImplementationEdge(serviceNode, edge)) continue;
                 if (!state.NodesById.TryGetValue(edge.To, out var impl)) continue;
                 if (!ShouldIncludeImplementation(caller, impl)) continue;
                 if (seen.Add(impl.Id)) candidates.Add(impl);
@@ -1114,12 +522,8 @@ public static partial class FlowBuilder
         }
 
         var dispatches = edges
-            .Where(e => e.Kind == "sends_request" &&
-                        string.Equals(e.Source, "synthetic", StringComparison.OrdinalIgnoreCase) &&
-                        e.Transform?.Type == "requestprocessor.dispatch" &&
-                        state.NodesById.TryGetValue(e.To, out _))
+            .Where(e => IsSyntheticRequestProcessorDispatch(e) && state.NodesById.TryGetValue(e.To, out _))
             .Select(e => new { Edge = e, Node = state.NodesById[e.To] })
-            .OrderBy(d => d.Node.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (dispatches.Count == 0)
@@ -1128,31 +532,33 @@ public static partial class FlowBuilder
             return;
         }
 
-        // Emit generic IRequestProcessor narration once per unique TRequest/TResult pair
-        var genericPairs = dispatches
-            .Select(d => new
-            {
-                TRequest = d.Node.Name,
-                TResult = d.Edge.Props is { } p && p.TryGetValue("response_type", out var rt) && !string.IsNullOrWhiteSpace(rt?.ToString())
-                    ? GetSimpleType(rt!.ToString())
-                    : "Unit"
-            })
-            .Distinct()
-            .ToList();
-
-        foreach (var g in genericPairs)
+        dispatches.Sort(static (a, b) =>
         {
-            AppendIndented(builder, indent, $"constructs RequestProcessorWrapper<{g.TRequest},{g.TResult}>");
-            AppendIndented(builder, indent, $"resolves IPipelineBehavior<{g.TRequest},{g.TResult}> chain");
-            AppendIndented(builder, indent, $"invokes IAsyncRequestHandler<{g.TRequest},{g.TResult}>.Handle");
-        }
+            var lineA = a.Edge.Transform?.Location?.Line ?? int.MaxValue;
+            var lineB = b.Edge.Transform?.Location?.Line ?? int.MaxValue;
+            var cmp = lineA.CompareTo(lineB);
+            if (cmp != 0) return cmp;
+            return string.Compare(a.Node.Name, b.Node.Name, StringComparison.OrdinalIgnoreCase);
+        });
 
         foreach (var d in dispatches)
         {
-            var responseType = d.Edge.Props is { } props && props.TryGetValue("response_type", out var rt) ? rt?.ToString() : null;
-            var responsePart = string.IsNullOrWhiteSpace(responseType) ? string.Empty : $" : {responseType}";
-            var baseLabel = $"dispatches {d.Node.Name}{responsePart}";
+            var requestName = d.Node.Name ?? d.Node.Fqdn ?? d.Node.Id;
+            var rawResponseType = d.Edge.Props is { } props && props.TryGetValue("response_type", out var rt) ? rt?.ToString() : null;
+            var simpleResponseType = string.IsNullOrWhiteSpace(rawResponseType) ? "Unit" : GetSimpleType(rawResponseType!);
+            if (string.IsNullOrWhiteSpace(simpleResponseType))
+            {
+                simpleResponseType = "Unit";
+            }
+
+            AppendIndented(builder, indent, $"constructs RequestProcessorWrapper<{requestName},{simpleResponseType}>");
+            AppendIndented(builder, indent, $"resolves IPipelineBehavior<{requestName},{simpleResponseType}> chain");
+            AppendIndented(builder, indent, $"invokes IAsyncRequestHandler<{requestName},{simpleResponseType}>.Handle");
+
+            var responsePart = string.IsNullOrWhiteSpace(rawResponseType) ? string.Empty : $" : {rawResponseType}";
+            var baseLabel = $"dispatches {requestName}{responsePart}";
             AppendIndented(builder, indent, FormatLinkedCode(baseLabel, d.Edge.Transform?.Location));
+            MarkSyntheticDispatchRendered(state, d.Edge);
 
             // Expand pipeline behaviors (processed_by edges) under the request
             if (state.EdgesByFrom.TryGetValue(d.Node.Id, out var requestEdges))
@@ -1172,5 +578,78 @@ public static partial class FlowBuilder
         }
     }
 
+
+
+    public static IEnumerable<(string Key, List<ControllerAction> Actions)> GroupControllers(
+        GraphDocument document,
+        Func<GraphNode, bool>? controllerPredicate = null)
+    {
+        controllerPredicate ??= static _ => true;
+
+        var actionNodes = document.Nodes
+            .Where(n => string.Equals(n.Type, "endpoint.controller", StringComparison.OrdinalIgnoreCase) && controllerPredicate(n))
+            .OrderBy(n => n.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (actionNodes.Count == 0)
+        {
+            yield break;
+        }
+
+        var groups = new Dictionary<string, List<ControllerAction>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in actionNodes)
+        {
+            var action = new ControllerAction(node);
+            var key = ResolveControllerKey(node);
+            (groups.TryGetValue(key, out var list) ? list : groups[key] = new()).Add(action);
+        }
+
+        foreach (var kv in groups.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return (kv.Key, kv.Value.OrderBy(a => a.Fqdn ?? a.Name, StringComparer.OrdinalIgnoreCase).ToList());
+        }
+    }
+
+    public sealed record ControllerAction
+    {
+        public ControllerAction(GraphNode node)
+        {
+            Node = node ?? throw new ArgumentNullException(nameof(node));
+            Id = node.Id;
+            Name = node.Name;
+            Fqdn = node.Fqdn;
+            Route = GetNodeProp(node, "route");
+            HttpMethod = GetNodeProp(node, "http_method") ?? GetNodeProp(node, "method");
+        }
+
+        public GraphNode Node { get; }
+        public string Id { get; }
+        public string? Name { get; }
+        public string? Fqdn { get; }
+        public string? Route { get; }
+        public string? HttpMethod { get; }
+    }
+
+    public static FlowRenderState CreateState(GraphDocument document, FlowWorkspaceIndex? workspace, int? maxDepth)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        var index = FlowGraphIndex.Build(document);
+        return CreateState(index, workspace, maxDepth);
+    }
+
+    internal static FlowRenderState CreateState(FlowGraphIndex index, FlowWorkspaceIndex? workspace, int? maxDepth)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        return new FlowRenderState(
+            index.Document,
+            index.NodesById,
+            index.EdgesByFrom,
+            index.NodesByFqdn,
+            index.NodesByName,
+            index.MapLookup,
+            workspace,
+            maxDepth,
+            index);
+    }
 
 }

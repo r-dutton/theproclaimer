@@ -14,6 +14,12 @@ HashSet<string>? tagFilter = null;
 string format = "md";
 var flowPatterns = new List<string>();
 var solutions = new List<string>();
+bool turbo = argsList.Remove("--turbo") || argsList.Remove("-t");
+bool legacy = argsList.Remove("--legacy");
+bool quiet = argsList.Remove("--quiet");
+bool noMsg = argsList.Remove("--no-msg");
+bool noDb  = argsList.Remove("--no-db");
+bool noCache = argsList.Remove("--no-cache");
 int? maxDepth = null;
 
 for (int i = 0; i < argsList.Count; i++)
@@ -64,7 +70,14 @@ var workspaceIndex = FlowWorkspaceIndex.Load(workspace);
 if (flowPatterns.Count > 0)
 {
     var predicate = FlowFilter.BuildPredicate(flowPatterns);
-    var flow = FlowBuilder.BuildFlows(document, predicate, workspaceIndex, maxDepth);
+    var useTurbo = !legacy;
+    if (!legacy && turbo)
+    {
+        useTurbo = true;
+    }
+
+    IFlowEngine engine = useTurbo ? new TurboFlowEngine() : new FatherFlowEngine();
+    var flow = engine.Build(document, workspaceIndex, predicate, format, maxDepth);
 
     if (string.IsNullOrWhiteSpace(flow))
     {

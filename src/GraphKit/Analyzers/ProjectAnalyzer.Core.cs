@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
@@ -17,7 +18,9 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, ControllerActionInfo> _controllerActions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, MinimalEndpointInfo> _minimalEndpoints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RequestInfo> _requests = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, RequestInfo>> _requestsByInterfaceType = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HandlerInfo> _handlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, HandlerInfo> _handlersByRequestType = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ServiceInfo> _services = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _serviceHttpClientTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, PipelineBehaviorInfo> _pipelineBehaviors = new(StringComparer.OrdinalIgnoreCase);
@@ -34,6 +37,8 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentBag<HttpCallInfo> _httpCalls = new();
     private readonly ConcurrentDictionary<string, PublisherInfo> _publishers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, MessageContractInfo> _messageContracts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, PublisherProxyInfo> _publisherProxies = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _publisherProxyContracts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<DerivedRequestCandidate> _derivedRequestCandidates = new();
     private readonly ConcurrentDictionary<string, ConcurrentBag<ServiceRegistrationInfo>> _serviceRegistrations = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConfigurationValue> _configurationValues = new(StringComparer.OrdinalIgnoreCase);
@@ -49,6 +54,8 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, DbContextInfo> _dbContexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _interfaceMethodReturnTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _stringConstants = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly int MaxFileParseConcurrency = Math.Max(1, Environment.ProcessorCount - 1);
+    private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
 
     public ProjectAnalyzer(string workspaceRoot)
     {
@@ -63,17 +70,7 @@ public sealed partial class ProjectAnalyzer
     {
         LoadConfigurationValues(project);
 
-        var parsedFiles = new List<(string FilePath, SyntaxTree Tree, CompilationUnitSyntax Root)>();
-
-        foreach (var file in project.SourceFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var text = await File.ReadAllTextAsync(file, cancellationToken);
-            var tree = CSharpSyntaxTree.ParseText(text, path: file);
-            var root = tree.GetCompilationUnitRoot(cancellationToken);
-            parsedFiles.Add((file, tree, root));
-        }
+        var parsedFiles = await ParseProjectFilesAsync(project, cancellationToken);
 
         foreach (var (_, tree, root) in parsedFiles)
         {
@@ -117,6 +114,7 @@ public sealed partial class ProjectAnalyzer
         EmitEntities();
         EmitMappings();
         EmitHttpClients();
+        PropagateServicePublisherCalls();
         EmitPublishers();
         EmitServices();
         EmitServiceRegistrations();
@@ -189,4 +187,74 @@ public sealed partial class ProjectAnalyzer
 
     // Reuse existing route canonicalization logic defined elsewhere in analyzer (Controllers / Http). Provide fallback if not present.
     // Use existing CanonicalizeRoute(string route) defined in Controllers partial.
+
+    private static IReadOnlyList<TSyntax> Descendants<TSyntax>(SyntaxNode node) where TSyntax : SyntaxNode
+    {
+        var cache = DescendantCache.GetValue(node, static key => new NodeDescendantCache(key));
+        return cache.GetNodes<TSyntax>();
+    }
+
+    private static async Task<List<(string FilePath, SyntaxTree Tree, CompilationUnitSyntax Root)>> ParseProjectFilesAsync(ProjectInfo project, CancellationToken cancellationToken)
+    {
+        if (project.SourceFiles.Count == 0)
+        {
+            return new List<(string, SyntaxTree, CompilationUnitSyntax)>();
+        }
+
+        var results = new (string FilePath, SyntaxTree Tree, CompilationUnitSyntax Root)[project.SourceFiles.Count];
+        var indexedFiles = project.SourceFiles.Select((file, index) => (File: file, Index: index));
+        var parallelOptions = CreateParseParallelOptions(project.SourceFiles.Count, cancellationToken);
+
+        await Parallel.ForEachAsync(indexedFiles, parallelOptions, async (entry, ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var text = await File.ReadAllTextAsync(entry.File, ct).ConfigureAwait(false);
+            var tree = CSharpSyntaxTree.ParseText(text, path: entry.File);
+            var root = tree.GetCompilationUnitRoot(ct);
+            results[entry.Index] = (entry.File, tree, root);
+        }).ConfigureAwait(false);
+
+        return results.ToList();
+    }
+
+    private static ParallelOptions CreateParseParallelOptions(int fileCount, CancellationToken cancellationToken)
+    {
+        var degree = Math.Min(MaxFileParseConcurrency, Math.Max(1, fileCount / 4));
+        if (fileCount <= 4)
+        {
+            degree = Math.Min(2, MaxFileParseConcurrency);
+        }
+
+        return new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = degree
+        };
+    }
+
+    private sealed class NodeDescendantCache
+    {
+        private readonly SyntaxNode[] _all;
+        private Dictionary<Type, object>? _typed;
+
+        public NodeDescendantCache(SyntaxNode node)
+        {
+            _all = node.DescendantNodes(descendIntoTrivia: false).ToArray();
+        }
+
+        public IReadOnlyList<TSyntax> GetNodes<TSyntax>() where TSyntax : SyntaxNode
+        {
+            var type = typeof(TSyntax);
+            _typed ??= new Dictionary<Type, object>();
+            if (_typed.TryGetValue(type, out var existing))
+            {
+                return (IReadOnlyList<TSyntax>)existing;
+            }
+
+            var typed = _all.OfType<TSyntax>().ToArray();
+            _typed[type] = typed;
+            return typed;
+        }
+    }
 }

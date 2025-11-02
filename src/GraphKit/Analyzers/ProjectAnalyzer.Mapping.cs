@@ -30,7 +30,7 @@ public sealed partial class ProjectAnalyzer
             Tags = new[] { "mapping" }
         };
 
-        foreach (var invocation in classDeclaration.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(classDeclaration))
         {
             var generic = invocation.Expression switch
             {

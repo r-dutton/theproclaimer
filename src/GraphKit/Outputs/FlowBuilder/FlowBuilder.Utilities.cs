@@ -1,9 +1,11 @@
-﻿using GraphKit.Graph;
+using GraphKit.Graph;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 
@@ -327,32 +329,226 @@ namespace GraphKit.Outputs
                 return true;
             }
 
-            if (edge.Props is not { } props)
-            {
-                return false;
-            }
-
             var normalizedInvoked = NormalizeMethodName(invokedMethod);
-
-            if (props.TryGetValue("method", out var methodValue))
+            if (string.IsNullOrWhiteSpace(normalizedInvoked))
             {
-                var methodName = ToStringValue(methodValue);
-                if (!string.IsNullOrWhiteSpace(methodName) && string.Equals(NormalizeMethodName(methodName), normalizedInvoked, StringComparison.OrdinalIgnoreCase))
+                return true;
+            }
+
+            if (edge.Props is not { Count: > 0 } props)
+            {
+                // No metadata to filter on; allow expansion to avoid hiding relevant edges.
+                return true;
+            }
+
+            static bool IsHttpVerb(string candidate)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    return false;
+                }
+
+                var trimmed = candidate.Trim();
+                if (trimmed.Length is < 3 or > 10)
+                {
+                    return false;
+                }
+
+                return trimmed.Equals("GET", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("POST", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("PUT", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("PATCH", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("HEAD", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("TRACE", StringComparison.OrdinalIgnoreCase) ||
+                       trimmed.Equals("CONNECT", StringComparison.OrdinalIgnoreCase);
+            }
+
+            var sawCandidates = false;
+
+            bool Matches(string key, object? value)
+            {
+                var matched = false;
+
+                foreach (var candidate in EnumerateMethodCandidates(value))
+                {
+                    if (string.IsNullOrWhiteSpace(candidate))
+                    {
+                        continue;
+                    }
+
+                    var trimmed = candidate.Trim();
+                    if (trimmed.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    if (key.Equals("method", StringComparison.OrdinalIgnoreCase) && IsHttpVerb(trimmed))
+                    {
+                        sawCandidates = true;
+                        continue;
+                    }
+
+                    var normalizedCandidate = NormalizeMethodName(trimmed);
+                    if (string.IsNullOrWhiteSpace(normalizedCandidate))
+                    {
+                        continue;
+                    }
+
+                    sawCandidates = true;
+
+                    if (string.Equals(normalizedCandidate, normalizedInvoked, StringComparison.OrdinalIgnoreCase) ||
+                        normalizedCandidate.EndsWith("." + normalizedInvoked, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matched = true;
+                        break;
+                    }
+                }
+
+                return matched;
+            }
+
+            static bool KeyEquals(string candidate, string key)
+                => string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase);
+
+            static bool IsPreferredKey(string key)
+                => KeyEquals(key, "owner_method") ||
+                   KeyEquals(key, "handler_method") ||
+                   KeyEquals(key, "declaring_method") ||
+                   KeyEquals(key, "service_method") ||
+                   KeyEquals(key, "invoked_method") ||
+                   KeyEquals(key, "caller_method") ||
+                   KeyEquals(key, "method");
+
+            foreach (var preferred in props)
+            {
+                if (preferred.Key is null)
+                {
+                    continue;
+                }
+
+                if (!IsPreferredKey(preferred.Key))
+                {
+                    continue;
+                }
+
+                if (Matches(preferred.Key, preferred.Value))
                 {
                     return true;
                 }
             }
 
-            if (props.TryGetValue("client_method", out var clientMethodValue))
+            foreach (var kvp in props)
             {
-                var clientMethod = ToStringValue(clientMethodValue);
-                if (!string.IsNullOrWhiteSpace(clientMethod) && string.Equals(NormalizeMethodName(clientMethod), normalizedInvoked, StringComparison.OrdinalIgnoreCase))
+                if (kvp.Key is null)
+                {
+                    continue;
+                }
+
+                if (IsPreferredKey(kvp.Key))
+                {
+                    continue;
+                }
+
+                if (kvp.Key.IndexOf("method", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                if (Matches(kvp.Key, kvp.Value))
                 {
                     return true;
                 }
             }
 
-            return false;
+            return !sawCandidates;
+        }
+
+        private static IEnumerable<string> EnumerateMethodCandidates(object? value)
+        {
+            if (value is null)
+            {
+                yield break;
+            }
+
+            switch (value)
+            {
+                case string text when !string.IsNullOrWhiteSpace(text):
+                    yield return text;
+                    yield break;
+
+                case JsonElement element:
+                    switch (element.ValueKind)
+                    {
+                        case JsonValueKind.Array:
+                            foreach (var child in element.EnumerateArray())
+                            {
+                                foreach (var candidate in EnumerateMethodCandidates((object)child))
+                                {
+                                    yield return candidate;
+                                }
+                            }
+                            yield break;
+                        case JsonValueKind.String:
+                            var str = element.GetString();
+                            if (!string.IsNullOrWhiteSpace(str))
+                            {
+                                yield return str;
+                            }
+                            yield break;
+                        case JsonValueKind.Null:
+                        case JsonValueKind.Undefined:
+                            yield break;
+                        default:
+                            var fallback = element.ToString();
+                            if (!string.IsNullOrWhiteSpace(fallback))
+                            {
+                                yield return fallback;
+                            }
+                            yield break;
+                    }
+
+                case IEnumerable<string> stringEnumerable:
+                    foreach (var entry in stringEnumerable)
+                    {
+                        if (!string.IsNullOrWhiteSpace(entry))
+                        {
+                            yield return entry;
+                        }
+                    }
+                    yield break;
+
+                default:
+                    if (value is System.Collections.IDictionary)
+                    {
+                        var dictString = value.ToString();
+                        if (!string.IsNullOrWhiteSpace(dictString))
+                        {
+                            yield return dictString;
+                        }
+                        yield break;
+                    }
+
+                    if (value is System.Collections.IEnumerable enumerable && value is not string)
+                    {
+                        foreach (var item in enumerable)
+                        {
+                            foreach (var candidate in EnumerateMethodCandidates(item))
+                            {
+                                yield return candidate;
+                            }
+                        }
+                        yield break;
+                    }
+
+                    var fallbackText = value.ToString();
+                    if (!string.IsNullOrWhiteSpace(fallbackText))
+                    {
+                        yield return fallbackText;
+                    }
+                    break;
+            }
         }
 
 
@@ -428,7 +624,7 @@ namespace GraphKit.Outputs
                 {
                     continue;
                 }
-                if (state.AllowedIds != null && !state.AllowedIds.Contains(behaviorNode.Id)) continue;
+                if (!state.IsAllowedNode(behaviorNode.Id)) continue;
 
                 var stage = behaviorNode.Props is { } bProps && bProps.TryGetValue("stage", out var stageVal)
                     ? stageVal?.ToString()
@@ -450,15 +646,21 @@ namespace GraphKit.Outputs
                     .ToList();
                 if (genericBehaviors.Count > 0)
                 {
-                    AppendIndented(builder, indent, $"generic_pipeline_behaviors {genericBehaviors.Count}");
-                    state.CurrentImpact?.RecordGenericPipelineBehaviors(genericBehaviors.Count);
-                    foreach (var gb in genericBehaviors.OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase).Take(5))
+                    var distinctBehaviors = genericBehaviors
+                        .GroupBy(n => GetDisplayName(n), StringComparer.OrdinalIgnoreCase)
+                        .Select(g => g.First())
+                        .OrderBy(n => GetDisplayName(n), StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    AppendIndented(builder, indent, $"generic_pipeline_behaviors {distinctBehaviors.Count}");
+                    state.CurrentImpact?.RecordGenericPipelineBehaviors(distinctBehaviors.Count);
+                    foreach (var gb in distinctBehaviors.Take(5))
                     {
-                        AppendIndented(builder, indent + 1, $"{gb.Name}");
+                        AppendIndented(builder, indent + 1, GetDisplayName(gb));
                     }
-                    if (genericBehaviors.Count > 5)
+                    if (distinctBehaviors.Count > 5)
                     {
-                        AppendIndented(builder, indent + 1, $"+{genericBehaviors.Count - 5} more");
+                        AppendIndented(builder, indent + 1, $"+{distinctBehaviors.Count - 5} more");
                     }
                 }
             }
@@ -466,16 +668,20 @@ namespace GraphKit.Outputs
             var handlerEdges = edges.Where(e => e.Kind == "handled_by")
                 .GroupBy(e => e.To, StringComparer.Ordinal)
                 .Select(g => g.First());
+            var expandedHandlers = new HashSet<string>(StringComparer.Ordinal);
             foreach (var handlerEdge in handlerEdges)
             {
                 if (!state.NodesById.TryGetValue(handlerEdge.To, out var handlerNode)) continue;
-                if (state.AllowedIds != null && !state.AllowedIds.Contains(handlerNode.Id)) continue;
+                if (!state.IsAllowedNode(handlerNode.Id)) continue;
                 var span = handlerNode.Span;
                 var handlerKey = $"{handlerNode.Id}:{span?.StartLine}:{span?.EndLine}";
-                state.DedupHandlers ??= new HashSet<string>(StringComparer.Ordinal);
-                if (!state.DedupHandlers.Add(handlerKey)) continue;
+                if (!expandedHandlers.Add(handlerKey))
+                {
+                    continue;
+                }
                 var label = $"handled_by {handlerNode.Fqdn}.Handle";
-                AppendIndented(builder, indent, FormatLinkedCode(label, handlerNode));
+                var linkedLabel = FormatLinkedCode(label, handlerNode);
+                AppendIndented(builder, indent, linkedLabel);
                 state.CurrentImpact?.RecordHandler(GetDisplayName(handlerNode));
                 FlowBuilder.AppendHandlerFlow(builder, state, handlerNode, indent + 1);
             }
@@ -606,7 +812,7 @@ namespace GraphKit.Outputs
             {
                 return;
             }
-            if (state.AllowedIds != null && !state.AllowedIds.Contains(destination.Id))
+            if (!state.IsAllowedNode(destination.Id))
             {
                 return; // not in reachability scope
             }
@@ -621,7 +827,16 @@ namespace GraphKit.Outputs
             }
             var variableText = string.IsNullOrWhiteSpace(variable) ? string.Empty : $" (var {variable})";
             var annotationText = string.IsNullOrWhiteSpace(annotation) ? string.Empty : $" [{annotation}]";
-            var baseLabel = $"{label} {destination.Name}{variableText}";
+            var destinationLabel = destination.Name;
+            if (string.Equals(label, "returns", StringComparison.OrdinalIgnoreCase) && edge.Props is { } returnProps && returnProps.TryGetValue("response_type", out var responseValue))
+            {
+                var responseType = responseValue?.ToString();
+                if (!string.IsNullOrWhiteSpace(responseType))
+                {
+                    destinationLabel = responseType;
+                }
+            }
+            var baseLabel = $"{label} {destinationLabel}{variableText}";
             AppendIndented(builder, indent, $"{FormatLinkedCode(baseLabel, edge.Transform?.Location)}{annotationText}");
             state.CurrentImpact?.RecordMapping(GetDisplayName(destination));
 
@@ -635,7 +850,7 @@ namespace GraphKit.Outputs
                 return;
             }
             // Prevent expansion of downstream if outside allowed set
-            if (state.AllowedIds != null && !state.AllowedIds.Contains(destination.Id)) return;
+            if (!state.IsAllowedNode(destination.Id)) return;
 
             foreach (var convertEdge in downstreamEdges.Where(e => e.Kind == "converts_to"))
             {
@@ -758,11 +973,16 @@ namespace GraphKit.Outputs
                         nextIndent = indent + 2;
                     }
 
-                    FlowBuilder.AppendServiceContractFlow(builder, state, handler, serviceNode, serviceMethodName, nextIndent);
+                    FlowBuilder.AppendServiceContractFlow(builder, state, handler, serviceNode, serviceMethodName, nextIndent, service);
                 }
 
                 foreach (var requestEdge in edges.Where(e => e.Kind == "sends_request"))
                 {
+                    if (FlowBuilder.ShouldSkipSyntheticDispatch(state, requestEdge))
+                    {
+                        continue;
+                    }
+
                     if (!state.NodesById.TryGetValue(requestEdge.To, out var requestNode))
                     {
                         continue;
@@ -1023,5 +1243,25 @@ namespace GraphKit.Outputs
                 ? $" ({string.Join(", ", details)})"
                 : string.Empty;
         }
+    }
+}
+
+
+namespace GraphKit.Outputs
+{
+    public static partial class Utilities
+    {
+    [GeneratedRegex(@"\{[^}]+\}", RegexOptions.NonBacktracking)]
+    private static partial Regex RouteParamRx();
+
+            [GeneratedRegex(@"With(?:Required|Optional)QueryParameter\(\s*""([^""]+)""\)", RegexOptions.NonBacktracking)]
+    private static partial Regex QueryParamRx();
+
+        private static readonly ConcurrentDictionary<string, string> __routeCache = new(StringComparer.Ordinal);
+
+        public static string NormaliseRouteCached(string raw)
+            => string.IsNullOrEmpty(raw)
+                ? raw
+                : __routeCache.GetOrAdd(raw, static r => RouteParamRx().Replace(r, "{}"));
     }
 }

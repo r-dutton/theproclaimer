@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
@@ -103,19 +104,28 @@ public sealed partial class ProjectAnalyzer
         {
             var declaration = field.Declaration;
             var typeName = declaration.Type.ToString();
+            var isReadOnly = field.Modifiers.Any(m =>
+                m.IsKind(SyntaxKind.ReadOnlyKeyword) ||
+                m.IsKind(SyntaxKind.ConstKeyword));
             foreach (var variable in declaration.Variables)
             {
                 var line = GetLineNumber(tree, variable);
-                fieldTypes[variable.Identifier.Text] = new FieldDescriptor(typeName, line);
+                fieldTypes[variable.Identifier.Text] = new FieldDescriptor(typeName, line, isReadOnly);
             }
         }
 
         CaptureStringConstants(classDeclaration, namespaceName, fqdn);
 
+    var implementedInterfaces = GetImplementedInterfaceTypes(classDeclaration);
+    var inferredResponseType = InferRequestResponseType(implementedInterfaces, project.AssemblyName, project.RelativeDirectory);
+
+        CapturePublisherProxy(project, tree, classDeclaration, namespaceName, fieldTypes);
+
         if (ImplementsInterface(classDeclaration, "IRequest") || ImplementsInterface(classDeclaration, "IAsyncRequest"))
         {
-            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
+            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, implementedInterfaces, inferredResponseType);
             _requests[fqdn] = requestInfo;
+            RegisterRequestInterfaces(requestInfo, implementedInterfaces);
         }
         else if (classDeclaration.BaseList is { Types.Count: > 0 })
         {
@@ -133,7 +143,7 @@ public sealed partial class ProjectAnalyzer
 
         if (ImplementsInterface(classDeclaration, "IRequest") || ImplementsInterface(classDeclaration, "IAsyncRequest"))
         {
-            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
+            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, implementedInterfaces, inferredResponseType);
             _requests[fqdn] = requestInfo;
         }
         else if (classDeclaration.BaseList is { Types.Count: > 0 })
@@ -251,10 +261,14 @@ public sealed partial class ProjectAnalyzer
 
         CaptureStringConstants(structDeclaration, namespaceName, fqdn);
 
+        var implementedInterfaces = GetImplementedInterfaceTypes(structDeclaration);
+        var inferredResponseType = InferRequestResponseType(implementedInterfaces, project.AssemblyName, project.RelativeDirectory);
+
         if (ImplementsInterface(structDeclaration, "IRequest") || ImplementsInterface(structDeclaration, "IAsyncRequest"))
         {
-            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, structName);
+            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, structName, implementedInterfaces, inferredResponseType);
             _requests[fqdn] = requestInfo;
+            RegisterRequestInterfaces(requestInfo, implementedInterfaces);
         }
         else if (structDeclaration.BaseList is { Types.Count: > 0 })
         {
@@ -491,10 +505,14 @@ public sealed partial class ProjectAnalyzer
         var filePath = GetRelativePath(tree.FilePath);
         var span = ToGraphSpan(tree, recordDeclaration);
 
+        var implementedInterfaces = GetImplementedInterfaceTypes(recordDeclaration);
+        var inferredResponseType = InferRequestResponseType(implementedInterfaces, project.AssemblyName, project.RelativeDirectory);
+
         if (ImplementsInterface(recordDeclaration, "IRequest") || IsDerivedRequest(recordDeclaration))
         {
-            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, recordName);
+            var requestInfo = new RequestInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, recordName, implementedInterfaces, inferredResponseType);
             _requests[fqdn] = requestInfo;
+            RegisterRequestInterfaces(requestInfo, implementedInterfaces);
         }
         else if (recordDeclaration.BaseList is { Types.Count: > 0 })
         {
@@ -523,6 +541,34 @@ public sealed partial class ProjectAnalyzer
         if (IsMessageContract(recordDeclaration))
         {
             _messageContracts[fqdn] = new MessageContractInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, recordName);
+        }
+    }
+
+    private void RegisterRequestInterfaces(RequestInfo request, IReadOnlyList<string> interfaceTypes)
+    {
+        if (interfaceTypes.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var interfaceType in interfaceTypes)
+        {
+            if (string.IsNullOrWhiteSpace(interfaceType))
+            {
+                continue;
+            }
+
+            var keys = DeriveInterfaceLookupKeys(interfaceType);
+            foreach (var key in keys)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                var lookup = _requestsByInterfaceType.GetOrAdd(key, _ => new ConcurrentDictionary<string, RequestInfo>(StringComparer.OrdinalIgnoreCase));
+                lookup[request.Fqdn] = request;
+            }
         }
     }
 
@@ -590,6 +636,89 @@ public sealed partial class ProjectAnalyzer
         return false;
     }
 
+    private static IReadOnlyList<string> GetImplementedInterfaceTypes(TypeDeclarationSyntax typeDeclaration)
+    {
+        if (typeDeclaration.BaseList is not { Types.Count: > 0 })
+        {
+            return Array.Empty<string>();
+        }
+
+        var interfaces = new List<string>();
+        foreach (var baseType in typeDeclaration.BaseList.Types)
+        {
+            var typeText = baseType.Type.ToString();
+            if (string.IsNullOrWhiteSpace(typeText) || !IsLikelyInterfaceType(typeText))
+            {
+                continue;
+            }
+
+            interfaces.Add(typeText.Trim());
+        }
+
+        return interfaces.Count == 0 ? Array.Empty<string>() : interfaces;
+    }
+
+    private string? InferRequestResponseType(IReadOnlyList<string> interfaceTypes, string? preferredAssembly, string? preferredProject)
+    {
+        if (interfaceTypes.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var implementedInterface in interfaceTypes)
+        {
+            if (string.IsNullOrWhiteSpace(implementedInterface))
+            {
+                continue;
+            }
+
+            var simple = GetTopLevelSimpleIdentifier(implementedInterface);
+            if (!simple.Equals("IRequest", StringComparison.OrdinalIgnoreCase) &&
+                !simple.Equals("IAsyncRequest", StringComparison.OrdinalIgnoreCase) &&
+                !simple.Equals("IRequest`1", StringComparison.OrdinalIgnoreCase) &&
+                !simple.Equals("IAsyncRequest`1", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var genericArguments = SplitGenericArguments(implementedInterface);
+            if (genericArguments.Count == 0)
+            {
+                continue;
+            }
+
+            var responseCandidate = genericArguments[^1].Trim();
+            if (string.IsNullOrWhiteSpace(responseCandidate))
+            {
+                continue;
+            }
+
+            var qualified = QualifyTypeName(responseCandidate, preferredAssembly, preferredProject);
+            if (string.IsNullOrWhiteSpace(qualified))
+            {
+                qualified = responseCandidate;
+            }
+
+            if (IsGenericPlaceholder(qualified))
+            {
+                continue;
+            }
+
+            return qualified;
+        }
+
+        return null;
+    }
+
+    private static bool IsLikelyInterfaceType(string typeName)
+    {
+        var simple = GetTopLevelSimpleIdentifier(typeName);
+        return !string.IsNullOrWhiteSpace(simple) &&
+               simple.Length > 1 &&
+               simple[0] == 'I' &&
+               char.IsUpper(simple[1]);
+    }
+
     private static bool ExtendsType(ClassDeclarationSyntax typeDeclaration, string typeName)
         => typeDeclaration.BaseList?.Types.Any(t => t.Type.ToString().EndsWith(typeName, StringComparison.Ordinal)) == true;
 
@@ -614,15 +743,18 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-
-        if (fieldTypes.Values.Any(v => v.Type.Contains("HttpClient", StringComparison.Ordinal)))
+        var hasHttpClientField = fieldTypes.Values.Any(v => v.Type.Contains("HttpClient", StringComparison.Ordinal));
+        if (hasHttpClientField)
         {
             return true;
         }
 
-        if (fieldTypes.Values.Any(v =>
-                v.Type.Contains("IOAuthClient", StringComparison.Ordinal) ||
-                v.Type.Contains("IDataGetService", StringComparison.Ordinal)))
+        var hasWrapperInvocation = HasHttpWrapperInvocation(typeDeclaration);
+        var hasAlternateHttpDependency = fieldTypes.Values.Any(v =>
+            v.Type.Contains("IOAuthClient", StringComparison.Ordinal) ||
+            v.Type.Contains("IDataGetService", StringComparison.Ordinal));
+
+        if (hasAlternateHttpDependency && hasWrapperInvocation)
         {
             return true;
         }
@@ -632,9 +764,84 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
-        return typeDeclaration.DescendantNodes()
-            .OfType<ObjectCreationExpressionSyntax>()
+        if (!hasWrapperInvocation)
+        {
+            return false;
+        }
+
+        return Descendants<ObjectCreationExpressionSyntax>(typeDeclaration)
             .Any(creation => creation.Type.ToString().EndsWith("UrlBuilder", StringComparison.Ordinal));
+    }
+
+    private static bool HasHttpWrapperInvocation(ClassDeclarationSyntax typeDeclaration)
+    {
+        var hasUrlBuilder = Descendants<ObjectCreationExpressionSyntax>(typeDeclaration)
+            .Any(creation => creation.Type.ToString().EndsWith("UrlBuilder", StringComparison.Ordinal));
+
+        foreach (var invocation in Descendants<InvocationExpressionSyntax>(typeDeclaration))
+        {
+            var methodName = GetInvocationIdentifier(invocation.Expression);
+            if (string.IsNullOrWhiteSpace(methodName))
+            {
+                continue;
+            }
+
+            if (!IsLikelyHttpWrapperName(methodName!))
+            {
+                continue;
+            }
+
+            if (InvocationHasRouteCandidate(invocation, hasUrlBuilder))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool InvocationHasRouteCandidate(InvocationExpressionSyntax invocation, bool hasUrlBuilder)
+    {
+        var arguments = invocation.ArgumentList.Arguments;
+        if (arguments.Count == 0)
+        {
+            return false;
+        }
+
+        var limit = Math.Min(arguments.Count, 2);
+        for (var i = 0; i < limit; i++)
+        {
+            if (LooksLikeRouteExpression(arguments[i].Expression))
+            {
+                return true;
+            }
+        }
+
+        if (!hasUrlBuilder || arguments.Count <= 1)
+        {
+            return false;
+        }
+
+        var secondArgument = arguments[1].Expression;
+        return secondArgument is IdentifierNameSyntax
+            or InvocationExpressionSyntax
+            or MemberAccessExpressionSyntax
+            or ObjectCreationExpressionSyntax;
+    }
+
+    private static bool LooksLikeRouteExpression(ExpressionSyntax expression)
+    {
+        return expression switch
+        {
+            LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression)
+                => literal.Token.ValueText.Contains("/", StringComparison.Ordinal) ||
+                   literal.Token.ValueText.StartsWith("http", StringComparison.OrdinalIgnoreCase),
+            InterpolatedStringExpressionSyntax interpolated
+                => interpolated.Contents
+                    .OfType<InterpolatedStringTextSyntax>()
+                    .Any(content => content.TextToken.ValueText.Contains("/", StringComparison.Ordinal)),
+            _ => false
+        };
     }
 
     private static bool IsEntity(ClassDeclarationSyntax classDeclaration)
@@ -684,12 +891,29 @@ public sealed partial class ProjectAnalyzer
 
     private static bool IsPublisher(ClassDeclarationSyntax classDeclaration, IReadOnlyDictionary<string, FieldDescriptor> fieldTypes)
     {
-        if (!classDeclaration.Identifier.Text.EndsWith("Publisher", StringComparison.Ordinal))
+        var nameEndsWithPublisher = classDeclaration.Identifier.Text.EndsWith("Publisher", StringComparison.Ordinal);
+        var hasPublisherField = fieldTypes.Values.Any(v => v.Type.Contains("Publisher", StringComparison.OrdinalIgnoreCase) || v.Type.Contains("ServiceBus", StringComparison.OrdinalIgnoreCase));
+        var implementsPublisherInterface = classDeclaration.BaseList?.Types.Any(t => t.Type.ToString().Contains("Publisher", StringComparison.OrdinalIgnoreCase)) == true;
+        var hasPublishMethod = classDeclaration.Members
+            .OfType<MethodDeclarationSyntax>()
+            .Any(m => m.Identifier.Text.StartsWith("Publish", StringComparison.OrdinalIgnoreCase));
+
+        if (nameEndsWithPublisher && (hasPublisherField || hasPublishMethod || implementsPublisherInterface))
         {
-            return false;
+            return true;
         }
 
-        return fieldTypes.Values.Any(v => v.Type.Contains("ServiceBus", StringComparison.Ordinal));
+        if (implementsPublisherInterface && hasPublishMethod)
+        {
+            return true;
+        }
+
+        if (hasPublisherField && hasPublishMethod)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsBackgroundService(ClassDeclarationSyntax classDeclaration)

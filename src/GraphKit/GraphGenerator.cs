@@ -15,23 +15,29 @@ public sealed class GraphGenerator
         var projects = await loader.LoadAsync(cancellationToken); // process all solutions/projects without filtering
     Console.WriteLine($"[graph] Loaded {projects.Count} projects. Memory={GC.GetTotalMemory(false)/1024/1024:F1}MB");
 
+        var fingerprints = await ProjectFingerprint.ComputeAsync(projects, options.WorkspacePath, cancellationToken);
+        var cacheManager = new WorkspaceCacheManager(options.WorkspacePath, options.OutputDirectory);
+        var outputWriter = new GraphOutputWriter(options.WorkspacePath, options.OutputDirectory);
+        var cachedDocument = await cacheManager.TryLoadCachedDocumentAsync(AnalyzerVersion, fingerprints, cancellationToken);
+        if (cachedDocument is not null)
+        {
+            Console.WriteLine("[graph] Cache hit. Skipping analysis and reusing existing graph.");
+            await outputWriter.WriteAsync(cachedDocument, AnalyzerVersion, cancellationToken);
+            return cachedDocument;
+        }
+
         var analyzer = new ProjectAnalyzer(options.WorkspacePath);
-        foreach (var project in projects)
+        await Parallel.ForEachAsync(projects, cancellationToken, async (project, ct) =>
         {
             await analyzer.AnalyzeProjectAsync(project, cancellationToken);
-            Console.WriteLine($"[graph] Analyzed project {project.AssemblyName} ({project.SourceFiles.Count} files). Nodes={analyzer.NodeCount} Edges={analyzer.EdgeCount} Mem={GC.GetTotalMemory(false)/1024/1024:F1}MB");
-            // Opportunistic GC hint (non-filtering, full fidelity retained)
-            if ((project.SourceFiles?.Count ?? 0) > 250)
-            {
-                GC.Collect();
-            }
-        }
+            Console.WriteLine($"[graph] Analyzed project {project.AssemblyName} ({project.SourceFiles.Count} files). Nodes={analyzer.NodeCount} Edges={analyzer.EdgeCount} Mem={GC.GetTotalMemory(false) / 1024 / 1024:F1}MB");
+        });
 
         var document = analyzer.BuildDocument(AnalyzerVersion);
     Console.WriteLine($"[graph] Built document. Nodes={document.Nodes.Count} Edges={document.Edges.Count} Mem={GC.GetTotalMemory(false)/1024/1024:F1}MB");
 
-        var outputWriter = new GraphOutputWriter(options.WorkspacePath, options.OutputDirectory);
         await outputWriter.WriteAsync(document, AnalyzerVersion, cancellationToken);
+        await cacheManager.SaveAsync(AnalyzerVersion, document, fingerprints, cancellationToken);
 
         return document;
     }

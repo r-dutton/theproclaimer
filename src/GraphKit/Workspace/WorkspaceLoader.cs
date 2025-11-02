@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Xml.Linq;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace GraphKit.Workspace;
 
@@ -87,12 +90,26 @@ public sealed class WorkspaceLoader
             }
         }
 
-        var results = new List<ProjectInfo>();
-        foreach (var projectPath in projectPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        if (projectPaths.Count == 0)
         {
+            return Array.Empty<ProjectInfo>();
+        }
+
+        var bag = new ConcurrentBag<ProjectInfo>();
+        var parallelOptions = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1)
+        };
+
+        Parallel.ForEach(projectPaths, parallelOptions, projectPath =>
+        {
+            parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+
             var projectDir = Path.GetDirectoryName(projectPath)!;
             var relativeDir = Path.GetRelativePath(_workspaceRoot, projectDir).Replace('\\', '/');
-            var projectXml = XDocument.Load(projectPath);
+            using var stream = File.OpenRead(projectPath);
+            var projectXml = XDocument.Load(stream);
             var ns = projectXml.Root?.Name.Namespace ?? XNamespace.None;
             var assemblyName = projectXml.Root?
                 .Elements(ns + "PropertyGroup")
@@ -106,21 +123,89 @@ public sealed class WorkspaceLoader
                 .Select(e => e.Value)
                 .FirstOrDefault() ?? assemblyName;
 
-            var files = Directory
-                .EnumerateFiles(projectDir, "*.cs", SearchOption.AllDirectories)
-                .Where(path => !path.Contains("/bin/") && !path.Contains("/obj/"))
-                .Select(path => Path.GetFullPath(path))
+            var files = EnumerateSourceFiles(projectDir)
+                .Select(Path.GetFullPath)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            results.Add(new ProjectInfo(
+            bag.Add(new ProjectInfo(
                 projectPath,
                 assemblyName,
                 rootNamespace,
                 relativeDir,
                 files));
+        });
+
+        return bag
+            .OrderBy(p => p.ProjectPath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<string> EnumerateSourceFiles(string projectDirectory)
+    {
+        var stack = new Stack<string>();
+        stack.Push(projectDirectory);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(current, "*.cs", SearchOption.TopDirectoryOnly);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                yield return file;
+            }
+
+            IEnumerable<string> directories;
+            try
+            {
+                directories = Directory.EnumerateDirectories(current);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var directory in directories)
+            {
+                var name = Path.GetFileName(directory);
+                if (IsIgnoredDirectory(name))
+                {
+                    continue;
+                }
+
+                stack.Push(directory);
+            }
+        }
+    }
+
+    private static bool IsIgnoredDirectory(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
         }
 
-        return results;
+        return name.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("obj", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals(".git", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals(".vs", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("node_modules", StringComparison.OrdinalIgnoreCase);
     }
 }

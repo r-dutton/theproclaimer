@@ -50,7 +50,7 @@ public sealed partial class ProjectAnalyzer
                 .ToDictionary(p => p.Identifier.Text, p => p.Type?.ToString(), StringComparer.OrdinalIgnoreCase);
 
             var localVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var local in method.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            foreach (var local in Descendants<LocalDeclarationStatementSyntax>(method))
             {
                 var declaredType = local.Declaration.Type.ToString();
                 foreach (var variable in local.Declaration.Variables)
@@ -66,7 +66,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var memberAccess in method.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            foreach (var memberAccess in Descendants<MemberAccessExpressionSyntax>(method))
             {
                 if (memberAccess.Expression is not IdentifierNameSyntax identifier)
                 {
@@ -146,7 +146,7 @@ public sealed partial class ProjectAnalyzer
                             var requestType = argument switch
                             {
                                 ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                                IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                                IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables, project.AssemblyName, project.RelativeDirectory, fieldLookup),
                                 _ => null
                             };
 
@@ -162,7 +162,7 @@ public sealed partial class ProjectAnalyzer
                             var notification = argument switch
                             {
                                 ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
-                                IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables),
+                                IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, localVariables, project.AssemblyName, project.RelativeDirectory, fieldLookup),
                                 _ => null
                             };
 
@@ -187,7 +187,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var elementAccess in method.DescendantNodes().OfType<ElementAccessExpressionSyntax>())
+            foreach (var elementAccess in Descendants<ElementAccessExpressionSyntax>(method))
             {
                 if (elementAccess.Expression is not IdentifierNameSyntax identifier)
                 {
@@ -212,7 +212,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
                 if (invocation.Expression is not MemberAccessExpressionSyntax extensionAccess)
                 {
@@ -222,7 +222,7 @@ public sealed partial class ProjectAnalyzer
                 if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
                 {
                     var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup, project.AssemblyName, project.RelativeDirectory);
                     if (!string.IsNullOrWhiteSpace(destination))
                     {
                         var line = GetLineNumber(tree, invocation);
@@ -232,7 +232,7 @@ public sealed partial class ProjectAnalyzer
                 else if (extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectByIdAsync" } projectById)
                 {
                     var destination = projectById.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup);
+                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup, project.AssemblyName, project.RelativeDirectory);
                     if (!string.IsNullOrWhiteSpace(destination))
                     {
                         var line = GetLineNumber(tree, invocation);
@@ -486,7 +486,7 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var request in handler.RequestInvocations)
             {
-                var requestInfo = FindRequestByType(request.RequestType);
+                var requestInfo = FindRequestByType(request.RequestType, preferredAssembly: handler.Assembly, preferredProject: handler.Project);
                 if (requestInfo is null)
                 {
                     continue;
