@@ -140,6 +140,7 @@ public sealed partial class ProjectAnalyzer
         var nodes = _nodes.Values.ToList();
         var edges = _edges.ToList();
         edges = ResolveDeferredRequestDispatches(nodes, edges);
+        AnnotateEdgeMetadata(edges);
 
         return new GraphDocument
         {
@@ -300,6 +301,108 @@ public sealed partial class ProjectAnalyzer
         }
 
         return updatedEdges;
+    }
+
+
+    private static void AnnotateEdgeMetadata(IList<GraphEdge> edges)
+    {
+        if (edges.Count == 0)
+        {
+            return;
+        }
+
+        for (var index = 0; index < edges.Count; index++)
+        {
+            var edge = edges[index];
+            var existingProps = edge.Props;
+            Dictionary<string, object>? propsCopy = null;
+
+            if (existingProps is null || !existingProps.ContainsKey("provenance"))
+            {
+                propsCopy ??= existingProps is null
+                    ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, object>(existingProps, StringComparer.OrdinalIgnoreCase);
+                propsCopy["provenance"] = DetermineEdgeProvenance(edge);
+            }
+
+            if (existingProps is null || !existingProps.ContainsKey("confidence"))
+            {
+                propsCopy ??= existingProps is null
+                    ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, object>(existingProps, StringComparer.OrdinalIgnoreCase);
+                propsCopy["confidence"] = DetermineEdgeConfidence(edge);
+            }
+
+            if (propsCopy is not null)
+            {
+                edges[index] = new GraphEdge
+                {
+                    From = edge.From,
+                    To = edge.To,
+                    Kind = edge.Kind,
+                    Source = edge.Source,
+                    Confidence = edge.Confidence,
+                    Transform = edge.Transform,
+                    Props = propsCopy,
+                    Evidence = edge.Evidence
+                };
+            }
+        }
+    }
+
+    private static string DetermineEdgeProvenance(GraphEdge edge)
+    {
+        if (edge.Props is { } props && props.TryGetValue("provenance", out var existing) && existing is string existingStr && !string.IsNullOrWhiteSpace(existingStr))
+        {
+            return existingStr;
+        }
+
+        if (string.Equals(edge.Source, "synthetic", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Linker";
+        }
+
+        var transformType = edge.Transform?.Type ?? string.Empty;
+        if (transformType.Contains("mediatr", StringComparison.OrdinalIgnoreCase) ||
+            transformType.Contains("message", StringComparison.OrdinalIgnoreCase) ||
+            transformType.Contains("httpclient", StringComparison.OrdinalIgnoreCase) ||
+            transformType.Contains("pipeline", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Interprocedural";
+        }
+
+        if (edge.Kind is "uses_client" or "uses_cache" or "uses_options" or "uses_configuration")
+        {
+            return "Static";
+        }
+
+        return "Static";
+    }
+
+    private static string DetermineEdgeConfidence(GraphEdge edge)
+    {
+        if (edge.Props is { } props && props.TryGetValue("confidence", out var existing) && existing is string existingStr && !string.IsNullOrWhiteSpace(existingStr))
+        {
+            return existingStr;
+        }
+
+        var magnitude = edge.Confidence;
+        if (magnitude >= 0.9)
+        {
+            return "High";
+        }
+
+        if (magnitude >= 0.6)
+        {
+            return "Medium";
+        }
+
+        if (string.Equals(edge.Source, "synthetic", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Medium";
+        }
+
+        return "Low";
     }
 
 
