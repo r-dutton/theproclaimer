@@ -26,6 +26,24 @@ public sealed partial class ProjectAnalyzer
         return id;
     }
 
+    private string EnsureMinimalEndpointFactNode(MinimalEndpointInfo endpoint)
+    {
+        var id = StableId.For("endpoint.minimal_api", endpoint.Fqdn, endpoint.Assembly, endpoint.SymbolId);
+        var props = new Dictionary<string, object?>
+        {
+            ["name"] = endpoint.Name,
+            ["fqdn"] = endpoint.Fqdn,
+            ["assembly"] = endpoint.Assembly,
+            ["project"] = endpoint.Project,
+            ["route"] = endpoint.Route,
+            ["http_method"] = endpoint.HttpMethod,
+            ["verb"] = endpoint.HttpMethod,
+            ["symbol_id"] = endpoint.SymbolId
+        };
+        _facts.AddNode(new NodeFact(id, "endpoint.minimal_api", props));
+        return id;
+    }
+
     private string EnsureRequestFactNode(string requestType, RequestInfo? info, string? assemblyHint, string? projectHint)
     {
         var fqdn = info?.Fqdn ?? requestType;
@@ -478,7 +496,7 @@ public sealed partial class ProjectAnalyzer
 
     private string EnsureNotificationHandlerFactNode(NotificationHandlerInfo handler)
     {
-        var id = StableId.For("notification.handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
+        var id = StableId.For("cqrs.notification_handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
         var props = new Dictionary<string, object?>
         {
             ["name"] = handler.Name,
@@ -488,7 +506,7 @@ public sealed partial class ProjectAnalyzer
             ["notification_type"] = handler.NotificationType,
             ["symbol_id"] = handler.SymbolId
         };
-        _facts.AddNode(new NodeFact(id, "notification.handler", props));
+        _facts.AddNode(new NodeFact(id, "cqrs.notification_handler", props));
         return id;
     }
 

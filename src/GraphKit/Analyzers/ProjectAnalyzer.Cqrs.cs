@@ -629,6 +629,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var request in _requests.Values)
         {
+            EnsureRequestFactNode(request.Fqdn, request, request.Assembly, request.Project);
             var id = StableId.For("cqrs.request", request.Fqdn, request.Assembly, request.SymbolId);
             _nodes[id] = new GraphNode
             {
@@ -650,6 +651,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var handler in _handlers.Values)
         {
+            EnsureHandlerFactNode(handler);
             var id = StableId.For("cqrs.handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
             Dictionary<string, object>? handlerProps = null;
             if (handler.LogInvocations.Count > 0)

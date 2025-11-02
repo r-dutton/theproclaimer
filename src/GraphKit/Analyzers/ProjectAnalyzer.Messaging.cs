@@ -354,6 +354,7 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var publisher in _publishers.Values)
         {
+            EnsurePublisherFactNode(publisher.Fqdn, publisher.Assembly, publisher.Project);
             var id = StableId.For("message.publisher", publisher.Fqdn, publisher.Assembly, publisher.SymbolId);
             _nodes[id] = new GraphNode
             {
@@ -424,6 +425,7 @@ public sealed partial class ProjectAnalyzer
 
                 var contract = ResolveMessageContract(call.MessageType!);
                 var contractId = StableId.For("message.contract", contract.Fqdn, contract.Assembly, contract.SymbolId);
+                EnsureMessageContractFactNode(contract.Fqdn);
 
                 if (createdContracts.Add(contractId))
                 {

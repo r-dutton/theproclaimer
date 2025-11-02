@@ -191,6 +191,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var client in _httpClients.Values)
         {
+            EnsureHttpClientFactNode(client.Fqdn);
             HttpClientBaseAddress? effectiveAddress = null;
             if (_httpClientBaseUrls.TryGetValue(client.Fqdn, out var fqdnAddress))
             {

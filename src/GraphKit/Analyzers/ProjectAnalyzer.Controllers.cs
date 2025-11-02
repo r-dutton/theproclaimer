@@ -1552,6 +1552,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var action in _controllerActions.Values)
         {
+            EnsureControllerFactNode(action);
             var id = StableId.For("endpoint.controller", action.Fqdn, action.Assembly, action.SymbolId);
             var nodeProps = new Dictionary<string, object>
             {
@@ -3077,6 +3078,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var endpoint in _minimalEndpoints.Values)
         {
+            EnsureMinimalEndpointFactNode(endpoint);
             var id = StableId.For("endpoint.minimal_api", endpoint.Fqdn, endpoint.Assembly, endpoint.SymbolId);
             var props = new Dictionary<string, object>
             {

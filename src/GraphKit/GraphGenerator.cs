@@ -1,6 +1,9 @@
+using System.IO;
 using GraphKit.Analyzers;
+using GraphKit.Facts;
 using GraphKit.Graph;
 using GraphKit.Outputs;
+using GraphKit.Outputs.Facts;
 using GraphKit.Workspace;
 
 namespace GraphKit;
@@ -26,7 +29,8 @@ public sealed class GraphGenerator
             return cachedDocument;
         }
 
-        var analyzer = new ProjectAnalyzer(options.WorkspacePath);
+        var factWriter = new FactWriter();
+        var analyzer = new ProjectAnalyzer(options.WorkspacePath, factWriter);
         await Parallel.ForEachAsync(projects, cancellationToken, async (project, ct) =>
         {
             await analyzer.AnalyzeProjectAsync(project, cancellationToken);
@@ -35,6 +39,11 @@ public sealed class GraphGenerator
 
         var document = analyzer.BuildDocument(AnalyzerVersion);
     Console.WriteLine($"[graph] Built document. Nodes={document.Nodes.Count} Edges={document.Edges.Count} Mem={GC.GetTotalMemory(false)/1024/1024:F1}MB");
+
+        var factBag = FactsPipeline.Finalize(factWriter);
+        var factsOutputDirectory = Path.GetFullPath(Path.Combine(options.WorkspacePath, options.OutputDirectory));
+        var factsPath = Path.Combine(factsOutputDirectory, "facts.json");
+        FactsJsonWriter.Write(factBag, factsPath);
 
         await outputWriter.WriteAsync(document, AnalyzerVersion, cancellationToken);
         await cacheManager.SaveAsync(AnalyzerVersion, document, fingerprints, cancellationToken);

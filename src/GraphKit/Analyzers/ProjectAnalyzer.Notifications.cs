@@ -291,6 +291,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var notification in _notifications.Values)
         {
+            EnsureNotificationFactNode(notification);
             var id = StableId.For("cqrs.notification", notification.Fqdn, notification.Assembly, notification.SymbolId);
             _nodes[id] = new GraphNode
             {
@@ -316,6 +317,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var handler in _notificationHandlers.Values)
         {
+            EnsureNotificationHandlerFactNode(handler);
             var id = StableId.For("cqrs.notification_handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
             _nodes[id] = new GraphNode
             {

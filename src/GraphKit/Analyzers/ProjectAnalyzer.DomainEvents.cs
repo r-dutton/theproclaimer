@@ -485,6 +485,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var handler in _domainEventHandlers.Values)
         {
+            EnsureDomainEventHandlerFactNode(handler);
             var id = StableId.For("domain.event_handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
             _nodes[id] = new GraphNode
             {
