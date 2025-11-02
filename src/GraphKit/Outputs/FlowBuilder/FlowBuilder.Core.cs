@@ -652,4 +652,70 @@ public static partial class FlowBuilder
             index);
     }
 
+    internal static GraphNode? PreferControllerRootServiceNode(FlowRenderState state, GraphNode serviceNode)
+    {
+        if (state is null || serviceNode is null)
+        {
+            return serviceNode;
+        }
+
+        var controllerRoot = state.ControllerRoot;
+        if (string.IsNullOrWhiteSpace(controllerRoot))
+        {
+            return serviceNode;
+        }
+
+        static string? ExtractAssemblyRoot(GraphNode node)
+            => string.IsNullOrWhiteSpace(node.Assembly) ? null : Utilities.GetAssemblyRoot(node.Assembly);
+
+        var candidateRoot = ExtractAssemblyRoot(serviceNode);
+        if (!string.IsNullOrWhiteSpace(candidateRoot) &&
+            string.Equals(candidateRoot, controllerRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return serviceNode;
+        }
+
+        GraphNode? Match(IEnumerable<GraphNode> candidates)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (!string.Equals(candidate.Type, serviceNode.Type, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var root = ExtractAssemblyRoot(candidate);
+                if (!string.IsNullOrWhiteSpace(root) &&
+                    string.Equals(root, controllerRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(serviceNode.Name) &&
+            state.NodesByName.TryGetValue(serviceNode.Name, out var nameMatches))
+        {
+            var match = Match(nameMatches);
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(serviceNode.Fqdn) &&
+            state.NodesByFqdn.TryGetValue(serviceNode.Fqdn, out var fqdnMatches))
+        {
+            var match = Match(fqdnMatches);
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        return serviceNode;
+    }
+
 }

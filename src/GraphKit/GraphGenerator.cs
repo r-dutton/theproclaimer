@@ -7,7 +7,7 @@ namespace GraphKit;
 
 public sealed class GraphGenerator
 {
-    private const string AnalyzerVersion = "0.1.0";
+    private const string AnalyzerVersion = "0.2.1";
 
     public async Task<GraphDocument> GenerateAsync(GraphGenerationOptions options, CancellationToken cancellationToken = default)
     {

@@ -316,10 +316,10 @@ namespace GraphKit.Outputs
                 return true;
             if (name is "IDistributedCache" || fqdn.Contains("Microsoft.Extensions.Caching.Distributed.IDistributedCache", StringComparison.Ordinal))
                 return true;
-            if (string.Equals(name, "IHttpContextAccessor", StringComparison.Ordinal) || fqdn.Contains("Microsoft.AspNetCore.Http.IHttpContextAccessor", StringComparison.Ordinal))
-                return true;
-            return false;
-        }
+        if (string.Equals(name, "IHttpContextAccessor", StringComparison.Ordinal) || fqdn.Contains("Microsoft.AspNetCore.Http.IHttpContextAccessor", StringComparison.Ordinal))
+            return true;
+        return false;
+    }
 
 
         public static bool EdgeMatchesMethod(string? invokedMethod, GraphEdge edge)
@@ -618,14 +618,19 @@ namespace GraphKit.Outputs
             state.CurrentImpact?.RecordRequest(GetDisplayName(command));
 
             // Pipeline behaviors / request processors (processed_by edges)
+            var printedPipeline = false;
             foreach (var pipelineEdge in edges.Where(e => e.Kind == "processed_by"))
             {
                 if (!state.NodesById.TryGetValue(pipelineEdge.To, out var behaviorNode))
                 {
                     continue;
                 }
-                if (!state.IsAllowedNode(behaviorNode.Id)) continue;
+                if (!state.IsAllowedNode(behaviorNode.Id))
+                {
+                    continue;
+                }
 
+                printedPipeline = true;
                 var stage = behaviorNode.Props is { } bProps && bProps.TryGetValue("stage", out var stageVal)
                     ? stageVal?.ToString()
                     : null;
@@ -638,29 +643,43 @@ namespace GraphKit.Outputs
                 state.CurrentImpact?.RecordPipelineBehavior(GetDisplayName(behaviorNode));
             }
 
-            // If no concrete pipeline edges, attempt to list generic pipeline behaviors (nodes tagged generic_request)
-            if (!edges.Any(e => e.Kind == "processed_by"))
+            // If no concrete pipeline edges were emitted, attempt to list generic pipeline behaviors (nodes tagged generic_request)
+            if (!printedPipeline)
             {
                 var genericBehaviors = state.Document.Nodes
-                    .Where(n => n.Type == "cqrs.pipeline_behavior" && n.Props is { } p && p.TryGetValue("generic_request", out var gr) && gr is bool b && b)
+                    .Where(n => n.Type == "cqrs.pipeline_behavior" && n.Props is { } p && p.TryGetValue("generic_request", out var gr) && IsTruthy(gr))
                     .ToList();
+
                 if (genericBehaviors.Count > 0)
                 {
-                    var distinctBehaviors = genericBehaviors
-                        .GroupBy(n => GetDisplayName(n), StringComparer.OrdinalIgnoreCase)
-                        .Select(g => g.First())
-                        .OrderBy(n => GetDisplayName(n), StringComparer.OrdinalIgnoreCase)
+                    var relevantBehaviors = genericBehaviors
+                        .Where(n => string.IsNullOrWhiteSpace(state.ControllerRoot) || string.IsNullOrWhiteSpace(n.Assembly) ||
+                                    string.Equals(GetAssemblyRoot(n.Assembly), state.ControllerRoot, StringComparison.OrdinalIgnoreCase))
                         .ToList();
 
-                    AppendIndented(builder, indent, $"generic_pipeline_behaviors {distinctBehaviors.Count}");
-                    state.CurrentImpact?.RecordGenericPipelineBehaviors(distinctBehaviors.Count);
-                    foreach (var gb in distinctBehaviors.Take(5))
+                    if (relevantBehaviors.Count == 0)
                     {
-                        AppendIndented(builder, indent + 1, GetDisplayName(gb));
+                        relevantBehaviors = genericBehaviors;
                     }
-                    if (distinctBehaviors.Count > 5)
+
+                    if (relevantBehaviors.Count > 0)
                     {
-                        AppendIndented(builder, indent + 1, $"+{distinctBehaviors.Count - 5} more");
+                        var distinctBehaviors = relevantBehaviors
+                            .GroupBy(n => GetDisplayName(n), StringComparer.OrdinalIgnoreCase)
+                            .Select(g => g.First())
+                            .OrderBy(n => GetDisplayName(n), StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        AppendIndented(builder, indent, $"generic_pipeline_behaviors {distinctBehaviors.Count}");
+                        state.CurrentImpact?.RecordGenericPipelineBehaviors(distinctBehaviors.Count);
+                        foreach (var gb in distinctBehaviors.Take(5))
+                        {
+                            AppendIndented(builder, indent + 1, GetDisplayName(gb));
+                        }
+                        if (distinctBehaviors.Count > 5)
+                        {
+                            AppendIndented(builder, indent + 1, $"+{distinctBehaviors.Count - 5} more");
+                        }
                     }
                 }
             }
@@ -699,7 +718,17 @@ namespace GraphKit.Outputs
                 return node.Fqdn!;
             }
 
-            return node.Id;
+            return node.Id ?? "__unknown__";
+        }
+
+        private static bool IsTruthy(object? value)
+        {
+            return value switch
+            {
+                bool b => b,
+                string s when bool.TryParse(s, out var parsed) => parsed,
+                _ => false
+            };
         }
 
         public static string ExtractOperationLabel(GraphEdge edge)
@@ -1026,8 +1055,29 @@ namespace GraphKit.Outputs
 
         public static bool IsWithinCallerSolution(GraphNode caller, GraphNode candidate)
         {
-            var callerSolution = GetSolutionRoot(caller.Project);
-            var candidateSolution = GetSolutionRoot(candidate.Project);
+            string ExtractRoot(GraphNode node)
+            {
+                var solution = GetSolutionRoot(node.Project);
+                if (!string.IsNullOrWhiteSpace(solution))
+                {
+                    return solution;
+                }
+
+                if (!string.IsNullOrWhiteSpace(node.FilePath))
+                {
+                    var normalized = node.FilePath.Replace('\\', '/');
+                    var separatorIndex = normalized.IndexOf('/');
+                    if (separatorIndex > 0)
+                    {
+                        return normalized[..separatorIndex];
+                    }
+                }
+
+                return string.Empty;
+            }
+
+            var callerSolution = ExtractRoot(caller);
+            var candidateSolution = ExtractRoot(candidate);
 
             if (!string.IsNullOrWhiteSpace(callerSolution) && !string.IsNullOrWhiteSpace(candidateSolution))
             {
@@ -1071,18 +1121,23 @@ namespace GraphKit.Outputs
             // 2. Include if assembly roots match (likely same bounded context / solution segment).
             // 3. Exclude otherwise (likely external / framework / heuristic duplicate) to avoid noisy expansions.
 
-            var callerRoot = GetAssemblyRoot(caller.Assembly);
-            var implRoot = GetAssemblyRoot(implementation.Assembly);
-            var hasFile = !string.IsNullOrWhiteSpace(implementation.FilePath) && !implementation.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase);
-            if (!IsWithinCallerSolution(caller, implementation))
-            {
-                return false;
-            }
+        var callerRoot = GetAssemblyRoot(caller.Assembly);
+        var implRoot = GetAssemblyRoot(implementation.Assembly);
+        if (!IsWithinCallerSolution(caller, implementation))
+        {
+            return false;
+        }
 
-            if (hasFile)
-            {
-                return true;
-            }
+        var hasFile = !string.IsNullOrWhiteSpace(implementation.FilePath) && !implementation.FilePath.StartsWith("external:", StringComparison.OrdinalIgnoreCase);
+        if (hasFile)
+        {
+            return true;
+        }
+
+        if (!IsWithinCallerSolution(caller, implementation))
+        {
+            return false;
+        }
 
             if (string.Equals(callerRoot, implRoot, StringComparison.OrdinalIgnoreCase))
             {
@@ -1156,11 +1211,7 @@ namespace GraphKit.Outputs
                 var segment = segments[i];
                 if (segment.StartsWith("{", StringComparison.Ordinal) && segment.EndsWith("}", StringComparison.Ordinal))
                 {
-                    var colonIndex = segment.IndexOf(':');
-                    if (colonIndex > 0)
-                    {
-                        segment = segment[..colonIndex] + "}";
-                    }
+                    segment = "{*}";
                 }
 
                 var lowered = segment.ToLowerInvariant();

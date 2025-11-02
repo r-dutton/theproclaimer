@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -10,8 +11,42 @@ namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
-    private static string? ExtractStringValue(ExpressionSyntax expression)
+    private string RenderInterpolatedString(InterpolatedStringExpressionSyntax interpolated)
     {
+        var builder = new StringBuilder();
+        foreach (var content in interpolated.Contents)
+        {
+            switch (content)
+            {
+                case InterpolatedStringTextSyntax text:
+                    builder.Append(text.TextToken.ValueText);
+                    break;
+                case InterpolationSyntax interpolation:
+                    var evaluated = TryEvaluateStringConstant(interpolation.Expression);
+                    if (!string.IsNullOrWhiteSpace(evaluated))
+                    {
+                        builder.Append(evaluated);
+                    }
+                    else
+                    {
+                        builder.Append("{*}");
+                    }
+                    break;
+                default:
+                    builder.Append("{*}");
+                    break;
+            }
+        }
+        return builder.ToString();
+    }
+
+    private string? ExtractStringValue(ExpressionSyntax expression)
+    {
+        if (TryEvaluateStringConstant(expression) is { } evaluatedConstant)
+        {
+            return evaluatedConstant;
+        }
+
         switch (expression)
         {
             case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression):
@@ -19,11 +54,7 @@ public sealed partial class ProjectAnalyzer
             case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.NullLiteralExpression):
                 return null;
             case InterpolatedStringExpressionSyntax interpolated:
-                return string.Concat(interpolated.Contents.Select(content => content switch
-                {
-                    InterpolatedStringTextSyntax text => text.TextToken.ValueText,
-                    _ => "{*}"
-                }));
+                return RenderInterpolatedString(interpolated);
             case InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "nameof" } } nameofInvocation:
                 return nameofInvocation.ArgumentList?.Arguments.FirstOrDefault()?.Expression.ToString();
             default:
@@ -50,12 +81,7 @@ public sealed partial class ProjectAnalyzer
 
         if (expression is InterpolatedStringExpressionSyntax interpolated)
         {
-            var text = string.Concat(interpolated.Contents.Select(content => content switch
-            {
-                InterpolatedStringTextSyntax segment => segment.TextToken.ValueText,
-                _ => "{*}"
-            }));
-            return text;
+            return RenderInterpolatedString(interpolated);
         }
 
         var expressionText = expression.ToString();
@@ -110,6 +136,12 @@ public sealed partial class ProjectAnalyzer
             {
                 return NormalizeRoute(fullValue);
             }
+        }
+
+        if (expression is InterpolatedStringExpressionSyntax interpolated)
+        {
+            var rendered = RenderInterpolatedString(interpolated);
+            return NormalizeRoute(rendered);
         }
 
         return null;
@@ -185,18 +217,24 @@ public sealed partial class ProjectAnalyzer
         return Regex.Replace(normalized, "\\{[^}]+\\}", "{*}");
     }
 
-    private static string? ExtractRouteLiteral(SyntaxTree tree, ExpressionSyntax? expression)
+    private string? ExtractRouteLiteral(SyntaxTree tree, ExpressionSyntax? expression)
     {
+        if (expression is null)
+        {
+            return null;
+        }
+
+        if (TryEvaluateStringConstant(expression) is { } evaluated)
+        {
+            return NormalizeRoute(evaluated);
+        }
+
         switch (expression)
         {
             case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.StringLiteralExpression):
                 return NormalizeRoute(literal.Token.ValueText);
             case InterpolatedStringExpressionSyntax interpolated:
-                var text = string.Concat(interpolated.Contents.Select(content => content switch
-                {
-                    InterpolatedStringTextSyntax t => t.TextToken.ValueText,
-                    _ => "{*}"
-                }));
+                var text = RenderInterpolatedString(interpolated);
                 return NormalizeRoute(text);
             default:
                 return null;

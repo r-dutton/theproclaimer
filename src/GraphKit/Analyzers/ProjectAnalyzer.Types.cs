@@ -308,6 +308,22 @@ public sealed partial class ProjectAnalyzer
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
     }
 
+    private sealed record DomainEventInfo(string Fqdn, string Assembly, string? Project, string? FilePath, GraphSpan? Span, string SymbolId, string Name);
+
+    private sealed record DomainEventHandlerInfo(string Fqdn, string Assembly, string? Project, string? FilePath, GraphSpan? Span, string SymbolId, string Name, string EventType)
+    {
+        public List<NotificationHandlerRepositoryCall> RepositoryCalls { get; } = new();
+        public List<ServiceUsage> ServiceUsages { get; } = new();
+        public List<NotificationHandlerRequestInvocation> RequestInvocations { get; } = new();
+        public List<HandlerMapperCall> MapperCalls { get; } = new();
+        public List<HandlerNotificationPublication> PublishedNotifications { get; } = new();
+        public List<CacheInvocation> CacheInvocations { get; } = new();
+        public List<OptionsUsage> OptionsUsages { get; } = new();
+        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+    }
+
+    private sealed record DomainEventPublication(string PublisherType, string PublisherAssembly, string PublisherProject, string FilePath, string? MethodName, int Line, string EventType);
+
     private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
 
     private sealed record NotificationHandlerRequestInvocation(string RequestType, int Line);
@@ -340,5 +356,3 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record AuthorizationMetadata(List<EndpointAuthorization> Requirements, bool AllowsAnonymous);
 }
-
-

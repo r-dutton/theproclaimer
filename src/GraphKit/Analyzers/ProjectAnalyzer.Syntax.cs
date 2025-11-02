@@ -165,6 +165,11 @@ public sealed partial class ProjectAnalyzer
             RegisterNotification(project, tree, classDeclaration, namespaceName);
         }
 
+        if (ImplementsInterface(classDeclaration, "IDomainEvent"))
+        {
+            RegisterDomainEvent(project, tree, classDeclaration, namespaceName);
+        }
+
         if (IsPublisher(classDeclaration, fieldTypes))
         {
             AnalyzePublisher(project, tree, classDeclaration, namespaceName, fieldTypes);
@@ -199,6 +204,11 @@ public sealed partial class ProjectAnalyzer
         if (ImplementsInterface(classDeclaration, "INotificationHandler"))
         {
             AnalyzeNotificationHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
+        }
+
+        if (ImplementsInterface(classDeclaration, "IHandle") || ImplementsInterface(classDeclaration, "IHandleAsync"))
+        {
+            AnalyzeDomainEventHandler(project, tree, classDeclaration, namespaceName, fieldTypes);
         }
 
         if (IsRepository(classDeclaration))
@@ -248,6 +258,8 @@ public sealed partial class ProjectAnalyzer
         {
             _dtos[fqdn] = new DtoInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
         }
+
+        CaptureDomainEventPublications(project, tree, classDeclaration, namespaceName, fieldTypes);
     }
 
     private void AnalyzeStruct(ProjectInfo project, SyntaxTree tree, StructDeclarationSyntax structDeclaration, string? currentNamespace)

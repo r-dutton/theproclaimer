@@ -666,7 +666,7 @@ public sealed partial class ProjectAnalyzer
            name.Equals("SendRequest", StringComparison.Ordinal) ||
            name.Equals("SendRequestAsync", StringComparison.Ordinal);
 
-    private static string? TryResolveHttpMethod(ExpressionSyntax expression)
+    private string? TryResolveHttpMethod(ExpressionSyntax expression)
     {
         switch (expression)
         {

@@ -23,6 +23,10 @@ namespace GraphKit.Outputs
             string? clientMethodHint = ExtractProp(clientEdge, "method");
             string? clientVerbHint = ExtractProp(clientEdge, "verb");
             string? clientRouteHint = ExtractProp(clientEdge, "route");
+            if (string.IsNullOrWhiteSpace(clientRouteHint))
+            {
+                clientRouteHint = ExtractProp(clientEdge, "relative_path");
+            }
             string? clientTargetService = ExtractProp(clientEdge, "target_service");
             string? clientBaseUrl = ExtractProp(clientEdge, "base_url");
             string? clientConfigKey = ExtractProp(clientEdge, "configuration_key");
@@ -64,7 +68,8 @@ namespace GraphKit.Outputs
             headerDetails.Add($"target={clientTargetService}");
         }
 
-        var detailSuffix = headerDetails.Count > 0 ? $" ({string.Join(", ", headerDetails)})" : string.Empty;
+            var detailSuffix = headerDetails.Count > 0 ? $" ({string.Join(", ", headerDetails)})" : string.Empty;
+            state.NodesById.TryGetValue(clientEdge.From, out var callerNode);
 
             static bool IsHttpVerbCandidate(string? value)
             {
@@ -277,7 +282,7 @@ namespace GraphKit.Outputs
             foreach (var call in distinctCalls)
             {
                 var callEdge = call.Edge;
-                if (!state.NodesById.TryGetValue(callEdge.To, out var targetNode)) continue;
+                state.NodesById.TryGetValue(callEdge.To, out var targetNode);
                 var verb = call.Verb;
                 var route = call.Route;
                 var baseUrl = callEdge.Props is { } p3 && p3.TryGetValue("base_url", out var b) ? b?.ToString() : clientBaseUrl;
@@ -301,7 +306,10 @@ namespace GraphKit.Outputs
                 if (!string.IsNullOrWhiteSpace(targetService)) details.Add($"target={targetService}");
                 if (queryParams is { Count: > 0 }) details.Add($"query={string.Join('&', queryParams)}");
                 var detailText = details.Count > 0 ? $" ({string.Join(", ", details)})" : string.Empty;
-                var callLabel = $"calls {targetNode.Name}{detailText}";
+                var targetName = !string.IsNullOrWhiteSpace(targetNode?.Name)
+                    ? targetNode!.Name
+                    : (!string.IsNullOrWhiteSpace(clientNode.Name) ? clientNode.Name! : clientDisplay);
+                var callLabel = $"calls {targetName}{detailText}";
                 AppendIndented(builder, indent + 1, FormatLinkedCode(callLabel, callEdge.Transform?.Location));
                 var expKey = clientNode.Id + "::" + (targetService ?? "*") + "::" + (verb ?? "*") + "::" + (route ?? "*");
                 if (!state.HttpClientExpansionKeys.Add(expKey))
@@ -309,7 +317,15 @@ namespace GraphKit.Outputs
                     AppendIndented(builder, indent + 2, "remote_endpoint_expansion_suppressed (see previous expansion)");
                     continue;
                 }
-                AppendTargetServiceFlow(builder, state, callEdge, indent + 2, string.IsNullOrWhiteSpace(call.TargetService) ? clientTargetService : call.TargetService);
+
+                AppendTargetServiceFlow(
+                    builder,
+                    state,
+                    callEdge,
+                    indent + 2,
+                    string.IsNullOrWhiteSpace(call.TargetService) ? clientTargetService : call.TargetService,
+                    callerNode,
+                    targetNode);
             }
 
             // If we printed only the client usage and either there are no call edges or none include route/verb, annotate gap.
@@ -330,6 +346,15 @@ namespace GraphKit.Outputs
                 {
                     var metadataSuffix = $" [{string.Join(", ", metadataParts)}]";
                     AppendIndented(builder, indent + 1, $"remote_endpoint_summary (no downstream call edges captured){metadataSuffix}");
+
+                    // Metadata only; avoid forcing synthetic target expansion to prevent runaway flows.
+                    if (!string.IsNullOrWhiteSpace(clientTargetService))
+                    {
+                        var targetNote = string.IsNullOrWhiteSpace(clientRouteHint)
+                            ? $"target_service {clientTargetService} (metadata only)"
+                            : $"target_service {clientTargetService} (route_hint={clientRouteHint})";
+                        AppendIndented(builder, indent + 2, targetNote);
+                    }
                 }
                 else
                 {
@@ -421,7 +446,14 @@ namespace GraphKit.Outputs
             return props.TryGetValue(key, out var value) ? value?.ToString() : null;
         }
 
-        public static void AppendTargetServiceFlow(StringBuilder builder, FlowRenderState state, GraphEdge callEdge, int indent, string? fallbackTargetService = null)
+        public static void AppendTargetServiceFlow(
+            StringBuilder builder,
+            FlowRenderState state,
+            GraphEdge callEdge,
+            int indent,
+            string? fallbackTargetService = null,
+            GraphNode? callerNode = null,
+            GraphNode? targetNode = null)
         {
             if (state.Workspace is null)
             {
@@ -439,9 +471,7 @@ namespace GraphKit.Outputs
             var verb = GetProp("verb") ?? GetProp("method");
             var baseUrl = GetProp("base_url");
             var canonicalRoute = CanonicalizeRoute(route);
-            var routeForMatching = !string.IsNullOrWhiteSpace(canonicalRoute) && !canonicalRoute.Contains('*', StringComparison.Ordinal)
-                ? route
-                : null;
+            var routeForMatching = !string.IsNullOrWhiteSpace(canonicalRoute) ? route : null;
 
             var serviceName = props.TryGetValue("target_service", out var serviceValue) ? serviceValue?.ToString() : null;
 
@@ -528,6 +558,17 @@ namespace GraphKit.Outputs
                 ? set
                 : new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
 
+            var serviceRoot = assemblySet.FirstOrDefault() is { } firstAssembly
+                ? Utilities.GetAssemblyRoot(firstAssembly)
+                : string.Empty;
+            var controllerRoot = state.ControllerRoot ?? string.Empty;
+            var serviceNameRoot = Utilities.GetAssemblyRoot(serviceName ?? string.Empty);
+            var isExternal = !string.IsNullOrWhiteSpace(controllerRoot) && (
+                (!string.IsNullOrWhiteSpace(serviceNameRoot) &&
+                 !string.Equals(controllerRoot, serviceNameRoot, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(serviceRoot) &&
+                 !string.Equals(controllerRoot, serviceRoot, StringComparison.OrdinalIgnoreCase)));
+
             var keyRoute = routeForMatching ?? route ?? string.Empty;
             var key = $"{callEdge.From}->{serviceName}:{keyRoute}:{verb}";
             if (!state.TargetServiceVisited.Add(key))
@@ -544,6 +585,12 @@ namespace GraphKit.Outputs
             var targetHeader = string.IsNullOrWhiteSpace(host)
                 ? $"target_service {serviceName}"
                 : $"target_service {serviceName} (host={host})";
+            if (isExternal)
+            {
+                var callerRootText = string.IsNullOrWhiteSpace(controllerRoot) ? "<unknown>" : controllerRoot;
+                var targetRootText = string.IsNullOrWhiteSpace(serviceRoot) ? "<unknown>" : serviceRoot;
+                targetHeader += $" [cross_solution caller={callerRootText} target={targetRootText}]";
+            }
             AppendIndented(builder, indent, targetHeader);
 
             if (routeForMatching is null)
@@ -598,7 +645,21 @@ namespace GraphKit.Outputs
 
             foreach (var endpoint in matched)
             {
-                AppendEndpointFlow(builder, state, endpoint, indent + 1);
+                var originalRoot = state.ControllerRoot;
+                var endpointRoot = GetAssemblyRoot(endpoint.Assembly ?? string.Empty);
+                if (!string.IsNullOrWhiteSpace(endpointRoot))
+                {
+                    state.ControllerRoot = endpointRoot;
+                }
+
+                try
+                {
+                    AppendEndpointFlow(builder, state, endpoint, indent + 1);
+                }
+                finally
+                {
+                    state.ControllerRoot = originalRoot;
+                }
             }
         }
 
@@ -653,7 +714,9 @@ namespace GraphKit.Outputs
                 }
             }
 
-            return candidates;
+            return string.IsNullOrWhiteSpace(route) && string.IsNullOrWhiteSpace(verb)
+                ? candidates
+                : new List<GraphNode>();
         }
     }
 }

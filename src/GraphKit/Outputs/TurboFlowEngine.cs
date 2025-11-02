@@ -100,7 +100,23 @@ public sealed class TurboFlowEngine : IFlowEngine
             }
 
             var state = FlowBuilder.CreateState(flowIndex, workspace, maxDepth);
-            var reachableIds = CollectReachableIds(actionNodes, state.EdgesByFrom, maxDepth);
+            var controllerProjectRoot = Utilities.GetSolutionRoot(actionNodes[0].Project);
+            var controllerAssemblyRoot = Utilities.GetAssemblyRoot(actionNodes[0].Assembly);
+            if (string.IsNullOrWhiteSpace(controllerAssemblyRoot) && !string.IsNullOrWhiteSpace(controllerProjectRoot))
+            {
+                controllerAssemblyRoot = Utilities.GetAssemblyRoot(controllerProjectRoot);
+            }
+            var canonicalControllerRoot = !string.IsNullOrWhiteSpace(controllerAssemblyRoot)
+                ? controllerAssemblyRoot
+                : controllerProjectRoot;
+            state.ControllerRoot = canonicalControllerRoot;
+            var reachableIds = CollectReachableIds(
+                actionNodes,
+                state.EdgesByFrom,
+                state.NodesById,
+                controllerProjectRoot,
+                controllerAssemblyRoot,
+                maxDepth);
             allowedIds.UnionWith(reachableIds);
             state.AllowedIds = allowedIds;
 
@@ -118,6 +134,9 @@ public sealed class TurboFlowEngine : IFlowEngine
     private static HashSet<string> CollectReachableIds(
         IReadOnlyList<GraphNode> actionNodes,
         IReadOnlyDictionary<string, List<GraphEdge>> edgesByFrom,
+        IReadOnlyDictionary<string, GraphNode> nodesById,
+        string? controllerProjectRoot,
+        string? controllerAssemblyRoot,
         int? maxDepth)
     {
         var allowed = new HashSet<string>(StringComparer.Ordinal);
@@ -160,6 +179,16 @@ public sealed class TurboFlowEngine : IFlowEngine
                     continue;
                 }
 
+                if (!nodesById.TryGetValue(to, out var targetNode))
+                {
+                    continue;
+                }
+
+                if (!ShouldIncludeNode(controllerProjectRoot, controllerAssemblyRoot, targetNode))
+                {
+                    continue;
+                }
+
                 if (seen.Add(to))
                 {
                     queue.Enqueue((to, depth + 1));
@@ -168,6 +197,37 @@ public sealed class TurboFlowEngine : IFlowEngine
         }
 
         return allowed;
+    }
+
+    private static bool ShouldIncludeNode(string? controllerProjectRoot, string? controllerAssemblyRoot, GraphNode node)
+    {
+        if (node is null)
+        {
+            return true;
+        }
+
+        var nodeProjectRoot = Utilities.GetSolutionRoot(node.Project);
+        if (!string.IsNullOrWhiteSpace(controllerProjectRoot) && !string.IsNullOrWhiteSpace(nodeProjectRoot) &&
+            string.Equals(nodeProjectRoot, controllerProjectRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var nodeProjectAssemblyHint = Utilities.GetAssemblyRoot(nodeProjectRoot);
+        if (!string.IsNullOrWhiteSpace(controllerAssemblyRoot) && !string.IsNullOrWhiteSpace(nodeProjectAssemblyHint) &&
+            string.Equals(nodeProjectAssemblyHint, controllerAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var nodeAssemblyRoot = Utilities.GetAssemblyRoot(node.Assembly);
+        if (!string.IsNullOrWhiteSpace(controllerAssemblyRoot) && !string.IsNullOrWhiteSpace(nodeAssemblyRoot) &&
+            string.Equals(nodeAssemblyRoot, controllerAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.IsNullOrWhiteSpace(nodeProjectRoot) && string.IsNullOrWhiteSpace(nodeAssemblyRoot);
     }
 
     public string Build(

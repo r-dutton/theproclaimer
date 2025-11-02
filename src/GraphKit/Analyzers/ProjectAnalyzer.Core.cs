@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using GraphKit.Graph;
 using GraphKit.Workspace;
@@ -48,6 +49,9 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, ConcurrentBag<ControllerActionInfo>> _controllerRoutes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, NotificationInfo> _notifications = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, NotificationHandlerInfo> _notificationHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DomainEventInfo> _domainEvents = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DomainEventHandlerInfo> _domainEventHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentBag<DomainEventPublication> _domainEventPublications = new();
     private readonly ConcurrentDictionary<string, BackgroundServiceInfo> _backgroundServices = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, OptionsInfo> _options = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CacheInfo> _caches = new(StringComparer.OrdinalIgnoreCase);
@@ -100,11 +104,13 @@ public sealed partial class ProjectAnalyzer
 
         EmitRequests();
         EmitNotifications();
+        EmitDomainEvents();
         EmitOptions();
         EmitHandlers();
         EmitPipelineBehaviors();
         EmitRequestProcessors();
         EmitNotificationHandlers();
+        EmitDomainEventHandlers();
         EmitRepositories();
         EmitControllers();
         EmitMinimalEndpoints();
@@ -118,14 +124,16 @@ public sealed partial class ProjectAnalyzer
         EmitPublishers();
         EmitServices();
         EmitServiceRegistrations();
-    EmitHttpCalls();
-    // Deferred synthetic call edges derived from uses_client edges (for cross-solution linking restoration)
-    ClientLinker.EmitClientUseCallEdges(_nodes, _edges, _clientTargetServices);
+        EmitHttpCalls();
+        // Deferred synthetic call edges derived from uses_client edges (for cross-solution linking restoration)
+        ClientLinker.EmitClientUseCallEdges(_nodes, _edges, _clientTargetServices);
         EmitBackgroundServices();
+        EmitDomainEventPublications();
 
 
         var nodes = _nodes.Values.ToList();
         var edges = _edges.ToList();
+        edges = ResolveDeferredRequestDispatches(nodes, edges);
 
         return new GraphDocument
         {
@@ -135,6 +143,389 @@ public sealed partial class ProjectAnalyzer
         };
     }
 
+    private List<GraphEdge> ResolveDeferredRequestDispatches(IReadOnlyList<GraphNode> nodes, List<GraphEdge> edges)
+    {
+        if (edges.Count == 0)
+        {
+            return edges;
+        }
+
+        var nodesById = nodes
+            .Where(n => !string.IsNullOrWhiteSpace(n.Id))
+            .ToDictionary(n => n.Id, n => n, StringComparer.OrdinalIgnoreCase);
+
+        var nodesByFqdn = nodes
+            .Where(n => !string.IsNullOrWhiteSpace(n.Fqdn))
+            .GroupBy(n => n.Fqdn!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var preferredHandlers = new Dictionary<string, HandlerInfo>(StringComparer.OrdinalIgnoreCase);
+        var updatedEdges = new List<GraphEdge>(edges.Count);
+
+        foreach (var edge in edges)
+        {
+            Dictionary<string, object>? mutableProps = null;
+            var props = edge.Props;
+            bool changed = false;
+            var newTo = edge.To;
+
+            if (string.Equals(edge.Kind, "sends_request", StringComparison.OrdinalIgnoreCase))
+            {
+                var callerNode = nodesById.TryGetValue(edge.From, out var caller) ? caller : null;
+                var serviceType = TryGetString(props, "service");
+                var requestType = TryGetString(props, "request_type");
+                var requestInfo = ResolveRequestInfo(requestType, callerNode, serviceType);
+
+                if (requestInfo is not null)
+                {
+                    if (!string.Equals(requestType, requestInfo.Fqdn, StringComparison.OrdinalIgnoreCase))
+                    {
+                        mutableProps ??= CloneProps(props);
+                        mutableProps["request_type"] = requestInfo.Fqdn;
+                        changed = true;
+                    }
+
+                    var recordedResponse = TryGetString(props, "response_type");
+                    if (string.IsNullOrWhiteSpace(recordedResponse) &&
+                        !string.IsNullOrWhiteSpace(requestInfo.ResponseType) &&
+                        !IsGenericPlaceholder(requestInfo.ResponseType))
+                    {
+                        mutableProps ??= CloneProps(props);
+                        mutableProps["response_type"] = requestInfo.ResponseType!;
+                        changed = true;
+                    }
+
+                    requestType = requestInfo.Fqdn;
+
+                    if (!string.IsNullOrWhiteSpace(requestType))
+                    {
+                        var handler = ResolvePreferredHandler(requestType, callerNode, preferredHandlers);
+                        if (handler is not null)
+                        {
+                            _handlersByRequestType[requestType] = handler;
+                        }
+                    }
+                }
+            }
+            else if (string.Equals(edge.Kind, "handled_by", StringComparison.OrdinalIgnoreCase))
+            {
+                var fromNode = nodesById.TryGetValue(edge.From, out var caller) ? caller : null;
+                var requestType = TryGetString(props, "request_type");
+
+                if (string.IsNullOrWhiteSpace(requestType) && fromNode is not null && !string.IsNullOrWhiteSpace(fromNode.Fqdn))
+                {
+                    if (IsRequestNode(fromNode))
+                    {
+                        requestType = fromNode.Fqdn;
+                    }
+                }
+
+                RequestInfo? requestInfo = null;
+                if (!string.IsNullOrWhiteSpace(requestType))
+                {
+                    requestInfo = ResolveRequestInfo(requestType, caller, null);
+                    if (requestInfo is not null)
+                    {
+                        if (!string.Equals(requestType, requestInfo.Fqdn, StringComparison.OrdinalIgnoreCase))
+                        {
+                            mutableProps ??= CloneProps(props);
+                            mutableProps["request_type"] = requestInfo.Fqdn;
+                            changed = true;
+                        }
+                        requestType = requestInfo.Fqdn;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(requestType))
+                {
+                    var preferredHandler = ResolvePreferredHandler(requestType, caller, preferredHandlers);
+                    if (preferredHandler is not null)
+                    {
+                        _handlersByRequestType[requestType] = preferredHandler;
+
+                        var handlerNode = nodesByFqdn.TryGetValue(preferredHandler.Fqdn, out var node) ? node : null;
+                        if (handlerNode is not null && !string.Equals(edge.To, handlerNode.Id, StringComparison.OrdinalIgnoreCase))
+                        {
+                            newTo = handlerNode.Id;
+                            changed = true;
+                        }
+
+                        var handlerName = TryGetString(props, "handler");
+                        if (!string.Equals(handlerName, preferredHandler.Fqdn, StringComparison.OrdinalIgnoreCase))
+                        {
+                            mutableProps ??= CloneProps(props);
+                            mutableProps["handler"] = preferredHandler.Fqdn;
+                            changed = true;
+                        }
+
+                        var recordedResponse = TryGetString(props, "response_type");
+                        var handlerResponse = preferredHandler.ResponseType;
+                        if (string.IsNullOrWhiteSpace(recordedResponse) &&
+                            !string.IsNullOrWhiteSpace(handlerResponse) &&
+                            !IsGenericPlaceholder(handlerResponse))
+                        {
+                            mutableProps ??= CloneProps(props);
+                            mutableProps["response_type"] = handlerResponse!;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                var updatedEdge = new GraphEdge
+                {
+                    From = edge.From,
+                    To = newTo,
+                    Kind = edge.Kind,
+                    Source = edge.Source,
+                    Confidence = edge.Confidence,
+                    Transform = edge.Transform,
+                    Props = mutableProps ?? edge.Props,
+                    Evidence = edge.Evidence
+                };
+                updatedEdges.Add(updatedEdge);
+            }
+            else
+            {
+                updatedEdges.Add(edge);
+            }
+        }
+
+        return updatedEdges;
+    }
+
+
+    private static Dictionary<string, object> CloneProps(IReadOnlyDictionary<string, object>? original)
+    {
+        if (original is null || original.Count == 0)
+        {
+            return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var clone = new Dictionary<string, object>(original.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in original)
+        {
+            clone[kv.Key] = kv.Value;
+        }
+
+        return clone;
+    }
+
+    private static string? TryGetString(IReadOnlyDictionary<string, object>? source, string key)
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string s => s,
+            _ => value.ToString()
+        };
+    }
+
+    private static bool IsRequestNode(GraphNode node)
+        => !string.IsNullOrWhiteSpace(node.Type) &&
+           node.Type.Equals("cqrs.request", StringComparison.OrdinalIgnoreCase);
+
+    private RequestInfo? ResolveRequestInfo(string? requestType, GraphNode? callerNode, string? serviceType)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return null;
+        }
+
+        var preferredAssembly = callerNode?.Assembly;
+        var preferredProject = callerNode?.Project;
+        var simple = GetSimpleIdentifier(requestType);
+
+        var requestInfo = FindRequestByType(requestType, preferredAssembly, preferredProject, serviceType);
+        if (requestInfo is not null)
+        {
+            if (callerNode is not null && !string.IsNullOrWhiteSpace(callerNode.Assembly))
+            {
+                var callerRoot = GetAssemblyRoot(callerNode.Assembly);
+                if (!string.IsNullOrWhiteSpace(callerRoot))
+                {
+                    var requestRoot = GetAssemblyRoot(requestInfo.Assembly);
+                    if (!string.Equals(requestRoot, callerRoot, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var rootMatches = _requests.Values
+                            .Where(r => r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+                            .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+
+                        var preferred = SelectRequestCandidate(rootMatches, callerNode);
+                        if (preferred is not null)
+                        {
+                            return preferred;
+                        }
+                    }
+                }
+            }
+
+            return requestInfo;
+        }
+
+        var qualified = QualifyTypeName(requestType, preferredAssembly, preferredProject);
+        if (!string.Equals(qualified, requestType, StringComparison.OrdinalIgnoreCase))
+        {
+            requestInfo = FindRequestByType(qualified, preferredAssembly, preferredProject, serviceType);
+            if (requestInfo is not null)
+            {
+                return requestInfo;
+            }
+        }
+
+        var candidates = _requests.Values
+            .Where(r => r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        return SelectRequestCandidate(candidates, callerNode);
+    }
+
+    private HandlerInfo? ResolvePreferredHandler(string requestType, GraphNode? callerNode, IDictionary<string, HandlerInfo> cache)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return null;
+        }
+
+        if (cache.TryGetValue(requestType, out var cached))
+        {
+            return cached;
+        }
+
+        var candidates = _handlers.Values
+            .Where(h => h.RequestSignatures.Any(sig => sig.RequestType.Equals(requestType, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            var simple = GetSimpleIdentifier(requestType);
+            candidates = _handlers.Values
+                .Where(h => h.RequestSignatures.Any(sig => GetSimpleIdentifier(sig.RequestType).Equals(simple, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var nonTest = candidates.Where(c => !IsTestAssembly(c.Assembly)).ToList();
+        if (nonTest.Count > 0)
+        {
+            candidates = nonTest;
+        }
+
+        if (callerNode is not null && !string.IsNullOrWhiteSpace(callerNode.Assembly))
+        {
+            var callerRoot = GetAssemblyRoot(callerNode.Assembly);
+            if (!string.IsNullOrWhiteSpace(callerRoot))
+            {
+                var sameRoot = candidates
+                    .Where(c => string.Equals(GetAssemblyRoot(c.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (sameRoot.Count == 1)
+                {
+                    candidates = sameRoot;
+                }
+                else if (sameRoot.Count > 1)
+                {
+                    candidates = sameRoot;
+                }
+            }
+        }
+
+        var ordered = candidates
+            .OrderByDescending(c => !string.IsNullOrWhiteSpace(c.ResponseType) && !IsGenericPlaceholder(c.ResponseType))
+            .ThenBy(c => c.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var chosen = ordered.FirstOrDefault();
+        if (chosen is not null)
+        {
+            cache[requestType] = chosen;
+        }
+
+        return chosen;
+    }
+
+    private static bool IsTestAssembly(string? assemblyName)
+        => !string.IsNullOrWhiteSpace(assemblyName) &&
+           assemblyName.Contains(".Tests", StringComparison.OrdinalIgnoreCase);
+
+    private RequestInfo? SelectRequestCandidate(IReadOnlyList<RequestInfo> candidates, GraphNode? callerNode)
+    {
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var list = candidates.ToList();
+
+        if (callerNode is not null && !string.IsNullOrWhiteSpace(callerNode.Assembly))
+        {
+            var sameAssembly = list
+                .Where(r => string.Equals(r.Assembly, callerNode.Assembly, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (sameAssembly.Count == 1)
+            {
+                return sameAssembly[0];
+            }
+
+            if (sameAssembly.Count > 1)
+            {
+                list = sameAssembly;
+            }
+
+            var callerRoot = GetAssemblyRoot(callerNode.Assembly);
+            if (!string.IsNullOrWhiteSpace(callerRoot))
+            {
+                var sameRoot = list
+                    .Where(r => string.Equals(GetAssemblyRoot(r.Assembly), callerRoot, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (sameRoot.Count == 1)
+                {
+                    return sameRoot[0];
+                }
+
+                if (sameRoot.Count > 1)
+                {
+                    list = sameRoot;
+                }
+            }
+        }
+
+        var nonTest = list.Where(r => !IsTestAssembly(r.Assembly)).ToList();
+        if (nonTest.Count == 1)
+        {
+            return nonTest[0];
+        }
+
+        if (nonTest.Count > 1)
+        {
+            list = nonTest;
+        }
+
+        return list
+            .OrderBy(r => r.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
 
     private string GetRelativePath(string filePath)
         => Path.GetRelativePath(_workspaceRoot, filePath).Replace('\\', '/');

@@ -1616,7 +1616,7 @@ public sealed partial class ProjectAnalyzer
                             continue;
                         }
 
-                        if (TryResolveNodeReference(candidate!, out var reference))
+                        if (TryResolveNodeReference(candidate!, out var reference, action.Assembly, action.Project))
                         {
                             domainReference = reference;
                             break;
@@ -1739,7 +1739,7 @@ public sealed partial class ProjectAnalyzer
             {
                 NodeReference? repositoryReference = null;
                 if (!string.IsNullOrWhiteSpace(repository.RepositoryType) &&
-                    TryResolveNodeReference(repository.RepositoryType, out var directReference))
+                    TryResolveNodeReference(repository.RepositoryType, out var directReference, action.Assembly, action.Project))
                 {
                     repositoryReference = directReference;
                 }
@@ -1748,7 +1748,7 @@ public sealed partial class ProjectAnalyzer
                     var derivedRepositoryType = repository.EntityType.EndsWith("Repository", StringComparison.Ordinal)
                         ? repository.EntityType
                         : $"{repository.EntityType}Repository";
-                    if (TryResolveNodeReference(derivedRepositoryType, out var derivedReference))
+                    if (TryResolveNodeReference(derivedRepositoryType, out var derivedReference, action.Assembly, action.Project))
                     {
                         repositoryReference = derivedReference;
                     }
@@ -1780,7 +1780,7 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 if (!string.IsNullOrWhiteSpace(repository.EntityType) &&
-                    TryResolveNodeReference(repository.EntityType, out var entityReference))
+                    TryResolveNodeReference(repository.EntityType, out var entityReference, action.Assembly, action.Project))
                 {
                     var kind = repository.Operation switch
                     {
@@ -2044,7 +2044,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (!TryResolveNodeReference(mapping.DestinationType, out var destination))
+                if (!TryResolveNodeReference(mapping.DestinationType, out var destination, action.Assembly, action.Project))
                 {
                     continue;
                 }
@@ -2086,7 +2086,7 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(r => new { r.ResponseType, r.Variable, r.IsReturn })
                 .Select(group => group.OrderBy(r => r.Line).First()))
             {
-                if (!TryResolveNodeReference(response.ResponseType, out var responseNode))
+                if (!TryResolveNodeReference(response.ResponseType, out var responseNode, action.Assembly, action.Project))
                 {
                     continue;
                 }
@@ -2130,7 +2130,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (!TryResolveNodeReference(cast.DestinationType, out var destination))
+                if (!TryResolveNodeReference(cast.DestinationType, out var destination, action.Assembly, action.Project))
                 {
                     continue;
                 }

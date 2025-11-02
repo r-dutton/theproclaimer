@@ -39,9 +39,10 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private bool TryResolveNodeReference(string typeName, out NodeReference reference)
+    private bool TryResolveNodeReference(string typeName, out NodeReference reference, string? preferredAssembly = null, string? preferredProject = null)
     {
         var simple = GetSimpleIdentifier(typeName);
+        var typeAssemblyRoot = GetTypeAssemblyRoot(typeName);
 
         if (_dtos.TryGetValue(typeName, out var dto))
         {
@@ -50,7 +51,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_dtos.Values.FirstOrDefault(d => d.Name.Equals(simple, StringComparison.Ordinal)) is { } dtoFallback)
+        var dtoFallback = SelectBestCandidate(
+            _dtos.Values.Where(d => d.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            d => d.Assembly,
+            d => d.Project,
+            d => d.Fqdn);
+
+        if (dtoFallback is not null)
         {
             var id = StableId.For("dto", dtoFallback.Fqdn, dtoFallback.Assembly, dtoFallback.SymbolId);
             reference = new NodeReference(id, dtoFallback.FilePath, dtoFallback.Span);
@@ -64,7 +74,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_requests.Values.FirstOrDefault(r => r.Name.Equals(simple, StringComparison.Ordinal)) is { } requestFallback)
+        var requestFallback = SelectBestCandidate(
+            _requests.Values.Where(r => r.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            r => r.Assembly,
+            r => r.Project,
+            r => r.Fqdn);
+
+        if (requestFallback is not null)
         {
             var id = StableId.For("cqrs.request", requestFallback.Fqdn, requestFallback.Assembly, requestFallback.SymbolId);
             reference = new NodeReference(id, requestFallback.FilePath, requestFallback.Span);
@@ -78,7 +97,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_notifications.Values.FirstOrDefault(n => n.Name.Equals(simple, StringComparison.Ordinal)) is { } notificationFallback)
+        var notificationFallback = SelectBestCandidate(
+            _notifications.Values.Where(n => n.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            n => n.Assembly,
+            n => n.Project,
+            n => n.Fqdn);
+
+        if (notificationFallback is not null)
         {
             var id = StableId.For("cqrs.notification", notificationFallback.Fqdn, notificationFallback.Assembly, notificationFallback.SymbolId);
             reference = new NodeReference(id, notificationFallback.FilePath, notificationFallback.Span);
@@ -92,7 +120,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_entities.Values.FirstOrDefault(e => e.Name.Equals(simple, StringComparison.Ordinal)) is { } entityFallback)
+        var entityFallback = SelectBestCandidate(
+            _entities.Values.Where(e => e.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            e => e.Assembly,
+            e => e.Project,
+            e => e.Fqdn);
+
+        if (entityFallback is not null)
         {
             var id = StableId.For("ef.entity", entityFallback.Fqdn, entityFallback.Assembly, entityFallback.SymbolId);
             reference = new NodeReference(id, entityFallback.FilePath, entityFallback.Span);
@@ -106,9 +143,18 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_dbContexts.Values.FirstOrDefault(c =>
+        var contextFallback = SelectBestCandidate(
+            _dbContexts.Values.Where(c =>
                 c.Fqdn.Equals(typeName, StringComparison.OrdinalIgnoreCase) ||
-                c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)) is { } contextFallback)
+                c.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            c => c.Assembly,
+            c => c.Project,
+            c => c.Fqdn);
+
+        if (contextFallback is not null)
         {
             var id = StableId.For("ef.db_context", contextFallback.Fqdn, contextFallback.Assembly, contextFallback.SymbolId);
             reference = new NodeReference(id, contextFallback.FilePath, contextFallback.Span);
@@ -122,9 +168,18 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_backgroundServices.Values.FirstOrDefault(s =>
+        var backgroundFallback = SelectBestCandidate(
+            _backgroundServices.Values.Where(s =>
                 s.Fqdn.Equals(typeName, StringComparison.OrdinalIgnoreCase) ||
-                s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)) is { } backgroundFallback)
+                s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            s => s.Assembly,
+            s => s.Project,
+            s => s.Fqdn);
+
+        if (backgroundFallback is not null)
         {
             var id = StableId.For("app.background_service", backgroundFallback.Fqdn, backgroundFallback.Assembly, backgroundFallback.SymbolId);
             reference = new NodeReference(id, backgroundFallback.FilePath, backgroundFallback.Span);
@@ -138,7 +193,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_handlers.Values.FirstOrDefault(h => h.Name.Equals(simple, StringComparison.Ordinal)) is { } handlerFallback)
+        var handlerFallback = SelectBestCandidate(
+            _handlers.Values.Where(h => h.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            h => h.Assembly,
+            h => h.Project,
+            h => h.Fqdn);
+
+        if (handlerFallback is not null)
         {
             var id = StableId.For("cqrs.handler", handlerFallback.Fqdn, handlerFallback.Assembly, handlerFallback.SymbolId);
             reference = new NodeReference(id, handlerFallback.FilePath, handlerFallback.Span);
@@ -152,7 +216,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_pipelineBehaviors.Values.FirstOrDefault(p => p.Name.Equals(simple, StringComparison.Ordinal)) is { } pipelineFallback)
+        var pipelineFallback = SelectBestCandidate(
+            _pipelineBehaviors.Values.Where(p => p.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            p => p.Assembly,
+            p => p.Project,
+            p => p.Fqdn);
+
+        if (pipelineFallback is not null)
         {
             var id = StableId.For("cqrs.pipeline_behavior", pipelineFallback.Fqdn, pipelineFallback.Assembly, pipelineFallback.SymbolId);
             reference = new NodeReference(id, pipelineFallback.FilePath, pipelineFallback.Span);
@@ -166,9 +239,18 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_services.Values.FirstOrDefault(s =>
+        var serviceFallback = SelectBestCandidate(
+            _services.Values.Where(s =>
                 s.Fqdn.Equals(typeName, StringComparison.OrdinalIgnoreCase) ||
-                s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)) is { } serviceFallback)
+                s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            s => s.Assembly,
+            s => s.Project,
+            s => s.Fqdn);
+
+        if (serviceFallback is not null)
         {
             var id = StableId.For("app.service", serviceFallback.Fqdn, serviceFallback.Assembly, serviceFallback.SymbolId);
             reference = new NodeReference(id, serviceFallback.FilePath, serviceFallback.Span);
@@ -182,7 +264,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_requestProcessors.Values.FirstOrDefault(p => p.Name.Equals(simple, StringComparison.Ordinal)) is { } processorFallback)
+        var processorFallback = SelectBestCandidate(
+            _requestProcessors.Values.Where(p => p.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            p => p.Assembly,
+            p => p.Project,
+            p => p.Fqdn);
+
+        if (processorFallback is not null)
         {
             var id = StableId.For("cqrs.request_processor", processorFallback.Fqdn, processorFallback.Assembly, processorFallback.SymbolId);
             reference = new NodeReference(id, processorFallback.FilePath, processorFallback.Span);
@@ -196,7 +287,16 @@ public sealed partial class ProjectAnalyzer
             return true;
         }
 
-        if (_repositories.Values.FirstOrDefault(r => r.Name.Equals(simple, StringComparison.Ordinal)) is { } repositoryFallback)
+        var repositoryFallback = SelectBestCandidate(
+            _repositories.Values.Where(r => r.Name.Equals(simple, StringComparison.Ordinal)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            r => r.Assembly,
+            r => r.Project,
+            r => r.Fqdn);
+
+        if (repositoryFallback is not null)
         {
             var id = StableId.For("app.repository", repositoryFallback.Fqdn, repositoryFallback.Assembly, repositoryFallback.SymbolId);
             reference = new NodeReference(id, repositoryFallback.FilePath, repositoryFallback.Span);
@@ -205,11 +305,93 @@ public sealed partial class ProjectAnalyzer
 
         if (ResolveImplementationType(typeName) is { } resolved && !string.Equals(resolved, typeName, StringComparison.Ordinal))
         {
-            return TryResolveNodeReference(resolved, out reference);
+            return TryResolveNodeReference(resolved, out reference, preferredAssembly, preferredProject);
         }
 
         reference = default!;
         return false;
+    }
+
+    private static T? SelectBestCandidate<T>(
+        IEnumerable<T> candidates,
+        string? preferredAssembly,
+        string? preferredProject,
+        string? typeAssemblyRoot,
+        Func<T, string> getAssembly,
+        Func<T, string> getProject,
+        Func<T, string> getFqdn)
+    {
+        if (candidates is null)
+        {
+            return default;
+        }
+
+        var list = candidates.ToList();
+        if (list.Count == 0)
+        {
+            return default;
+        }
+
+        if (list.Count == 1)
+        {
+            return list[0];
+        }
+
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+        var preferredProjectRoot = GetProjectRoot(preferredProject);
+
+        T? best = default;
+        var bestScore = int.MinValue;
+
+        foreach (var candidate in list)
+        {
+            var score = 0;
+            var candidateAssembly = getAssembly(candidate);
+            var candidateProject = getProject(candidate);
+            var candidateAssemblyRoot = GetAssemblyRoot(candidateAssembly);
+            var candidateProjectRoot = GetProjectRoot(candidateProject);
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly) &&
+                string.Equals(candidateAssembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 500;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot) &&
+                string.Equals(candidateAssemblyRoot, preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 400;
+            }
+
+            if (!string.IsNullOrWhiteSpace(typeAssemblyRoot) &&
+                string.Equals(candidateAssemblyRoot, typeAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 350;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject) &&
+                string.Equals(candidateProject, preferredProject, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 250;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProjectRoot) &&
+                string.Equals(candidateProjectRoot, preferredProjectRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 200;
+            }
+
+            if (best is null || score > bestScore ||
+                (score == bestScore && string.Compare(getFqdn(candidate), getFqdn(best), StringComparison.OrdinalIgnoreCase) < 0))
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best ?? list
+            .OrderBy(candidate => getFqdn(candidate), StringComparer.OrdinalIgnoreCase)
+            .First();
     }
 
     private HandlerInfo? FindHandlerForRequest(string requestType)
@@ -546,6 +728,36 @@ public sealed partial class ProjectAnalyzer
             .Where(n =>
                 n.Fqdn.Equals(notificationType, StringComparison.OrdinalIgnoreCase) ||
                 n.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    private DomainEventInfo? FindDomainEventByType(string domainEventType)
+    {
+        if (string.IsNullOrWhiteSpace(domainEventType))
+        {
+            return null;
+        }
+
+        if (_domainEvents.TryGetValue(domainEventType, out var domainEvent))
+        {
+            return domainEvent;
+        }
+
+        var baseType = GetTypeNameWithoutGenerics(domainEventType);
+        if (!string.Equals(baseType, domainEventType, StringComparison.OrdinalIgnoreCase) &&
+            _domainEvents.TryGetValue(baseType, out domainEvent))
+        {
+            return domainEvent;
+        }
+
+        var simple = GetSimpleIdentifier(domainEventType);
+        var matches = _domainEvents.Values
+            .Where(e =>
+                e.Fqdn.Equals(domainEventType, StringComparison.OrdinalIgnoreCase) ||
+                e.Fqdn.Equals(baseType, StringComparison.OrdinalIgnoreCase) ||
+                e.Name.Equals(simple, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         return matches.Count == 1 ? matches[0] : null;
@@ -1526,11 +1738,23 @@ private static bool NamespaceRootMatches(string candidateType, string referenceT
     return string.Equals(candidateRoot, referenceRoot, StringComparison.OrdinalIgnoreCase);
 }
 
-private static string GetAssemblyRoot(string? assembly)
-{
-    if (string.IsNullOrWhiteSpace(assembly))
+    private static string GetProjectRoot(string? project)
     {
-        return string.Empty;
+        if (string.IsNullOrWhiteSpace(project))
+        {
+            return string.Empty;
+        }
+
+        var normalized = project.Replace('\\', '/');
+        var separatorIndex = normalized.IndexOf('/');
+        return separatorIndex > 0 ? normalized[..separatorIndex] : normalized;
+    }
+
+    private static string GetAssemblyRoot(string? assembly)
+    {
+        if (string.IsNullOrWhiteSpace(assembly))
+        {
+            return string.Empty;
         }
 
         var separatorIndex = assembly.IndexOf('.');
@@ -1670,4 +1894,3 @@ private static string GetAssemblyRoot(string? assembly)
                simple.Contains("DocumentStore", StringComparison.OrdinalIgnoreCase);
     }
 }
-
