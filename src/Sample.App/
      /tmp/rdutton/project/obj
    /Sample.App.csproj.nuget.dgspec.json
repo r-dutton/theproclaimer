@@ -1,0 +1,218 @@
+{
+  "format": 1,
+  "restore": {
+    "/mnt/d/theproclaimer/src/Sample.App/Sample.App.csproj": {}
+  },
+  "projects": {
+    "/mnt/d/theproclaimer/src/Sample.App/Sample.App.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/mnt/d/theproclaimer/src/Sample.App/Sample.App.csproj",
+        "projectName": "Sample.App",
+        "projectPath": "/mnt/d/theproclaimer/src/Sample.App/Sample.App.csproj",
+        "packagesPath": "/home/rdutton/.nuget/packages/",
+        "outputPath": "/mnt/d/theproclaimer/src/Sample.App/\n      /tmp/rdutton/project/obj\n    /",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/rdutton/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "/mnt/d/theproclaimer/src/Sample.Data/Sample.Data.csproj": {
+                "projectPath": "/mnt/d/theproclaimer/src/Sample.Data/Sample.Data.csproj"
+              },
+              "/mnt/d/theproclaimer/src/Sample.Msg/Sample.Msg.csproj": {
+                "projectPath": "/mnt/d/theproclaimer/src/Sample.Msg/Sample.Msg.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "AutoMapper": {
+              "target": "Package",
+              "version": "[12.0.1, )"
+            },
+            "FluentValidation": {
+              "target": "Package",
+              "version": "[12.0.0, )"
+            },
+            "MediatR.Extensions.Microsoft.DependencyInjection": {
+              "target": "Package",
+              "version": "[11.1.0, )"
+            },
+            "Microsoft.Extensions.Caching.Memory": {
+              "target": "Package",
+              "version": "[8.0.1, )"
+            },
+            "Microsoft.Extensions.Hosting.Abstractions": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.Extensions.Options": {
+              "target": "Package",
+              "version": "[8.0.2, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/8.0.121/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/mnt/d/theproclaimer/src/Sample.Data/Sample.Data.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/mnt/d/theproclaimer/src/Sample.Data/Sample.Data.csproj",
+        "projectName": "Sample.Data",
+        "projectPath": "/mnt/d/theproclaimer/src/Sample.Data/Sample.Data.csproj",
+        "packagesPath": "/home/rdutton/.nuget/packages/",
+        "outputPath": "/mnt/d/theproclaimer/src/Sample.Data/\n      /tmp/rdutton/project/obj\n    /",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/rdutton/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "Microsoft.EntityFrameworkCore.Design": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.10, )"
+            },
+            "Microsoft.EntityFrameworkCore.Sqlite": {
+              "target": "Package",
+              "version": "[8.0.10, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/8.0.121/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/mnt/d/theproclaimer/src/Sample.Msg/Sample.Msg.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/mnt/d/theproclaimer/src/Sample.Msg/Sample.Msg.csproj",
+        "projectName": "Sample.Msg",
+        "projectPath": "/mnt/d/theproclaimer/src/Sample.Msg/Sample.Msg.csproj",
+        "packagesPath": "/home/rdutton/.nuget/packages/",
+        "outputPath": "/mnt/d/theproclaimer/src/Sample.Msg/\n      /tmp/rdutton/project/obj\n    /",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/rdutton/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "Azure.Messaging.ServiceBus": {
+              "target": "Package",
+              "version": "[7.20.1, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/8.0.121/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
