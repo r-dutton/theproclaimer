@@ -2,11 +2,14 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -24,6 +27,10 @@ public sealed partial class ProjectAnalyzer
         var symbolId = $"T:{fqdn}";
         var filePath = GetRelativePath(tree.FilePath);
         var span = ToGraphSpan(tree, classDeclaration);
+
+        var model = project.GetModel(tree);
+        var pointsTo = new FlowPointsToFacade();
+        var valueContent = new FlowValueContentFacade();
 
         var fieldLookup = new Dictionary<string, FieldDescriptor>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in fieldTypes)
@@ -52,6 +59,8 @@ public sealed partial class ProjectAnalyzer
             ?? new List<string>();
 
         var publisherCalls = new List<HandlerPublisherCall>();
+
+        var flowPublisherKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -108,15 +117,61 @@ public sealed partial class ProjectAnalyzer
                 var qualifiedPublisherType = QualifyTypeName(publisherTypeCandidate!, project.AssemblyName, project.RelativeDirectory);
                 var resolvedPublisherType = ResolveImplementationType(qualifiedPublisherType) ?? qualifiedPublisherType;
 
-                var messageType = ResolvePublishedMessageType(invocation, parameterTypes, localVariables, project.AssemblyName, project.RelativeDirectory);
-                if (!string.IsNullOrWhiteSpace(messageType))
-                {
-                    messageType = QualifyTypeName(messageType!, project.AssemblyName, project.RelativeDirectory);
-                }
+                    var messageType = ResolvePublishedMessageType(invocation, parameterTypes, localVariables, project.AssemblyName, project.RelativeDirectory);
+                    if (!string.IsNullOrWhiteSpace(messageType))
+                    {
+                        messageType = QualifyTypeName(messageType!, project.AssemblyName, project.RelativeDirectory);
+                    }
 
                 var line = GetLineNumber(tree, invocation);
                 var containingMember = method.Identifier.Text;
                 publisherCalls.Add(new HandlerPublisherCall(resolvedPublisherType ?? qualifiedPublisherType, methodName!, line, messageType, containingMember));
+            }
+
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null)
+            {
+                if (!TryAcquireMethodAnalysis(methodSymbol))
+                {
+                    continue;
+                }
+
+                var visitor = new MessagingOperationVisitor(
+                    this,
+                    model,
+                    project.AssemblyName,
+                    project.RelativeDirectory,
+                    method.Identifier.Text,
+                    pointsTo,
+                    valueContent,
+                    _facts,
+                    (publisherType, publishMethod, messageType, line, owner) =>
+                    {
+                        var key = $"{publisherType}@{publishMethod}@{messageType}@{line}";
+                        if (!flowPublisherKeys.Add(key))
+                        {
+                            return;
+                        }
+
+                        publisherCalls.Add(new HandlerPublisherCall(publisherType, publishMethod, line, messageType, owner));
+                    });
+
+                FlowAnalysisEngine.AnalyzeMethod(
+                    project.Compilation,
+                    model,
+                    methodSymbol,
+                    new FlowInterproceduralConfig(4, 2),
+                    ShouldExpandForCqrsEfHttpMap,
+                    visitor);
             }
         }
 
@@ -299,6 +354,7 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var publisher in _publishers.Values)
         {
+            EnsurePublisherFactNode(publisher.Fqdn, publisher.Assembly, publisher.Project);
             var id = StableId.For("message.publisher", publisher.Fqdn, publisher.Assembly, publisher.SymbolId);
             _nodes[id] = new GraphNode
             {
@@ -369,6 +425,7 @@ public sealed partial class ProjectAnalyzer
 
                 var contract = ResolveMessageContract(call.MessageType!);
                 var contractId = StableId.For("message.contract", contract.Fqdn, contract.Assembly, contract.SymbolId);
+                EnsureMessageContractFactNode(contract.Fqdn);
 
                 if (createdContracts.Add(contractId))
                 {

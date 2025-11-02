@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -52,6 +55,9 @@ public sealed partial class ProjectAnalyzer
         eventType = QualifyTypeName(eventType!, project.AssemblyName, project.RelativeDirectory);
 
         var info = new DomainEventHandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, eventType!);
+        var model = project.GetModel(tree);
+        var pointsTo = new FlowPointsToFacade();
+        var valueContent = new FlowValueContentFacade();
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
@@ -215,6 +221,42 @@ public sealed partial class ProjectAnalyzer
                 {
                     info.ConfigurationUsages.Add(configurationUsage);
                 }
+            }
+
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null &&
+                methodSymbol.Name.StartsWith("Handle", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryAcquireMethodAnalysis(methodSymbol))
+                {
+                    continue;
+                }
+
+                var visitor = new DomainEventsOperationVisitor(
+                    this,
+                    model,
+                    info,
+                    method.Identifier.Text,
+                    pointsTo,
+                    valueContent,
+                    _facts);
+
+                FlowAnalysisEngine.AnalyzeMethod(
+                    project.Compilation,
+                    model,
+                    methodSymbol,
+                    new FlowInterproceduralConfig(4, 2),
+                    ShouldExpandForCqrsEfHttpMap,
+                    visitor);
             }
         }
 
@@ -443,6 +485,7 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var handler in _domainEventHandlers.Values)
         {
+            EnsureDomainEventHandlerFactNode(handler);
             var id = StableId.For("domain.event_handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
             _nodes[id] = new GraphNode
             {

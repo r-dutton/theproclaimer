@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using GraphKit.Facts;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
@@ -13,8 +14,11 @@ namespace GraphKit.Analyzers;
 public sealed partial class ProjectAnalyzer
 {
     private readonly string _workspaceRoot;
+    private readonly FlowWorkspaceIndex _workspaceIndex;
     private readonly ConcurrentDictionary<string, GraphNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<GraphEdge> _edges = new();
+    private readonly ConcurrentDictionary<string, ProjectInfo> _projectsByAssembly = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _analyzedHandlers = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ConcurrentDictionary<string, ControllerActionInfo> _controllerActions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, MinimalEndpointInfo> _minimalEndpoints = new(StringComparer.OrdinalIgnoreCase);
@@ -58,21 +62,27 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, DbContextInfo> _dbContexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _interfaceMethodReturnTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _stringConstants = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _analyzedMethods = new(StringComparer.OrdinalIgnoreCase);
     private static readonly int MaxFileParseConcurrency = Math.Max(1, Environment.ProcessorCount - 1);
     private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
+    private readonly FactWriter _facts;
 
-    public ProjectAnalyzer(string workspaceRoot)
+    public ProjectAnalyzer(string workspaceRoot, FactWriter? facts = null)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
+        _workspaceIndex = FlowWorkspaceIndex.Load(_workspaceRoot);
+        _facts = facts ?? new FactWriter();
         LoadFlowMap();
     }
 
     public int NodeCount => _nodes.Count;
     public int EdgeCount => _edges.Count;
+    public FactWriter Facts => _facts;
 
     public async Task AnalyzeProjectAsync(ProjectInfo project, CancellationToken cancellationToken)
     {
         LoadConfigurationValues(project);
+        _projectsByAssembly[project.AssemblyName] = project;
 
         var parsedFiles = await ParseProjectFilesAsync(project, cancellationToken);
 
@@ -127,6 +137,7 @@ public sealed partial class ProjectAnalyzer
         EmitHttpCalls();
         // Deferred synthetic call edges derived from uses_client edges (for cross-solution linking restoration)
         ClientLinker.EmitClientUseCallEdges(_nodes, _edges, _clientTargetServices);
+        MessageLinker.EmitMessageContractLinks(_nodes, _edges, _workspaceIndex);
         EmitBackgroundServices();
         EmitDomainEventPublications();
 
@@ -134,6 +145,7 @@ public sealed partial class ProjectAnalyzer
         var nodes = _nodes.Values.ToList();
         var edges = _edges.ToList();
         edges = ResolveDeferredRequestDispatches(nodes, edges);
+        AnnotateEdgeMetadata(edges);
 
         return new GraphDocument
         {
@@ -297,6 +309,108 @@ public sealed partial class ProjectAnalyzer
     }
 
 
+    private static void AnnotateEdgeMetadata(IList<GraphEdge> edges)
+    {
+        if (edges.Count == 0)
+        {
+            return;
+        }
+
+        for (var index = 0; index < edges.Count; index++)
+        {
+            var edge = edges[index];
+            var existingProps = edge.Props;
+            Dictionary<string, object>? propsCopy = null;
+
+            if (existingProps is null || !existingProps.ContainsKey("provenance"))
+            {
+                propsCopy ??= existingProps is null
+                    ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, object>(existingProps, StringComparer.OrdinalIgnoreCase);
+                propsCopy["provenance"] = DetermineEdgeProvenance(edge);
+            }
+
+            if (existingProps is null || !existingProps.ContainsKey("confidence"))
+            {
+                propsCopy ??= existingProps is null
+                    ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, object>(existingProps, StringComparer.OrdinalIgnoreCase);
+                propsCopy["confidence"] = DetermineEdgeConfidence(edge);
+            }
+
+            if (propsCopy is not null)
+            {
+                edges[index] = new GraphEdge
+                {
+                    From = edge.From,
+                    To = edge.To,
+                    Kind = edge.Kind,
+                    Source = edge.Source,
+                    Confidence = edge.Confidence,
+                    Transform = edge.Transform,
+                    Props = propsCopy,
+                    Evidence = edge.Evidence
+                };
+            }
+        }
+    }
+
+    private static string DetermineEdgeProvenance(GraphEdge edge)
+    {
+        if (edge.Props is { } props && props.TryGetValue("provenance", out var existing) && existing is string existingStr && !string.IsNullOrWhiteSpace(existingStr))
+        {
+            return existingStr;
+        }
+
+        if (string.Equals(edge.Source, "synthetic", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Linker";
+        }
+
+        var transformType = edge.Transform?.Type ?? string.Empty;
+        if (transformType.Contains("mediatr", StringComparison.OrdinalIgnoreCase) ||
+            transformType.Contains("message", StringComparison.OrdinalIgnoreCase) ||
+            transformType.Contains("httpclient", StringComparison.OrdinalIgnoreCase) ||
+            transformType.Contains("pipeline", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Interprocedural";
+        }
+
+        if (edge.Kind is "uses_client" or "uses_cache" or "uses_options" or "uses_configuration")
+        {
+            return "Static";
+        }
+
+        return "Static";
+    }
+
+    private static string DetermineEdgeConfidence(GraphEdge edge)
+    {
+        if (edge.Props is { } props && props.TryGetValue("confidence", out var existing) && existing is string existingStr && !string.IsNullOrWhiteSpace(existingStr))
+        {
+            return existingStr;
+        }
+
+        var magnitude = edge.Confidence;
+        if (magnitude >= 0.9)
+        {
+            return "High";
+        }
+
+        if (magnitude >= 0.6)
+        {
+            return "Medium";
+        }
+
+        if (string.Equals(edge.Source, "synthetic", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Medium";
+        }
+
+        return "Low";
+    }
+
+
     private static Dictionary<string, object> CloneProps(IReadOnlyDictionary<string, object>? original)
     {
         if (original is null || original.Count == 0)
@@ -330,6 +444,27 @@ public sealed partial class ProjectAnalyzer
             string s => s,
             _ => value.ToString()
         };
+    }
+
+    private bool TryAcquireMethodAnalysis(IMethodSymbol method)
+    {
+        if (method is null)
+        {
+            return false;
+        }
+
+        var key = method.GetDocumentationCommentId();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = method.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        }
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = method.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        }
+
+        return _analyzedMethods.TryAdd(key, 0);
     }
 
     private static bool IsRequestNode(GraphNode node)

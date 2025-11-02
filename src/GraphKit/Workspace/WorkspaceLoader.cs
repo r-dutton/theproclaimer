@@ -1,9 +1,12 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Xml.Linq;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace GraphKit.Workspace;
 
@@ -11,6 +14,7 @@ public sealed class WorkspaceLoader
 {
     private readonly string _workspaceRoot;
     private readonly IReadOnlyList<string>? _explicitSolutions;
+    private static readonly ImmutableArray<MetadataReference> DefaultMetadataReferences = CreateDefaultMetadataReferences();
 
     public WorkspaceLoader(string workspaceRoot, IReadOnlyList<string>? explicitSolutions = null)
     {
@@ -128,17 +132,159 @@ public sealed class WorkspaceLoader
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            var langVersionValue = GetProjectProperty(projectXml, ns, "LangVersion");
+            var defineConstants = GetProjectProperty(projectXml, ns, "DefineConstants");
+            var nullableValue = GetProjectProperty(projectXml, ns, "Nullable");
+            var parseOptions = CreateParseOptions(langVersionValue, defineConstants);
+            var compilationOptions = CreateCompilationOptions(nullableValue);
+
             bag.Add(new ProjectInfo(
                 projectPath,
                 assemblyName,
                 rootNamespace,
                 relativeDir,
-                files));
+                files,
+                CreateCompilationFactory(assemblyName, files, parseOptions, compilationOptions)));
         });
 
         return bag
             .OrderBy(p => p.ProjectPath, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static Func<Compilation> CreateCompilationFactory(
+        string assemblyName,
+        IReadOnlyList<string> files,
+        CSharpParseOptions parseOptions,
+        CSharpCompilationOptions compilationOptions)
+        => () =>
+        {
+            var trees = new List<SyntaxTree>(files.Count);
+            foreach (var file in files)
+            {
+                try
+                {
+                    var text = File.ReadAllText(file);
+                    var tree = CSharpSyntaxTree.ParseText(text, options: parseOptions, path: file);
+                    trees.Add(tree);
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+            }
+
+            return CSharpCompilation.Create(
+                assemblyName,
+                syntaxTrees: trees,
+                references: DefaultMetadataReferences,
+                options: compilationOptions);
+        };
+
+    private static CSharpParseOptions CreateParseOptions(string? langVersion, string? defineConstants)
+    {
+        var options = CSharpParseOptions.Default.WithDocumentationMode(DocumentationMode.Parse);
+
+        if (!string.IsNullOrWhiteSpace(langVersion) &&
+            LanguageVersionFacts.TryParse(langVersion, out var version))
+        {
+            options = options.WithLanguageVersion(version);
+        }
+
+        if (!string.IsNullOrWhiteSpace(defineConstants))
+        {
+            var symbols = defineConstants
+                .Split(new[] { ';', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            if (symbols.Length > 0)
+            {
+                options = options.WithPreprocessorSymbols(symbols);
+            }
+        }
+
+        return options;
+    }
+
+    private static CSharpCompilationOptions CreateCompilationOptions(string? nullableValue)
+    {
+        var nullable = MapNullableOption(nullableValue);
+
+        return new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+            .WithNullableContextOptions(nullable)
+            .WithOptimizationLevel(OptimizationLevel.Debug)
+            .WithMetadataImportOptions(MetadataImportOptions.Public);
+    }
+
+    private static NullableContextOptions MapNullableOption(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return NullableContextOptions.Disable;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "enable" => NullableContextOptions.Enable,
+            "disable" => NullableContextOptions.Disable,
+            "warnings" => NullableContextOptions.Warnings,
+            "annotations" => NullableContextOptions.Annotations,
+            "safeonly" => NullableContextOptions.Enable,
+            _ => NullableContextOptions.Disable
+        };
+    }
+
+    private static string? GetProjectProperty(XDocument projectXml, XNamespace ns, string propertyName)
+    {
+        return projectXml.Root?
+            .Elements(ns + "PropertyGroup")
+            .Elements(ns + propertyName)
+            .Select(e => e.Value)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static ImmutableArray<MetadataReference> CreateDefaultMetadataReferences()
+    {
+        var trustedAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (string.IsNullOrWhiteSpace(trustedAssemblies))
+        {
+            return ImmutableArray<MetadataReference>.Empty;
+        }
+
+        var builder = ImmutableArray.CreateBuilder<MetadataReference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in trustedAssemblies.Split(Path.PathSeparator))
+        {
+            if (string.IsNullOrWhiteSpace(path) || !seen.Add(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                builder.Add(MetadataReference.CreateFromFile(path));
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+        }
+
+        return builder.ToImmutable();
     }
 
     private static IEnumerable<string> EnumerateSourceFiles(string projectDirectory)

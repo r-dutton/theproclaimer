@@ -1,7 +1,13 @@
+using System.Collections.Generic;
+using GraphKit.Facts;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -30,6 +36,12 @@ public sealed partial class ProjectAnalyzer
             Tags = new[] { "mapping" }
         };
 
+        var model = project.GetModel(tree);
+        var compilation = project.Compilation;
+        var pointsToFacade = new FlowPointsToFacade();
+        var valueContentFacade = new FlowValueContentFacade();
+        var registeredMappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var invocation in Descendants<InvocationExpressionSyntax>(classDeclaration))
         {
             var generic = invocation.Expression switch
@@ -50,51 +62,57 @@ public sealed partial class ProjectAnalyzer
                 var source = generic.TypeArgumentList.Arguments[0].ToString();
                 var destination = generic.TypeArgumentList.Arguments[1].ToString();
                 var line = GetLineNumber(tree, invocation);
-                var mapFqdn = $"{profileFqdn}.CreateMap<{source},{destination}>";
-                var mapSymbolId = $"M:{mapFqdn}";
-                var mapSpan = new GraphSpan { StartLine = line, EndLine = line };
-                var mapId = StableId.For("mapping.automapper.map", mapFqdn, project.AssemblyName, mapSymbolId);
+                RegisterMappingDefinition(project, profileFqdn, profileId, profileFile, profileSpan, source, destination, line, registeredMappings);
+            }
+        }
 
-                _nodes[mapId] = new GraphNode
-                {
-                    Id = mapId,
-                    Type = "mapping.automapper.map",
-                    Name = $"{source}->{destination}",
-                    Fqdn = mapFqdn,
-                    Assembly = project.AssemblyName,
-                    Project = project.RelativeDirectory,
-                    FilePath = profileFile,
-                    Span = mapSpan,
-                    SymbolId = mapSymbolId,
-                    Tags = new[] { "mapping" },
-                    Props = new Dictionary<string, object>
-                    {
-                        ["source_type"] = source,
-                        ["destination_type"] = destination
-                    }
-                };
+        foreach (var constructor in classDeclaration.Members.OfType<ConstructorDeclarationSyntax>())
+        {
+            IMethodSymbol? ctorSymbol = null;
+            try
+            {
+                ctorSymbol = model.GetDeclaredSymbol(constructor) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                ctorSymbol = null;
+            }
 
-                _edges.Add(new GraphEdge
-                {
-                    From = mapId,
-                    To = profileId,
-                    Kind = "generated_from",
-                    Source = "static",
-                    Confidence = 1.0,
-                    Transform = new GraphTransform
-                    {
-                        Type = "automapper.create_map",
-                        Location = new GraphLocation { File = profileFile, Line = line }
-                    },
-                    Props = new Dictionary<string, object>
-                    {
-                        ["source_type"] = source,
-                        ["destination_type"] = destination
-                    },
-                    Evidence = CreateEvidence(profileFile, line)
-                });
+            if (ctorSymbol is not null && TryAcquireMethodAnalysis(ctorSymbol))
+            {
+                var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade, _facts);
+                FlowAnalysisEngine.AnalyzeMethod(
+                    compilation,
+                    model,
+                    ctorSymbol,
+                    new FlowInterproceduralConfig(2, 1),
+                    ShouldExpandForCqrsEfHttpMap,
+                    visitor);
+            }
+        }
 
-                _mappings.Add(new MappingInfo(mapId, profileFile, mapSpan, profileFqdn, $"{source}->{destination}", source, destination));
+        foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
+        {
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
+            {
+                var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade, _facts);
+                FlowAnalysisEngine.AnalyzeMethod(
+                    compilation,
+                    model,
+                    methodSymbol,
+                    new FlowInterproceduralConfig(2, 1),
+                    ShouldExpandForCqrsEfHttpMap,
+                    visitor);
             }
         }
     }
@@ -150,5 +168,88 @@ public sealed partial class ProjectAnalyzer
                 Evidence = CreateEvidence(mapping.FilePath, mapping.Span)
             });
         }
+    }
+
+    private void RegisterMappingDefinition(
+        ProjectInfo project,
+        string profileFqdn,
+        string profileId,
+        string profileFile,
+        GraphSpan profileSpan,
+        string source,
+        string destination,
+        int line,
+        HashSet<string> registeredMappings)
+    {
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(destination))
+        {
+            return;
+        }
+
+        var mappingKey = $"{source}->{destination}";
+        if (!registeredMappings.Add(mappingKey))
+        {
+            return;
+        }
+
+        var mapFqdn = $"{profileFqdn}.CreateMap<{source},{destination}>";
+        var mapSymbolId = $"M:{mapFqdn}";
+        var mapSpan = new GraphSpan { StartLine = line, EndLine = line };
+        var mapId = StableId.For("mapping.automapper.map", mapFqdn, project.AssemblyName, mapSymbolId);
+
+        if (!_nodes.ContainsKey(mapId))
+        {
+            _nodes[mapId] = new GraphNode
+            {
+                Id = mapId,
+                Type = "mapping.automapper.map",
+                Name = $"{source}->{destination}",
+                Fqdn = mapFqdn,
+                Assembly = project.AssemblyName,
+                Project = project.RelativeDirectory,
+                FilePath = profileFile,
+                Span = mapSpan,
+                SymbolId = mapSymbolId,
+                Tags = new[] { "mapping" },
+                Props = new Dictionary<string, object>
+                {
+                    ["source_type"] = source,
+                    ["destination_type"] = destination
+                }
+            };
+        }
+
+        var factProps = new Dictionary<string, object?>
+        {
+            ["source_type"] = source,
+            ["destination_type"] = destination,
+            ["profile_fqdn"] = profileFqdn,
+            ["profile_id"] = profileId,
+            ["file_path"] = profileFile,
+            ["line"] = line
+        };
+        _facts.AddNode(new NodeFact(mapId, "mapping.automapper.map", factProps));
+
+        _edges.Add(new GraphEdge
+        {
+            From = mapId,
+            To = profileId,
+            Kind = "generated_from",
+            Source = "static",
+            Confidence = 1.0,
+            Transform = new GraphTransform
+            {
+                Type = "automapper.create_map",
+                Location = new GraphLocation { File = profileFile, Line = line }
+            },
+            Props = new Dictionary<string, object>
+            {
+                ["source_type"] = source,
+                ["destination_type"] = destination
+            },
+            Evidence = CreateEvidence(profileFile, line)
+        });
+
+        _mappings.Add(new MappingInfo(mapId, profileFile, mapSpan, profileFqdn, mappingKey, source, destination));
     }
 }
