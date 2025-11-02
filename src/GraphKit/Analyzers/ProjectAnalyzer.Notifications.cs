@@ -247,6 +247,11 @@ public sealed partial class ProjectAnalyzer
             if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol &&
                 methodSymbol.Name.StartsWith("Handle", StringComparison.OrdinalIgnoreCase))
             {
+                if (!TryAcquireMethodAnalysis(methodSymbol))
+                {
+                    continue;
+                }
+
                 var visitor = new NotificationOperationVisitor(
                     this,
                     model,

@@ -46,6 +46,11 @@ public sealed partial class ProjectAnalyzer
                 continue;
             }
 
+            if (!TryAcquireMethodAnalysis(methodSymbol))
+            {
+                continue;
+            }
+
             var visitor = new PipelineOperationVisitor(
                 this,
                 model,
@@ -123,6 +128,11 @@ public sealed partial class ProjectAnalyzer
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
             if (model.GetDeclaredSymbol(method) is not IMethodSymbol methodSymbol)
+            {
+                continue;
+            }
+
+            if (!TryAcquireMethodAnalysis(methodSymbol))
             {
                 continue;
             }

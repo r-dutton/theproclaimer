@@ -102,14 +102,17 @@ public sealed partial class ProjectAnalyzer
 
             if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol && isAction)
             {
-                var visitor = new ControllerOperationVisitor(this, model, info, pointsToFacade, valueContentFacade);
-                FlowAnalysisEngine.AnalyzeMethod(
-                    compilation,
-                    model,
-                    methodSymbol,
-                    new FlowInterproceduralConfig(4, 2),
-                    ShouldExpandForCqrsEfHttpMap,
-                    visitor);
+                if (TryAcquireMethodAnalysis(methodSymbol))
+                {
+                    var visitor = new ControllerOperationVisitor(this, model, info, pointsToFacade, valueContentFacade);
+                    FlowAnalysisEngine.AnalyzeMethod(
+                        compilation,
+                        model,
+                        methodSymbol,
+                        new FlowInterproceduralConfig(4, 2),
+                        ShouldExpandForCqrsEfHttpMap,
+                        visitor);
+                }
             }
 
             // Attribute-declared response status codes (ProducesResponseType)

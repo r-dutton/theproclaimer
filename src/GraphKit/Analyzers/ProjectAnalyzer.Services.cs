@@ -463,6 +463,11 @@ public sealed partial class ProjectAnalyzer
 
             if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol)
             {
+                if (!TryAcquireMethodAnalysis(methodSymbol))
+                {
+                    continue;
+                }
+
                 var visitor = new ServiceOperationVisitor(
                     this,
                     model,

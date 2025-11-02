@@ -61,6 +61,7 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, DbContextInfo> _dbContexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _interfaceMethodReturnTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _stringConstants = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _analyzedMethods = new(StringComparer.OrdinalIgnoreCase);
     private static readonly int MaxFileParseConcurrency = Math.Max(1, Environment.ProcessorCount - 1);
     private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
 
@@ -439,6 +440,27 @@ public sealed partial class ProjectAnalyzer
             string s => s,
             _ => value.ToString()
         };
+    }
+
+    private bool TryAcquireMethodAnalysis(IMethodSymbol method)
+    {
+        if (method is null)
+        {
+            return false;
+        }
+
+        var key = method.GetDocumentationCommentId();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = method.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        }
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = method.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        }
+
+        return _analyzedMethods.TryAdd(key, 0);
     }
 
     private static bool IsRequestNode(GraphNode node)
