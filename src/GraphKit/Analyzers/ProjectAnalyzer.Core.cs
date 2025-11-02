@@ -13,6 +13,7 @@ namespace GraphKit.Analyzers;
 public sealed partial class ProjectAnalyzer
 {
     private readonly string _workspaceRoot;
+    private readonly FlowWorkspaceIndex _workspaceIndex;
     private readonly ConcurrentDictionary<string, GraphNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<GraphEdge> _edges = new();
     private readonly ConcurrentDictionary<string, ProjectInfo> _projectsByAssembly = new(StringComparer.OrdinalIgnoreCase);
@@ -66,6 +67,7 @@ public sealed partial class ProjectAnalyzer
     public ProjectAnalyzer(string workspaceRoot)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
+        _workspaceIndex = FlowWorkspaceIndex.Load(_workspaceRoot);
         LoadFlowMap();
     }
 
@@ -130,6 +132,7 @@ public sealed partial class ProjectAnalyzer
         EmitHttpCalls();
         // Deferred synthetic call edges derived from uses_client edges (for cross-solution linking restoration)
         ClientLinker.EmitClientUseCallEdges(_nodes, _edges, _clientTargetServices);
+        MessageLinker.EmitMessageContractLinks(_nodes, _edges, _workspaceIndex);
         EmitBackgroundServices();
         EmitDomainEventPublications();
 
