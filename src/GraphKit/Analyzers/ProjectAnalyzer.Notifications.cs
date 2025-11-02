@@ -41,6 +41,9 @@ public sealed partial class ProjectAnalyzer
         var span = ToGraphSpan(tree, classDeclaration);
 
         var handler = new NotificationHandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, notificationType);
+        var model = project.GetModel(tree);
+        var pointsTo = new FlowPointsToFacade();
+        var valueContent = new FlowValueContentFacade();
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
@@ -239,6 +242,26 @@ public sealed partial class ProjectAnalyzer
                         handler.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, line));
                     }
                 }
+            }
+
+            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol &&
+                methodSymbol.Name.StartsWith("Handle", StringComparison.OrdinalIgnoreCase))
+            {
+                var visitor = new NotificationOperationVisitor(
+                    this,
+                    model,
+                    handler,
+                    method.Identifier.Text,
+                    pointsTo,
+                    valueContent);
+
+                FlowAnalysisEngine.AnalyzeMethod(
+                    project.Compilation,
+                    model,
+                    methodSymbol,
+                    new FlowInterproceduralConfig(4, 2),
+                    ShouldExpandForCqrsEfHttpMap,
+                    visitor);
             }
         }
 
