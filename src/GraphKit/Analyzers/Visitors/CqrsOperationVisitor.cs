@@ -14,6 +14,7 @@ public sealed partial class ProjectAnalyzer
         private readonly ProjectAnalyzer _analyzer;
         private readonly HandlerInfo _handler;
         private readonly string _ownerMethod;
+        private readonly EfOperationVisitor _efVisitor;
         private readonly HashSet<string> _seenDbAccesses = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenRepositoryCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenMapperCalls = new(StringComparer.OrdinalIgnoreCase);
@@ -32,10 +33,13 @@ public sealed partial class ProjectAnalyzer
             _analyzer = analyzer;
             _handler = handler;
             _ownerMethod = ownerMethod;
+            _efVisitor = new EfOperationVisitor(analyzer, handler.Assembly, handler.Project, RecordEfAccess);
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            _efVisitor.TryProcess(op);
+
             if (AnalysisPredicates.IsDbContextOrRepoCall(op))
             {
                 HandleDataCall(op);
@@ -72,19 +76,6 @@ public sealed partial class ProjectAnalyzer
                     _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, methodName, line, operation));
                 }
                 return;
-            }
-
-            if (IsDbContextType(receiverSymbol))
-            {
-                var normalized = string.IsNullOrWhiteSpace(typeName)
-                    ? receiverSymbol?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ?? string.Empty
-                    : typeName;
-
-                var key = $"{normalized}@{methodName}@{line}";
-                if (_seenDbAccesses.Add(key))
-                {
-                    _handler.DbContextAccesses.Add(new HandlerDbAccess(normalized, methodName, line));
-                }
             }
         }
 
@@ -161,6 +152,23 @@ public sealed partial class ProjectAnalyzer
                 _ownerMethod));
         }
 
+        private void RecordEfAccess(string? contextType, string entityName, string operation, int line)
+        {
+            if (string.IsNullOrWhiteSpace(entityName))
+            {
+                return;
+            }
+
+            var key = $"{entityName}@{line}";
+            if (!_seenDbAccesses.Add(key))
+            {
+                return;
+            }
+
+            var context = string.IsNullOrWhiteSpace(contextType) ? entityName : contextType!;
+            _handler.DbContextAccesses.Add(new HandlerDbAccess(context, entityName, line));
+        }
+
         private string? Qualify(ITypeSymbol? symbol)
         {
             if (symbol is null)
@@ -171,28 +179,6 @@ public sealed partial class ProjectAnalyzer
             var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
             var qualified = _analyzer.QualifyTypeName(display, _handler.Assembly, _handler.Project);
             return string.IsNullOrWhiteSpace(qualified) ? display : qualified;
-        }
-
-        private static bool IsDbContextType(ITypeSymbol? type)
-        {
-            if (type is null)
-            {
-                return false;
-            }
-
-            var current = type;
-            while (current is not null)
-            {
-                var display = current.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-                if (display.Contains("DbContext", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                current = current.BaseType;
-            }
-
-            return false;
         }
 
         private static ITypeSymbol? GetDestinationType(IInvocationOperation invocation)
