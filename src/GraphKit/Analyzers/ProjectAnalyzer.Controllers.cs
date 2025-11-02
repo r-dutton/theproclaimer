@@ -3,11 +3,15 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -29,6 +33,10 @@ public sealed partial class ProjectAnalyzer
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
         var helperInfos = new Dictionary<string, ControllerActionInfo>(StringComparer.OrdinalIgnoreCase);
         var actionInfos = new List<ControllerActionInfo>();
+        var model = project.GetModel(tree);
+        var compilation = project.Compilation;
+        var pointsToFacade = new FlowPointsToFacade();
+        var valueContentFacade = new FlowValueContentFacade();
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -90,6 +98,18 @@ public sealed partial class ProjectAnalyzer
                 {
                     info.Authorizations.Add(authorization);
                 }
+            }
+
+            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol && isAction)
+            {
+                var visitor = new ControllerOperationVisitor(this, model, info, pointsToFacade, valueContentFacade);
+                FlowAnalysisEngine.AnalyzeMethod(
+                    compilation,
+                    model,
+                    methodSymbol,
+                    new FlowInterproceduralConfig(4, 2),
+                    ShouldExpandForCqrsEfHttpMap,
+                    visitor);
             }
 
             // Attribute-declared response status codes (ProducesResponseType)
@@ -2821,6 +2841,23 @@ public sealed partial class ProjectAnalyzer
         }
 
         return null;
+    }
+
+    private static bool ShouldExpandForCqrsEfHttpMap(IInvocationOperation invocation)
+    {
+        if (invocation is null)
+        {
+            return false;
+        }
+
+        return AnalysisPredicates.IsMediatorSend(invocation) ||
+               AnalysisPredicates.IsMediatorPublish(invocation) ||
+               AnalysisPredicates.IsDbContextOrRepoCall(invocation) ||
+               AnalysisPredicates.IsHttpClientCall(invocation) ||
+               AnalysisPredicates.IsMapperMap(invocation) ||
+               AnalysisPredicates.IsPipelineBehavior(invocation) ||
+               AnalysisPredicates.IsValidatorCall(invocation) ||
+               AnalysisPredicates.IsDomainEventPublish(invocation);
     }
 
     private static Dictionary<string, object> CreateClientInvocationProps(ControllerClientInvocation invocation)
