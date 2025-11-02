@@ -9,73 +9,89 @@ namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
-    private sealed class ControllerOperationVisitor : FlowDataFlowOperationVisitor
+    private sealed class CqrsOperationVisitor : FlowDataFlowOperationVisitor
     {
         private readonly ProjectAnalyzer _analyzer;
-        private readonly ControllerActionInfo _action;
-        private readonly HashSet<string> _seenRequests = new(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _seenMappings = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HandlerInfo _handler;
+        private readonly string _ownerMethod;
+        private readonly HashSet<string> _seenDbAccesses = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _seenRepositoryCalls = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _seenMapperCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenHttpCalls = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
 
-        public ControllerOperationVisitor(
+        public CqrsOperationVisitor(
             ProjectAnalyzer analyzer,
             SemanticModel model,
-            ControllerActionInfo action,
+            HandlerInfo handler,
+            string ownerMethod,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent)
             : base(model.Compilation, model, pointsTo, valueContent)
         {
             _analyzer = analyzer;
-            _action = action;
+            _handler = handler;
+            _ownerMethod = ownerMethod;
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
-            if (AnalysisPredicates.IsMediatorSend(op))
+            if (AnalysisPredicates.IsDbContextOrRepoCall(op))
             {
-                HandleMediatorSend(op);
+                HandleDataCall(op);
             }
-            else if (AnalysisPredicates.IsMediatorPublish(op))
+            else if (AnalysisPredicates.IsMediatorPublish(op) || AnalysisPredicates.IsDomainEventPublish(op))
             {
                 HandleMediatorPublish(op);
             }
             else if (AnalysisPredicates.IsMapperMap(op))
             {
-                HandleMapperMap(op);
+                HandleMapperCall(op);
             }
             else if (AnalysisPredicates.IsHttpClientCall(op))
             {
-                HandleHttpClientCall(op);
+                HandleHttpCall(op);
             }
 
             base.VisitInvocation(op);
         }
 
-        private void HandleMediatorSend(IInvocationOperation invocation)
+        private void HandleDataCall(IInvocationOperation invocation)
         {
-            var requestArgument = invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
-            var requestType = Qualify(requestArgument?.Type);
-            if (string.IsNullOrWhiteSpace(requestType))
-            {
-                return;
-            }
-
+            var receiverSymbol = invocation.Instance?.Type ?? invocation.TargetMethod.ContainingType;
+            var typeName = Qualify(receiverSymbol);
+            var methodName = invocation.TargetMethod.Name ?? string.Empty;
             var line = GetInvocationLine(invocation);
-            var key = $"{requestType}@{line}";
-            if (!_seenRequests.Add(key))
+
+            if (!string.IsNullOrWhiteSpace(typeName) && IsRepositoryType(typeName))
             {
+                var operation = DetermineRepositoryOperation(methodName);
+                var key = $"{typeName}@{methodName}@{line}";
+                if (_seenRepositoryCalls.Add(key))
+                {
+                    _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, methodName, line, operation));
+                }
                 return;
             }
 
-            _action.RequestInvocations.Add(new ControllerRequestInvocation(requestType, line));
-            _analyzer.EnsureHandlerAnalysis(requestType);
+            if (IsDbContextType(receiverSymbol))
+            {
+                var normalized = string.IsNullOrWhiteSpace(typeName)
+                    ? receiverSymbol?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ?? string.Empty
+                    : typeName;
+
+                var key = $"{normalized}@{methodName}@{line}";
+                if (_seenDbAccesses.Add(key))
+                {
+                    _handler.DbContextAccesses.Add(new HandlerDbAccess(normalized, methodName, line));
+                }
+            }
         }
 
         private void HandleMediatorPublish(IInvocationOperation invocation)
         {
-            var messageArgument = invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
-            var notificationType = Qualify(messageArgument?.Type);
+            var argument = invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
+            var notificationType = Qualify(argument?.Type);
             if (string.IsNullOrWhiteSpace(notificationType))
             {
                 return;
@@ -83,15 +99,13 @@ public sealed partial class ProjectAnalyzer
 
             var line = GetInvocationLine(invocation);
             var key = $"{notificationType}@{line}";
-            if (!_seenNotifications.Add(key))
+            if (_seenNotifications.Add(key))
             {
-                return;
+                _handler.PublishedNotifications.Add(new HandlerNotificationPublication(notificationType, line));
             }
-
-            _action.NotificationInvocations.Add(new ControllerNotificationInvocation(notificationType, line));
         }
 
-        private void HandleMapperMap(IInvocationOperation invocation)
+        private void HandleMapperCall(IInvocationOperation invocation)
         {
             var destinationType = Qualify(GetDestinationType(invocation));
             if (string.IsNullOrWhiteSpace(destinationType))
@@ -99,20 +113,18 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var sourceArgument = invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
-            var sourceType = Qualify(sourceArgument?.Type);
+            var sourceOperation = invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
+            var sourceType = Qualify(sourceOperation?.Type);
 
             var line = GetInvocationLine(invocation);
             var key = $"{destinationType}@{sourceType}@{line}";
-            if (!_seenMappings.Add(key))
+            if (_seenMapperCalls.Add(key))
             {
-                return;
+                _handler.MapperCalls.Add(new HandlerMapperCall(sourceType, destinationType, line));
             }
-
-            _action.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destinationType, null, line));
         }
 
-        private void HandleHttpClientCall(IInvocationOperation invocation)
+        private void HandleHttpCall(IInvocationOperation invocation)
         {
             var clientSymbol = invocation.Instance?.Type ?? invocation.TargetMethod.ContainingType;
             var clientType = Qualify(clientSymbol) ??
@@ -124,9 +136,7 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var methodName = invocation.TargetMethod.Name;
-            var verb = NormalizeHttpVerb(methodName);
-
+            var verb = NormalizeHttpVerb(invocation.TargetMethod.Name);
             var route = TryResolveRoute(invocation);
             if (!string.IsNullOrWhiteSpace(route))
             {
@@ -134,18 +144,21 @@ public sealed partial class ProjectAnalyzer
             }
 
             var line = GetInvocationLine(invocation);
-            var key = $"{clientType}@{methodName}@{route}@{line}";
+            var key = $"{clientType}@{verb}@{route}@{line}";
             if (!_seenHttpCalls.Add(key))
             {
                 return;
             }
 
-            _action.HttpClientInvocations.Add(new ControllerClientInvocation(
+            _handler.HttpClientInvocations.Add(new HandlerClientInvocation(
                 clientType,
-                verb,
+                verb ?? string.Empty,
                 route,
                 line,
-                methodName));
+                invocation.TargetMethod.Name,
+                null,
+                null,
+                _ownerMethod));
         }
 
         private string? Qualify(ITypeSymbol? symbol)
@@ -156,8 +169,30 @@ public sealed partial class ProjectAnalyzer
             }
 
             var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-            var qualified = _analyzer.QualifyTypeName(display, _action.Assembly, _action.Project);
+            var qualified = _analyzer.QualifyTypeName(display, _handler.Assembly, _handler.Project);
             return string.IsNullOrWhiteSpace(qualified) ? display : qualified;
+        }
+
+        private static bool IsDbContextType(ITypeSymbol? type)
+        {
+            if (type is null)
+            {
+                return false;
+            }
+
+            var current = type;
+            while (current is not null)
+            {
+                var display = current.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (display.Contains("DbContext", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                current = current.BaseType;
+            }
+
+            return false;
         }
 
         private static ITypeSymbol? GetDestinationType(IInvocationOperation invocation)

@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -483,7 +486,82 @@ public sealed partial class ProjectAnalyzer
             _handlersByRequestType[signature.RequestType] = handlerInfo;
         }
 
+        AnalyzeHandlerOperations(handlerInfo);
         _handlers[fqdn] = handlerInfo;
+    }
+
+    private void AnalyzeHandlerOperations(HandlerInfo handler)
+    {
+        if (handler is null)
+        {
+            return;
+        }
+
+        if (!_projectsByAssembly.TryGetValue(handler.Assembly, out var project))
+        {
+            return;
+        }
+
+        if (!_analyzedHandlers.TryAdd(handler.Fqdn, 0))
+        {
+            return;
+        }
+
+        var typeSymbol = project.Compilation.GetTypeByMetadataName(handler.Fqdn);
+        if (typeSymbol is null)
+        {
+            return;
+        }
+
+        var pointsTo = new FlowPointsToFacade();
+        var valueContent = new FlowValueContentFacade();
+
+        foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
+        {
+            if (!string.Equals(method.Name, "Handle", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(method.Name, "HandleAsync", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (method.DeclaringSyntaxReferences.Length == 0)
+            {
+                continue;
+            }
+
+            var syntax = method.DeclaringSyntaxReferences[0].GetSyntax();
+            if (syntax is not MethodDeclarationSyntax methodSyntax)
+            {
+                continue;
+            }
+
+            var tree = methodSyntax.SyntaxTree;
+            var model = project.GetModel(tree);
+            var visitor = new CqrsOperationVisitor(this, model, handler, method.Name, pointsTo, valueContent);
+            FlowAnalysisEngine.AnalyzeMethod(
+                project.Compilation,
+                model,
+                method,
+                new FlowInterproceduralConfig(4, 2),
+                ShouldExpandForCqrsEfHttpMap,
+                visitor);
+        }
+    }
+
+    internal void EnsureHandlerAnalysis(string? requestType)
+    {
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return;
+        }
+
+        var handler = FindHandlerForRequest(requestType);
+        if (handler is null)
+        {
+            return;
+        }
+
+        AnalyzeHandlerOperations(handler);
     }
 
     private string EnsureGuardNode(string guardType)

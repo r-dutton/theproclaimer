@@ -15,6 +15,8 @@ public sealed partial class ProjectAnalyzer
     private readonly string _workspaceRoot;
     private readonly ConcurrentDictionary<string, GraphNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentBag<GraphEdge> _edges = new();
+    private readonly ConcurrentDictionary<string, ProjectInfo> _projectsByAssembly = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _analyzedHandlers = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ConcurrentDictionary<string, ControllerActionInfo> _controllerActions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, MinimalEndpointInfo> _minimalEndpoints = new(StringComparer.OrdinalIgnoreCase);
@@ -73,6 +75,7 @@ public sealed partial class ProjectAnalyzer
     public async Task AnalyzeProjectAsync(ProjectInfo project, CancellationToken cancellationToken)
     {
         LoadConfigurationValues(project);
+        _projectsByAssembly[project.AssemblyName] = project;
 
         var parsedFiles = await ParseProjectFilesAsync(project, cancellationToken);
 
