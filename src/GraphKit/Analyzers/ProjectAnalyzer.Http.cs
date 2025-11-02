@@ -42,7 +42,17 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
-            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol)
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
                 var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade);
                 FlowAnalysisEngine.AnalyzeMethod(

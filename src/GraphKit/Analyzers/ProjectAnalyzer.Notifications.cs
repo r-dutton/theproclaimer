@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -244,7 +247,17 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol &&
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null &&
                 methodSymbol.Name.StartsWith("Handle", StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryAcquireMethodAnalysis(methodSymbol))

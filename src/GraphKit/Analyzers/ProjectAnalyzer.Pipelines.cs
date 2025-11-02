@@ -41,12 +41,17 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
-            if (model.GetDeclaredSymbol(method) is not IMethodSymbol methodSymbol)
+            IMethodSymbol? methodSymbol = null;
+            try
             {
-                continue;
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
             }
 
-            if (!TryAcquireMethodAnalysis(methodSymbol))
+            if (methodSymbol is null || !TryAcquireMethodAnalysis(methodSymbol))
             {
                 continue;
             }
@@ -127,12 +132,17 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
-            if (model.GetDeclaredSymbol(method) is not IMethodSymbol methodSymbol)
+            IMethodSymbol? methodSymbol = null;
+            try
             {
-                continue;
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
             }
 
-            if (!TryAcquireMethodAnalysis(methodSymbol))
+            if (methodSymbol is null || !TryAcquireMethodAnalysis(methodSymbol))
             {
                 continue;
             }

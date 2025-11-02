@@ -223,7 +223,17 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol &&
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null &&
                 methodSymbol.Name.StartsWith("Handle", StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryAcquireMethodAnalysis(methodSymbol))

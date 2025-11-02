@@ -128,7 +128,17 @@ public sealed partial class ProjectAnalyzer
                 publisherCalls.Add(new HandlerPublisherCall(resolvedPublisherType ?? qualifiedPublisherType, methodName!, line, messageType, containingMember));
             }
 
-            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol)
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null)
             {
                 if (!TryAcquireMethodAnalysis(methodSymbol))
                 {

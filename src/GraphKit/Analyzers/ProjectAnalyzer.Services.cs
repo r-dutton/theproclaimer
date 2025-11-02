@@ -461,31 +461,43 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol)
+            IMethodSymbol? methodSymbol = null;
+            try
             {
-                if (!TryAcquireMethodAnalysis(methodSymbol))
-                {
-                    continue;
-                }
-
-                var visitor = new ServiceOperationVisitor(
-                    this,
-                    model,
-                    project.AssemblyName,
-                    project.RelativeDirectory,
-                    method.Identifier.Text,
-                    pointsTo,
-                    valueContent,
-                    serviceInfo);
-
-                FlowAnalysisEngine.AnalyzeMethod(
-                    project.Compilation,
-                    model,
-                    methodSymbol,
-                    new FlowInterproceduralConfig(4, 2),
-                    ShouldExpandForCqrsEfHttpMap,
-                    visitor);
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
             }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is null)
+            {
+                continue;
+            }
+
+            if (!TryAcquireMethodAnalysis(methodSymbol))
+            {
+                continue;
+            }
+
+            var visitor = new ServiceOperationVisitor(
+                this,
+                model,
+                project.AssemblyName,
+                project.RelativeDirectory,
+                method.Identifier.Text,
+                pointsTo,
+                valueContent,
+                serviceInfo);
+
+            FlowAnalysisEngine.AnalyzeMethod(
+                project.Compilation,
+                model,
+                methodSymbol,
+                new FlowInterproceduralConfig(4, 2),
+                ShouldExpandForCqrsEfHttpMap,
+                visitor);
         }
 
         _services[fqdn] = serviceInfo;

@@ -67,7 +67,17 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var constructor in classDeclaration.Members.OfType<ConstructorDeclarationSyntax>())
         {
-            if (model.GetDeclaredSymbol(constructor) is IMethodSymbol ctorSymbol)
+            IMethodSymbol? ctorSymbol = null;
+            try
+            {
+                ctorSymbol = model.GetDeclaredSymbol(constructor) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                ctorSymbol = null;
+            }
+
+            if (ctorSymbol is not null && TryAcquireMethodAnalysis(ctorSymbol))
             {
                 var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade);
                 FlowAnalysisEngine.AnalyzeMethod(
@@ -82,7 +92,17 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
-            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol)
+            IMethodSymbol? methodSymbol = null;
+            try
+            {
+                methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
+            }
+            catch (ArgumentException)
+            {
+                methodSymbol = null;
+            }
+
+            if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
                 var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade);
                 FlowAnalysisEngine.AnalyzeMethod(
