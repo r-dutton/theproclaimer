@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
@@ -17,17 +18,21 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenMappings = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenHttpCalls = new(StringComparer.OrdinalIgnoreCase);
+        private readonly FactWriter _facts;
 
         public ControllerOperationVisitor(
             ProjectAnalyzer analyzer,
             SemanticModel model,
             ControllerActionInfo action,
             FlowPointsToFacade pointsTo,
-            FlowValueContentFacade valueContent)
+            FlowValueContentFacade valueContent,
+            FactWriter facts)
             : base(model.Compilation, model, pointsTo, valueContent)
         {
             _analyzer = analyzer;
             _action = action;
+            _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _ = _facts;
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
@@ -70,6 +75,7 @@ public sealed partial class ProjectAnalyzer
 
             _action.RequestInvocations.Add(new ControllerRequestInvocation(requestType, line));
             _analyzer.EnsureHandlerAnalysis(requestType);
+            _analyzer.RecordControllerRequestFact(_action, requestType, line);
         }
 
         private void HandleMediatorPublish(IInvocationOperation invocation)
@@ -89,6 +95,7 @@ public sealed partial class ProjectAnalyzer
             }
 
             _action.NotificationInvocations.Add(new ControllerNotificationInvocation(notificationType, line));
+            _analyzer.RecordControllerNotificationFact(_action, notificationType, line);
         }
 
         private void HandleMapperMap(IInvocationOperation invocation)
@@ -110,6 +117,7 @@ public sealed partial class ProjectAnalyzer
             }
 
             _action.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destinationType, null, line));
+            _analyzer.RecordControllerMappingFact(_action, sourceType, destinationType!, null, line);
         }
 
         private void HandleHttpClientCall(IInvocationOperation invocation)
@@ -146,6 +154,7 @@ public sealed partial class ProjectAnalyzer
                 route,
                 line,
                 methodName));
+            _analyzer.RecordControllerHttpClientFact(_action, clientType, verb, route, methodName, line);
         }
 
         private string? Qualify(ITypeSymbol? symbol)

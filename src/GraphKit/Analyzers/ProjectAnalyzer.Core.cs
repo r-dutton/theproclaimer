@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using GraphKit.Facts;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
@@ -64,16 +65,19 @@ public sealed partial class ProjectAnalyzer
     private readonly ConcurrentDictionary<string, byte> _analyzedMethods = new(StringComparer.OrdinalIgnoreCase);
     private static readonly int MaxFileParseConcurrency = Math.Max(1, Environment.ProcessorCount - 1);
     private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
+    private readonly FactWriter _facts;
 
-    public ProjectAnalyzer(string workspaceRoot)
+    public ProjectAnalyzer(string workspaceRoot, FactWriter? facts = null)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         _workspaceIndex = FlowWorkspaceIndex.Load(_workspaceRoot);
+        _facts = facts ?? new FactWriter();
         LoadFlowMap();
     }
 
     public int NodeCount => _nodes.Count;
     public int EdgeCount => _edges.Count;
+    public FactWriter Facts => _facts;
 
     public async Task AnalyzeProjectAsync(ProjectInfo project, CancellationToken cancellationToken)
     {

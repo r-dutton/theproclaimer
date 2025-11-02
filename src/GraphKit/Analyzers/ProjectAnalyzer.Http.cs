@@ -54,7 +54,7 @@ public sealed partial class ProjectAnalyzer
 
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
-                var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade);
+                var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade, _facts);
                 FlowAnalysisEngine.AnalyzeMethod(
                     compilation,
                     model,

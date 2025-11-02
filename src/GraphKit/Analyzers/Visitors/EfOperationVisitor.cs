@@ -1,4 +1,5 @@
 using System;
+using GraphKit.Facts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -12,17 +13,21 @@ public sealed partial class ProjectAnalyzer
         private readonly string _assembly;
         private readonly string _project;
         private readonly Action<string?, string, string, int> _recordAccess;
+        private readonly FactWriter _facts;
 
         public EfOperationVisitor(
             ProjectAnalyzer analyzer,
             string assembly,
             string project,
-            Action<string?, string, string, int> recordAccess)
+            Action<string?, string, string, int> recordAccess,
+            FactWriter facts)
         {
             _analyzer = analyzer;
             _assembly = assembly;
             _project = project;
             _recordAccess = recordAccess;
+            _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _ = _facts;
         }
 
         public bool TryProcess(IInvocationOperation invocation)

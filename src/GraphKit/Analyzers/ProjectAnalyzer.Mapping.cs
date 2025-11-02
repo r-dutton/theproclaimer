@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
@@ -79,7 +80,7 @@ public sealed partial class ProjectAnalyzer
 
             if (ctorSymbol is not null && TryAcquireMethodAnalysis(ctorSymbol))
             {
-                var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade);
+                var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade, _facts);
                 FlowAnalysisEngine.AnalyzeMethod(
                     compilation,
                     model,
@@ -104,7 +105,7 @@ public sealed partial class ProjectAnalyzer
 
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
-                var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade);
+                var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade, _facts);
                 FlowAnalysisEngine.AnalyzeMethod(
                     compilation,
                     model,
@@ -217,6 +218,17 @@ public sealed partial class ProjectAnalyzer
                 }
             };
         }
+
+        var factProps = new Dictionary<string, object?>
+        {
+            ["source_type"] = source,
+            ["destination_type"] = destination,
+            ["profile_fqdn"] = profileFqdn,
+            ["profile_id"] = profileId,
+            ["file_path"] = profileFile,
+            ["line"] = line
+        };
+        _facts.AddNode(new NodeFact(mapId, "mapping.automapper.map", factProps));
 
         _edges.Add(new GraphEdge
         {

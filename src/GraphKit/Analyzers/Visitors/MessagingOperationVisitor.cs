@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
@@ -17,6 +18,7 @@ public sealed partial class ProjectAnalyzer
         private readonly string _ownerMethod;
         private readonly Action<string, string, string?, int, string> _recordPublish;
         private readonly HashSet<string> _seenPublishes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly FactWriter _facts;
 
         public MessagingOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -26,6 +28,7 @@ public sealed partial class ProjectAnalyzer
             string ownerMethod,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
+            FactWriter facts,
             Action<string, string, string?, int, string> recordPublish)
             : base(model.Compilation, model, pointsTo, valueContent)
         {
@@ -33,6 +36,8 @@ public sealed partial class ProjectAnalyzer
             _assembly = assembly;
             _project = project;
             _ownerMethod = ownerMethod;
+            _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _ = _facts;
             _recordPublish = recordPublish;
         }
 
@@ -119,6 +124,7 @@ public sealed partial class ProjectAnalyzer
             }
 
             _recordPublish(publisherType!, methodName, messageType, line, _ownerMethod);
+            _analyzer.RecordPublisherInvocationFact(publisherType!, methodName, messageType, line, _ownerMethod, _assembly, _project);
         }
 
         private string? DetermineMessageType(IInvocationOperation invocation)

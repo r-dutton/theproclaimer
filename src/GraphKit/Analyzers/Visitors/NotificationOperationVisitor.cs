@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
@@ -18,6 +19,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenRequests = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenMappings = new(StringComparer.OrdinalIgnoreCase);
+        private readonly FactWriter _facts;
 
         public NotificationOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -25,12 +27,15 @@ public sealed partial class ProjectAnalyzer
             NotificationHandlerInfo handler,
             string ownerMethod,
             FlowPointsToFacade pointsTo,
-            FlowValueContentFacade valueContent)
+            FlowValueContentFacade valueContent,
+            FactWriter facts)
             : base(model.Compilation, model, pointsTo, valueContent)
         {
             _analyzer = analyzer;
             _handler = handler;
             _ownerMethod = ownerMethod;
+            _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _ = _facts;
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
@@ -71,6 +76,7 @@ public sealed partial class ProjectAnalyzer
             }
 
             _handler.RequestInvocations.Add(new NotificationHandlerRequestInvocation(requestType!, line));
+            _analyzer.RecordNotificationHandlerRequestFact(_handler, requestType!, line);
         }
 
         private void HandleMediatorPublish(IInvocationOperation invocation)
@@ -89,6 +95,7 @@ public sealed partial class ProjectAnalyzer
             }
 
             _handler.PublishedNotifications.Add(new HandlerNotificationPublication(notificationType!, line));
+            _analyzer.RecordNotificationHandlerPublishFact(_handler, notificationType!, line);
         }
 
         private void HandleMapperMap(IInvocationOperation invocation)
@@ -110,6 +117,7 @@ public sealed partial class ProjectAnalyzer
             }
 
             _handler.MapperCalls.Add(new HandlerMapperCall(sourceType, destinationType, line));
+            _analyzer.RecordNotificationHandlerMappingFact(_handler, sourceType, destinationType!, line);
         }
 
         private void HandleRepositoryCall(IInvocationOperation invocation)
@@ -131,6 +139,7 @@ public sealed partial class ProjectAnalyzer
 
             var operation = DetermineRepositoryOperation(methodName);
             _handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(typeName!, methodName, line, operation));
+            _analyzer.RecordNotificationHandlerRepositoryFact(_handler, typeName!, methodName, operation, line);
         }
 
         private string? DetermineRequestType(IInvocationOperation invocation)

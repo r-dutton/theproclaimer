@@ -153,6 +153,7 @@ public sealed partial class ProjectAnalyzer
                     method.Identifier.Text,
                     pointsTo,
                     valueContent,
+                    _facts,
                     (publisherType, publishMethod, messageType, line, owner) =>
                     {
                         var key = $"{publisherType}@{publishMethod}@{messageType}@{line}";

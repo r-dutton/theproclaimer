@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
@@ -20,6 +21,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenMapperCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenHttpCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
+        private readonly FactWriter _facts;
 
         public CqrsOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -27,13 +29,16 @@ public sealed partial class ProjectAnalyzer
             HandlerInfo handler,
             string ownerMethod,
             FlowPointsToFacade pointsTo,
-            FlowValueContentFacade valueContent)
+            FlowValueContentFacade valueContent,
+            FactWriter facts)
             : base(model.Compilation, model, pointsTo, valueContent)
         {
             _analyzer = analyzer;
             _handler = handler;
             _ownerMethod = ownerMethod;
-            _efVisitor = new EfOperationVisitor(analyzer, handler.Assembly, handler.Project, RecordEfAccess);
+            _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _ = _facts;
+            _efVisitor = new EfOperationVisitor(analyzer, handler.Assembly, handler.Project, RecordEfAccess, _facts);
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
@@ -74,6 +79,7 @@ public sealed partial class ProjectAnalyzer
                 if (_seenRepositoryCalls.Add(key))
                 {
                     _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, methodName, line, operation));
+                    _analyzer.RecordHandlerRepositoryFact(_handler, typeName!, methodName, operation, line);
                 }
                 return;
             }
@@ -93,6 +99,7 @@ public sealed partial class ProjectAnalyzer
             if (_seenNotifications.Add(key))
             {
                 _handler.PublishedNotifications.Add(new HandlerNotificationPublication(notificationType, line));
+                _analyzer.RecordHandlerNotificationFact(_handler, notificationType, line);
             }
         }
 
@@ -112,6 +119,7 @@ public sealed partial class ProjectAnalyzer
             if (_seenMapperCalls.Add(key))
             {
                 _handler.MapperCalls.Add(new HandlerMapperCall(sourceType, destinationType, line));
+                _analyzer.RecordHandlerMappingFact(_handler, sourceType, destinationType!, line);
             }
         }
 
@@ -150,6 +158,7 @@ public sealed partial class ProjectAnalyzer
                 null,
                 null,
                 _ownerMethod));
+            _analyzer.RecordHandlerHttpClientFact(_handler, clientType, verb, route, invocation.TargetMethod.Name, line, _ownerMethod);
         }
 
         private void RecordEfAccess(string? contextType, string entityName, string operation, int line)
@@ -167,6 +176,7 @@ public sealed partial class ProjectAnalyzer
 
             var context = string.IsNullOrWhiteSpace(contextType) ? entityName : contextType!;
             _handler.DbContextAccesses.Add(new HandlerDbAccess(context, entityName, line));
+            _analyzer.RecordHandlerEfAccessFact(_handler, context, entityName, operation, line);
         }
 
         private string? Qualify(ITypeSymbol? symbol)

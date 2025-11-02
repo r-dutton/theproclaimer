@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Graph;
@@ -19,6 +20,7 @@ public sealed partial class ProjectAnalyzer
         private readonly string _profileFile;
         private readonly GraphSpan _profileSpan;
         private readonly HashSet<string> _registeredMappings;
+        private readonly FactWriter _facts;
 
         public MappingOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -30,7 +32,8 @@ public sealed partial class ProjectAnalyzer
             GraphSpan profileSpan,
             HashSet<string> registeredMappings,
             FlowPointsToFacade pointsTo,
-            FlowValueContentFacade valueContent)
+            FlowValueContentFacade valueContent,
+            FactWriter facts)
             : base(model.Compilation, model, pointsTo, valueContent)
         {
             _analyzer = analyzer;
@@ -40,6 +43,8 @@ public sealed partial class ProjectAnalyzer
             _profileFile = profileFile;
             _profileSpan = profileSpan;
             _registeredMappings = registeredMappings;
+            _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _ = _facts;
         }
 
         protected override void VisitInvocation(IInvocationOperation op)

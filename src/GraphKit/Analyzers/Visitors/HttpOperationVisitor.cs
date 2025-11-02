@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
@@ -15,6 +16,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HttpClientInfo _client;
         private readonly string _ownerMethod;
         private readonly HashSet<string> _seenCalls = new(StringComparer.OrdinalIgnoreCase);
+        private readonly FactWriter _facts;
 
         public HttpOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -22,12 +24,15 @@ public sealed partial class ProjectAnalyzer
             HttpClientInfo client,
             string ownerMethod,
             FlowPointsToFacade pointsTo,
-            FlowValueContentFacade valueContent)
+            FlowValueContentFacade valueContent,
+            FactWriter facts)
             : base(model.Compilation, model, pointsTo, valueContent)
         {
             _analyzer = analyzer;
             _client = client;
             _ownerMethod = ownerMethod;
+            _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _ = _facts;
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
@@ -53,12 +58,14 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            _client.OutboundCalls.Add(new HttpClientCall(
+            var call = new HttpClientCall(
                 _ownerMethod,
                 verb,
                 normalizedRoute,
                 line,
-                parameters));
+                parameters);
+            _client.OutboundCalls.Add(call);
+            _analyzer.RecordHttpClientOutboundCallFact(_client, call);
         }
 
         private string? TryResolveRoute(IInvocationOperation invocation)

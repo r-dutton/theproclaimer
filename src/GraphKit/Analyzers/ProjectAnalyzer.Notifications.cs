@@ -271,7 +271,8 @@ public sealed partial class ProjectAnalyzer
                     handler,
                     method.Identifier.Text,
                     pointsTo,
-                    valueContent);
+                    valueContent,
+                    _facts);
 
                 FlowAnalysisEngine.AnalyzeMethod(
                     project.Compilation,

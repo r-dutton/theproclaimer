@@ -115,7 +115,7 @@ public sealed partial class ProjectAnalyzer
 
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
-                var visitor = new ControllerOperationVisitor(this, model, info, pointsToFacade, valueContentFacade);
+                var visitor = new ControllerOperationVisitor(this, model, info, pointsToFacade, valueContentFacade, _facts);
                 FlowAnalysisEngine.AnalyzeMethod(
                     compilation,
                     model,

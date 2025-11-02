@@ -537,7 +537,7 @@ public sealed partial class ProjectAnalyzer
 
             var tree = methodSyntax.SyntaxTree;
             var model = project.GetModel(tree);
-            var visitor = new CqrsOperationVisitor(this, model, handler, method.Name, pointsTo, valueContent);
+            var visitor = new CqrsOperationVisitor(this, model, handler, method.Name, pointsTo, valueContent, _facts);
             FlowAnalysisEngine.AnalyzeMethod(
                 project.Compilation,
                 model,
