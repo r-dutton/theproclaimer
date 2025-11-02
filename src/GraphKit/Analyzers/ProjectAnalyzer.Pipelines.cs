@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -32,6 +35,38 @@ public sealed partial class ProjectAnalyzer
 
         var info = new PipelineBehaviorInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, requestType, responseType);
         CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations);
+        var model = project.GetModel(tree);
+        var pointsTo = new FlowPointsToFacade();
+        var valueContent = new FlowValueContentFacade();
+
+        foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
+        {
+            if (model.GetDeclaredSymbol(method) is not IMethodSymbol methodSymbol)
+            {
+                continue;
+            }
+
+            var visitor = new PipelineOperationVisitor(
+                this,
+                model,
+                project.AssemblyName,
+                project.RelativeDirectory,
+                method.Identifier.Text,
+                pointsTo,
+                valueContent,
+                info.ServiceUsages,
+                info.OptionsUsages,
+                info.CacheInvocations);
+
+            FlowAnalysisEngine.AnalyzeMethod(
+                project.Compilation,
+                model,
+                methodSymbol,
+                new FlowInterproceduralConfig(4, 2),
+                ShouldExpandForCqrsEfHttpMap,
+                visitor);
+        }
+
         _pipelineBehaviors[fqdn] = info;
     }
 
@@ -81,6 +116,38 @@ public sealed partial class ProjectAnalyzer
 
         var info = new RequestProcessorInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, requestType, responseType, kind);
         CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations);
+        var model = project.GetModel(tree);
+        var pointsTo = new FlowPointsToFacade();
+        var valueContent = new FlowValueContentFacade();
+
+        foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
+        {
+            if (model.GetDeclaredSymbol(method) is not IMethodSymbol methodSymbol)
+            {
+                continue;
+            }
+
+            var visitor = new PipelineOperationVisitor(
+                this,
+                model,
+                project.AssemblyName,
+                project.RelativeDirectory,
+                method.Identifier.Text,
+                pointsTo,
+                valueContent,
+                info.ServiceUsages,
+                info.OptionsUsages,
+                info.CacheInvocations);
+
+            FlowAnalysisEngine.AnalyzeMethod(
+                project.Compilation,
+                model,
+                methodSymbol,
+                new FlowInterproceduralConfig(4, 2),
+                ShouldExpandForCqrsEfHttpMap,
+                visitor);
+        }
+
         _requestProcessors[fqdn] = info;
     }
 

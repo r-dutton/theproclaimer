@@ -2,11 +2,14 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -116,6 +119,9 @@ public sealed partial class ProjectAnalyzer
         var span = ToGraphSpan(tree, classDeclaration);
 
         var serviceInfo = new ServiceInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
+        var model = project.GetModel(tree);
+        var pointsTo = new FlowPointsToFacade();
+        var valueContent = new FlowValueContentFacade();
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var baseTypeCandidates = classDeclaration.BaseList?.Types
@@ -453,6 +459,27 @@ public sealed partial class ProjectAnalyzer
                         break;
                     }
                 }
+            }
+
+            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol)
+            {
+                var visitor = new ServiceOperationVisitor(
+                    this,
+                    model,
+                    project.AssemblyName,
+                    project.RelativeDirectory,
+                    method.Identifier.Text,
+                    pointsTo,
+                    valueContent,
+                    serviceInfo);
+
+                FlowAnalysisEngine.AnalyzeMethod(
+                    project.Compilation,
+                    model,
+                    methodSymbol,
+                    new FlowInterproceduralConfig(4, 2),
+                    ShouldExpandForCqrsEfHttpMap,
+                    visitor);
             }
         }
 
