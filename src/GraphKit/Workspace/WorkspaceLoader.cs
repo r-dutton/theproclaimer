@@ -234,7 +234,7 @@ public sealed class WorkspaceLoader
             "disable" => NullableContextOptions.Disable,
             "warnings" => NullableContextOptions.Warnings,
             "annotations" => NullableContextOptions.Annotations,
-            "safeonly" => NullableContextOptions.SafeOnly,
+            "safeonly" => NullableContextOptions.Enable,
             _ => NullableContextOptions.Disable
         };
     }
