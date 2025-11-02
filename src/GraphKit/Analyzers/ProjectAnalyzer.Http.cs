@@ -2,10 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
+using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -31,8 +35,25 @@ public sealed partial class ProjectAnalyzer
 
         var info = new HttpClientInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
 
+        var model = project.GetModel(tree);
+        var compilation = project.Compilation;
+        var pointsToFacade = new FlowPointsToFacade();
+        var valueContentFacade = new FlowValueContentFacade();
+
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
+            if (model.GetDeclaredSymbol(method) is IMethodSymbol methodSymbol)
+            {
+                var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade);
+                FlowAnalysisEngine.AnalyzeMethod(
+                    compilation,
+                    model,
+                    methodSymbol,
+                    new FlowInterproceduralConfig(4, 2),
+                    ShouldExpandForHttpClient,
+                    visitor);
+            }
+
             var routeHints = CollectRouteHints(tree, method);
 
             var requestMessageHints = new Dictionary<string, (string? Method, RouteHint? Route)>(StringComparer.OrdinalIgnoreCase);
@@ -152,6 +173,9 @@ public sealed partial class ProjectAnalyzer
 
         _httpClients[fqdn] = info;
     }
+
+    private static bool ShouldExpandForHttpClient(IInvocationOperation invocation)
+        => AnalysisPredicates.IsHttpClientCall(invocation);
 
     private void EmitHttpClients()
     {
