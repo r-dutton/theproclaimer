@@ -1,11 +1,15 @@
 
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Linq;
 using GraphKit.Graph;
+using GraphKit.Outputs.Abstractions;
+using GraphKit.Outputs.FlowBuilder;
+using GraphKit.Outputs.Legacy;
 using GraphKit.Workspace;
 
 namespace GraphKit.Outputs;
@@ -286,43 +290,43 @@ public sealed class GraphOutputWriter
         var flowDirectory = Path.Combine(_outputDirectory, "flows");
         Directory.CreateDirectory(flowDirectory);
 
-        var engine = new TurboFlowEngine();
-        var narratives = engine.BuildNarratives(document, _workspaceIndex);
-        if (narratives.Count == 0)
+        IGraphProvider provider = new LegacyGraphProvider(document.Nodes, document.Edges);
+        var graph = FlowBuilderCore.BuildGraph(provider);
+        var endpoints = graph.Nodes
+            .Where(static n => n.Type.StartsWith("endpoint.", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(static n => n.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (endpoints.Count == 0)
         {
             return;
         }
 
-        // Stream controllers.all.md file incrementally instead of building a massive string in memory
         var allPath = Path.Combine(flowDirectory, "controllers.all.md");
         await using var stream = new FileStream(allPath, FileMode.Create, FileAccess.Write, FileShare.None);
         await using var writer = new StreamWriter(stream);
 
-        foreach (var narrative in narratives)
+        foreach (var endpoint in endpoints)
         {
-            var flow = narrative.Text;
+            var flow = FlowBuilderMarkdown.Render(graph, node => string.Equals(node.Id, endpoint.Id, StringComparison.Ordinal));
             if (string.IsNullOrWhiteSpace(flow))
             {
                 continue;
             }
 
-            await writer.WriteAsync(flow);
+            await writer.WriteLineAsync(flow);
             if (!flow.EndsWith(Environment.NewLine, StringComparison.Ordinal))
             {
                 await writer.WriteLineAsync();
             }
 
-            var primary = narrative.Actions.FirstOrDefault();
-            var basis = !string.IsNullOrWhiteSpace(primary?.Fqdn)
-                ? primary!.Fqdn
-                : (!string.IsNullOrWhiteSpace(primary?.Name) ? primary!.Name : narrative.DisplayName);
-
+            var basis = !string.IsNullOrWhiteSpace(endpoint.DisplayName) ? endpoint.DisplayName : endpoint.Id;
             if (string.IsNullOrWhiteSpace(basis))
             {
                 continue;
             }
 
-            var fileName = SanitizeFileName(basis!) + ".md";
+            var fileName = SanitizeFileName(basis) + ".md";
             await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
         }
 

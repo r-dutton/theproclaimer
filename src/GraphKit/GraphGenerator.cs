@@ -13,7 +13,7 @@ public sealed class GraphGenerator
 {
     private const string AnalyzerVersion = "0.2.1";
 
-    public async Task<GraphDocument> GenerateAsync(GraphGenerationOptions options, CancellationToken cancellationToken = default)
+    public async Task<GraphGenerationResult> GenerateAsync(GraphGenerationOptions options, CancellationToken cancellationToken = default)
     {
         var loader = new WorkspaceLoader(options.WorkspacePath, options.Solutions);
         var projects = await loader.LoadAsync(cancellationToken); // process all solutions/projects without filtering
@@ -27,7 +27,14 @@ public sealed class GraphGenerator
         {
             Console.WriteLine("[graph] Cache hit. Skipping analysis and reusing existing graph.");
             await outputWriter.WriteAsync(cachedDocument, AnalyzerVersion, cancellationToken);
-            return cachedDocument;
+
+            var cachedFacts = new FactWriter();
+            PopulateFactsFromGraph(cachedDocument, cachedFacts);
+            var cachedBag = FactsPipeline.Finalize(cachedFacts);
+            var cacheFactsDirectory = Path.GetFullPath(Path.Combine(options.WorkspacePath, options.OutputDirectory));
+            FactsJsonWriter.Write(cachedBag, Path.Combine(cacheFactsDirectory, "facts.json"));
+
+            return new GraphGenerationResult(cachedDocument, cachedBag);
         }
 
         var factWriter = new FactWriter();
@@ -52,7 +59,7 @@ public sealed class GraphGenerator
         await outputWriter.WriteAsync(document, AnalyzerVersion, cancellationToken);
         await cacheManager.SaveAsync(AnalyzerVersion, document, fingerprints, cancellationToken);
 
-        return document;
+        return new GraphGenerationResult(document, factBag);
     }
 
     private static string MapConfidence(double value)
