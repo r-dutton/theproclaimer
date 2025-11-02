@@ -671,7 +671,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (!TryResolveNodeReference(mapping.DestinationType, out var destination))
+                if (!TryResolveNodeReference(mapping.DestinationType, out var destination, handler.Assembly, handler.Project))
                 {
                     continue;
                 }
@@ -772,12 +772,12 @@ public sealed partial class ProjectAnalyzer
                     props["target_service"] = targetService!;
                 }
 
-                EnrichClientPropsFromHttpClient(preferredInvocation, props);
+                EnrichClientPropsFromHttpClient(preferredInvocation, props, handler.Assembly);
 
                 var propsOrNull = props.Count > 0 ? props : null;
                 var invocationLine = preferredInvocation.Line;
 
-                if (TryResolveHttpClient(preferredInvocation.ClientType, out var clientInfo))
+                if (TryResolveHttpClient(preferredInvocation.ClientType, out var clientInfo, handler.Assembly))
                 {
                     var clientId = StableId.For("http.client", clientInfo.Fqdn, clientInfo.Assembly, clientInfo.SymbolId);
                     _edges.Add(new GraphEdge
@@ -1309,9 +1309,9 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private void EnrichClientPropsFromHttpClient(HandlerClientInvocation invocation, IDictionary<string, object> props)
+    private void EnrichClientPropsFromHttpClient(HandlerClientInvocation invocation, IDictionary<string, object> props, string? contextAssembly)
     {
-        if (!TryResolveHttpClient(invocation.ClientType, out var client) || client.OutboundCalls.Count == 0)
+        if (!TryResolveHttpClient(invocation.ClientType, out var client, contextAssembly) || client.OutboundCalls.Count == 0)
         {
             return;
         }
@@ -1393,13 +1393,16 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
-    private bool TryResolveHttpClient(string clientType, [NotNullWhen(true)] out HttpClientInfo? client)
+    private bool TryResolveHttpClient(string clientType, [NotNullWhen(true)] out HttpClientInfo? client, string? preferredAssembly = null)
     {
         client = null;
         if (string.IsNullOrWhiteSpace(clientType))
         {
             return false;
         }
+
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+        var clientNamespaceRoot = GetNamespaceRoot(clientType);
 
         var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var simpleCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1598,6 +1601,17 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot))
+        {
+            var preferredMatches = matches
+                .Where(match => string.Equals(GetAssemblyRoot(match.Client.Assembly), preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (preferredMatches.Count > 0)
+            {
+                matches = preferredMatches;
+            }
+        }
+
         if (matches.Count == 0)
         {
             client = null;
@@ -1636,6 +1650,32 @@ public sealed partial class ProjectAnalyzer
                 if (NamespaceRootMatches(match.Fqdn, source))
                 {
                     score += 200;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                if (string.Equals(match.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 600;
+                }
+
+                var matchAssemblyRoot = GetAssemblyRoot(match.Assembly);
+                if (!string.IsNullOrWhiteSpace(matchAssemblyRoot) &&
+                    !string.IsNullOrWhiteSpace(preferredAssemblyRoot) &&
+                    string.Equals(matchAssemblyRoot, preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 350;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(clientNamespaceRoot))
+            {
+                var matchNamespaceRoot = GetNamespaceRoot(match.Fqdn);
+                if (!string.IsNullOrWhiteSpace(matchNamespaceRoot) &&
+                    string.Equals(matchNamespaceRoot, clientNamespaceRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 250;
                 }
             }
 

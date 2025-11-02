@@ -320,6 +320,29 @@ namespace GraphKit.Outputs
                     {
                         continue;
                     }
+                    var preferredServiceNode = PreferControllerRootServiceNode(state, serviceNode);
+                    if (preferredServiceNode is null)
+                    {
+                        continue;
+                    }
+                    if (!ReferenceEquals(preferredServiceNode, serviceNode))
+                    {
+                        serviceNode = preferredServiceNode;
+                    }
+                    if (state.AllowedIds is { } allow && !allow.Contains(serviceNode.Id))
+                    {
+                        var serviceRoot = GetAssemblyRoot(serviceNode.Assembly);
+                        if (string.IsNullOrWhiteSpace(state.ControllerRoot) ||
+                            string.IsNullOrWhiteSpace(serviceRoot) ||
+                            string.Equals(serviceRoot, state.ControllerRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            allow.Add(serviceNode.Id);
+                        }
+                        else
+                        {
+                            continue;
+                        }
+                    }
 
                     if (IsInfrastructureNoiseService(serviceNode))
                     {
@@ -587,8 +610,10 @@ namespace GraphKit.Outputs
                     : null;
 
                 string? targetDisplay = null;
+                GraphNode? resolvedDomainNode = null;
                 if (!string.IsNullOrWhiteSpace(domainEdge.To) && state.NodesById.TryGetValue(domainEdge.To!, out var domainNode))
                 {
+                    resolvedDomainNode = domainNode;
                     targetDisplay = GetDisplayName(domainNode);
                 }
                 else if (domainEdge.Props is { } targetProps)
@@ -621,6 +646,11 @@ namespace GraphKit.Outputs
                 var variablePart = string.IsNullOrWhiteSpace(variableName) ? string.Empty : $" ({variableName})";
                 var baseLabel = $"domain {labelTarget}{methodPart}{variablePart}";
                 AppendIndented(builder, indent, FormatLinkedCode(baseLabel, domainEdge.Transform?.Location));
+
+                if (resolvedDomainNode is not null && state.IsAllowedNode(resolvedDomainNode.Id))
+                {
+                    AppendDomainNodeFlow(builder, state, resolvedDomainNode, indent + 1);
+                }
             }
         }
 
@@ -673,6 +703,126 @@ namespace GraphKit.Outputs
                 var baseLabel = $"domain {labelTarget}{methodPart}{variablePart}";
                 AppendIndented(builder, indent, FormatLinkedCode(baseLabel, location));
             }
+        }
+
+        private static void AppendDomainNodeFlow(
+            StringBuilder builder,
+            FlowRenderState state,
+            GraphNode domainNode,
+            int indent)
+        {
+            if (!state.DomainNodeStack.Add(domainNode.Id))
+            {
+                AppendIndented(builder, indent, "... (domain recursion detected)");
+                return;
+            }
+
+            try
+            {
+                if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+                {
+                    AppendIndented(builder, indent, "... (max depth reached)");
+                    return;
+                }
+
+                if (state.AllowedIds is { } allow)
+                {
+                    allow.Add(domainNode.Id);
+                }
+
+                if (!state.EdgesByFrom.TryGetValue(domainNode.Id, out var edges))
+                {
+                    return;
+                }
+
+                foreach (var eventEdge in edges.Where(e => e.Kind == "publishes_domain_event"))
+                {
+                    if (eventEdge.To is null)
+                    {
+                        continue;
+                    }
+
+                    if (!state.NodesById.TryGetValue(eventEdge.To, out var eventNode))
+                    {
+                        continue;
+                    }
+
+                    var baseLabel = $"publishes_domain_event {eventNode.Name}";
+                    AppendIndented(builder, indent, FormatLinkedCode(baseLabel, eventEdge.Transform?.Location));
+                    AppendDomainEventFlow(builder, state, eventNode, indent + 1);
+                }
+            }
+            finally
+            {
+                state.DomainNodeStack.Remove(domainNode.Id);
+            }
+        }
+
+        private static void AppendDomainEventFlow(
+            StringBuilder builder,
+            FlowRenderState state,
+            GraphNode eventNode,
+            int indent)
+        {
+            if (!state.DomainEventStack.Add(eventNode.Id))
+            {
+                AppendIndented(builder, indent, "... (domain event recursion detected)");
+                return;
+            }
+
+            try
+            {
+                if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
+                {
+                    AppendIndented(builder, indent, "... (max depth reached)");
+                    return;
+                }
+
+                if (state.AllowedIds is { } allow)
+                {
+                    allow.Add(eventNode.Id);
+                }
+
+                if (!state.EdgesByFrom.TryGetValue(eventNode.Id, out var edges))
+                {
+                    return;
+                }
+
+                foreach (var handlerEdge in edges.Where(e => e.Kind == "handled_by"))
+                {
+                    if (handlerEdge.To is null)
+                    {
+                        continue;
+                    }
+
+                    if (!state.NodesById.TryGetValue(handlerEdge.To, out var handlerNode))
+                    {
+                        continue;
+                    }
+
+                    if (state.AllowedIds is { } allowSet)
+                    {
+                        allowSet.Add(handlerNode.Id);
+                    }
+
+                    var baseLabel = $"handled_by {handlerNode.Name}";
+                    AppendIndented(builder, indent, FormatLinkedCode(baseLabel, handlerEdge.Transform?.Location));
+                    AppendDomainEventHandlerFlow(builder, state, handlerNode, indent + 1);
+                }
+            }
+            finally
+            {
+                state.DomainEventStack.Remove(eventNode.Id);
+            }
+        }
+
+        private static void AppendDomainEventHandlerFlow(
+            StringBuilder builder,
+            FlowRenderState state,
+            GraphNode handlerNode,
+            int indent)
+        {
+            AppendHandlerFlow(builder, state, handlerNode, indent);
         }
 
         private static void AppendRemainingDomainCalls(

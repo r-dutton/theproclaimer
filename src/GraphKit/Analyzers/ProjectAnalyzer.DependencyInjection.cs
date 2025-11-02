@@ -977,7 +977,7 @@ public sealed partial class ProjectAnalyzer
                 .ThenBy(r => r.Span.StartLine))
             {
                 string? implementationId;
-                if (TryResolveNodeReference(registration.ImplementationType, out var implementation))
+                if (TryResolveNodeReference(registration.ImplementationType, out var implementation, registration.Assembly, registration.Project))
                 {
                     implementationId = implementation.Id;
                 }
@@ -1434,7 +1434,7 @@ public sealed partial class ProjectAnalyzer
             return null;
         }
 
-        if (TryResolveNodeReference(registration.ImplementationType, out var reference))
+        if (TryResolveNodeReference(registration.ImplementationType, out var reference, registration.Assembly, registration.Project))
         {
             return reference.Id;
         }

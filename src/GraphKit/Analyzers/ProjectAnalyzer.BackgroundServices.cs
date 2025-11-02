@@ -236,7 +236,7 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var call in service.RepositoryCalls)
             {
-                if (!TryResolveNodeReference(call.RepositoryType, out var repository))
+                if (!TryResolveNodeReference(call.RepositoryType, out var repository, service.Assembly, service.Project))
                 {
                     continue;
                 }

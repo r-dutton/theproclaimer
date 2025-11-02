@@ -322,11 +322,73 @@ public sealed partial class ProjectAnalyzer
                     string.Equals(normalizedServiceType, serviceInfo.Fqdn, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(normalizedSimple, serviceInfo.Name, StringComparison.OrdinalIgnoreCase);
 
+                string? dispatchRequestType = null;
+                string? dispatchResponseType = null;
+                string? dispatchKind = null;
+
+                if (invocation is not null && !string.IsNullOrWhiteSpace(methodName))
+                {
+                    var isRequestProcessor =
+                        (typeName?.Contains("RequestProcessor", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (resolvedType?.Contains("RequestProcessor", StringComparison.OrdinalIgnoreCase) ?? false);
+
+                    if (isRequestProcessor &&
+                        (string.Equals(methodName, "Process", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(methodName, "ProcessAsync", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        if (memberAccess.Name is GenericNameSyntax generic && generic.TypeArgumentList.Arguments.Count > 0)
+                        {
+                            var responseCandidate = generic.TypeArgumentList.Arguments[0].ToString();
+                            if (!string.IsNullOrWhiteSpace(responseCandidate))
+                            {
+                                var qualifiedResponse = QualifyTypeName(responseCandidate, project.AssemblyName, project.RelativeDirectory);
+                                dispatchResponseType = string.IsNullOrWhiteSpace(qualifiedResponse) ? responseCandidate : qualifiedResponse;
+                            }
+                        }
+
+                        if (invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is { } argumentExpression)
+                        {
+                            switch (argumentExpression)
+                            {
+                                case ObjectCreationExpressionSyntax creationExpression:
+                                    dispatchRequestType = QualifyTypeName(creationExpression.Type.ToString(), project.AssemblyName, project.RelativeDirectory);
+                                    break;
+                                case IdentifierNameSyntax identifierArgument:
+                                    dispatchRequestType = TryResolveExpressionType(identifierArgument, parameterTypes, localVariables, project.AssemblyName, project.RelativeDirectory, fieldLookup);
+                                    break;
+                                case MemberAccessExpressionSyntax memberAccessExpr when memberAccessExpr.Expression is IdentifierNameSyntax memberRoot:
+                                    dispatchRequestType = TryResolveExpressionType(memberRoot, parameterTypes, localVariables, project.AssemblyName, project.RelativeDirectory, fieldLookup);
+                                    break;
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(dispatchRequestType))
+                        {
+                            var qualifiedRequest = QualifyTypeName(dispatchRequestType, project.AssemblyName, project.RelativeDirectory);
+                            if (!string.IsNullOrWhiteSpace(qualifiedRequest))
+                            {
+                                dispatchRequestType = qualifiedRequest;
+                            }
+
+                            if (string.IsNullOrWhiteSpace(dispatchResponseType))
+                            {
+                                var requestInfo = FindRequestByType(dispatchRequestType, preferredAssembly: project.AssemblyName, preferredProject: project.RelativeDirectory, serviceType: resolvedType ?? typeName);
+                                if (!string.IsNullOrWhiteSpace(requestInfo?.ResponseType) && !IsGenericPlaceholder(requestInfo.ResponseType))
+                                {
+                                    dispatchResponseType = requestInfo.ResponseType;
+                                }
+                            }
+
+                            dispatchKind = "requestprocessor.dispatch";
+                        }
+                    }
+                }
+
                 if (!isSelfReference && (!recordedUsage || !IsRepositoryType(normalizedServiceType)))
                 {
-                    if (!shouldSkipServiceUsage)
+                    if (!shouldSkipServiceUsage || dispatchKind is not null)
                     {
-                        serviceInfo.ServiceUsages.Add(new ServiceUsage(normalizedServiceType, line, serviceMethodName, methodName));
+                        serviceInfo.ServiceUsages.Add(new ServiceUsage(normalizedServiceType, line, serviceMethodName, methodName, dispatchRequestType, dispatchResponseType, dispatchKind));
                     }
                 }
             }
@@ -432,6 +494,9 @@ public sealed partial class ProjectAnalyzer
                 Props = serviceProps
             };
 
+            var serviceNode = _nodes[id];
+            var handlerCache = new Dictionary<string, HandlerInfo>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var repositoryCall in service.RepositoryCalls)
             {
                 var targetType = ResolveImplementationType(repositoryCall.RepositoryType) ?? repositoryCall.RepositoryType;
@@ -469,7 +534,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (!TryResolveNodeReference(mapper.DestinationType, out var destination))
+                if (!TryResolveNodeReference(mapper.DestinationType, out var destination, service.Assembly, service.Project))
                 {
                     continue;
                 }
@@ -559,7 +624,7 @@ public sealed partial class ProjectAnalyzer
 
                 var propsOrNull = props.Count > 0 ? props : null;
 
-                if (TryResolveHttpClient(clientInvocation.ClientType, out var clientInfo))
+                if (TryResolveHttpClient(clientInvocation.ClientType, out var clientInfo, service.Assembly))
                 {
                     var clientId = StableId.For("http.client", clientInfo.Fqdn, clientInfo.Assembly, clientInfo.SymbolId);
                     _edges.Add(new GraphEdge
@@ -707,6 +772,90 @@ public sealed partial class ProjectAnalyzer
                         Evidence = CreateEvidence(service.FilePath, usage.Line)
                     });
                 }
+
+                if (!string.IsNullOrWhiteSpace(usage.DispatchKind) && !string.IsNullOrWhiteSpace(usage.RequestType))
+                {
+                    var requestInfo = FindRequestByType(usage.RequestType, preferredAssembly: service.Assembly, preferredProject: service.Project, serviceType: usage.ServiceType) ??
+                                      ResolveRequestInfo(usage.RequestType, null, usage.ServiceType);
+
+                    if (requestInfo is not null)
+                    {
+                        var requestId = StableId.For("cqrs.request", requestInfo.Fqdn, requestInfo.Assembly, requestInfo.SymbolId);
+                        if (_nodes.ContainsKey(requestId))
+                        {
+                            var responseValue = usage.ResponseType;
+                            if (string.IsNullOrWhiteSpace(responseValue) && !string.IsNullOrWhiteSpace(requestInfo.ResponseType) && !IsGenericPlaceholder(requestInfo.ResponseType))
+                            {
+                                responseValue = requestInfo.ResponseType;
+                            }
+
+                            var requestProps = new Dictionary<string, object>
+                            {
+                                ["service"] = usage.ServiceType,
+                                ["invocation"] = usage.InvocationMethod ?? usage.Method ?? string.Empty,
+                                ["request_type"] = requestInfo.Fqdn,
+                                ["response_type"] = responseValue ?? string.Empty
+                            };
+
+                            _edges.Add(new GraphEdge
+                            {
+                                From = id,
+                                To = requestId,
+                                Kind = "sends_request",
+                                Source = "synthetic",
+                                Confidence = 0.9,
+                                Transform = new GraphTransform
+                                {
+                                    Type = usage.DispatchKind!,
+                                    Location = new GraphLocation { File = service.FilePath, Line = usage.Line }
+                                },
+                                Props = requestProps,
+                                Evidence = CreateEvidence(service.FilePath, usage.Line)
+                            });
+
+                            var handler = ResolvePreferredHandler(requestInfo.Fqdn, serviceNode, handlerCache) ??
+                                          FindHandlerForRequest(requestInfo.Fqdn);
+                            if (handler is not null)
+                            {
+                                var handlerId = StableId.For("cqrs.handler", handler.Fqdn, handler.Assembly, handler.SymbolId);
+                                var handlerResponse = usage.ResponseType;
+                                if (string.IsNullOrWhiteSpace(handlerResponse) && !string.IsNullOrWhiteSpace(handler.ResponseType) && !IsGenericPlaceholder(handler.ResponseType))
+                                {
+                                    handlerResponse = handler.ResponseType;
+                                }
+                                if (string.IsNullOrWhiteSpace(handlerResponse) && !string.IsNullOrWhiteSpace(requestInfo.ResponseType) && !IsGenericPlaceholder(requestInfo.ResponseType))
+                                {
+                                    handlerResponse = requestInfo.ResponseType;
+                                }
+
+                                var handlerProps = new Dictionary<string, object>
+                                {
+                                    ["request_type"] = requestInfo.Fqdn,
+                                    ["handler"] = handler.Fqdn,
+                                    ["response_type"] = handlerResponse ?? string.Empty
+                                };
+
+                                _handlersByRequestType[requestInfo.Fqdn] = handler;
+
+                                _edges.Add(new GraphEdge
+                                {
+                                    From = requestId,
+                                    To = handlerId,
+                                    Kind = "handled_by",
+                                    Source = "synthetic",
+                                    Confidence = 0.85,
+                                    Transform = new GraphTransform
+                                    {
+                                        Type = usage.DispatchKind!,
+                                        Location = new GraphLocation { File = service.FilePath, Line = usage.Line }
+                                    },
+                                    Props = handlerProps,
+                                    Evidence = CreateEvidence(service.FilePath, usage.Line)
+                                });
+                            }
+                        }
+                    }
+                }
             }
 
             foreach (var cache in service.CacheInvocations)
@@ -846,9 +995,23 @@ public sealed partial class ProjectAnalyzer
         }
 
         var resolvedClientType = clientType;
-        if (TryResolveHttpClient(clientType, out var resolvedClient))
+        if (!string.IsNullOrWhiteSpace(serviceInfo.Assembly) &&
+            serviceInfo.Assembly.StartsWith("Dataverse", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(clientType, "Cirrus.Connections.DataGet.Client.DataGetClient", StringComparison.OrdinalIgnoreCase))
         {
-            resolvedClientType = resolvedClient.Fqdn;
+            clientType = "Dataverse.Services.Features.DataGet.Client.DataGetClient";
+        }
+
+        if (TryResolveHttpClient(clientType, out var resolvedClient, serviceInfo.Assembly))
+        {
+            var serviceRoot = GetAssemblyRoot(serviceInfo.Assembly);
+            var resolvedRoot = GetAssemblyRoot(resolvedClient.Assembly);
+            if (string.IsNullOrWhiteSpace(serviceRoot) ||
+                string.Equals(serviceRoot, resolvedRoot, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(resolvedClient.Assembly, serviceInfo.Assembly, StringComparison.OrdinalIgnoreCase))
+            {
+                resolvedClientType = resolvedClient.Fqdn;
+            }
         }
 
         var targetService = ResolveClientTargetService(resolvedClientType);

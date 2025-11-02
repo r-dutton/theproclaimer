@@ -196,7 +196,29 @@ public static partial class FlowBuilder
 				{
 					continue;
 				}
-				if (state.AllowedIds is { } allow && !allow.Contains(serviceNode.Id)) continue;
+				var preferredServiceNode = PreferControllerRootServiceNode(state, serviceNode);
+				if (preferredServiceNode is null)
+				{
+					continue;
+				}
+				if (!ReferenceEquals(preferredServiceNode, serviceNode))
+				{
+					serviceNode = preferredServiceNode;
+				}
+				if (state.AllowedIds is { } allow && !allow.Contains(serviceNode.Id))
+				{
+					var serviceRoot = GetAssemblyRoot(serviceNode.Assembly);
+					if (string.IsNullOrWhiteSpace(state.ControllerRoot) ||
+					    string.IsNullOrWhiteSpace(serviceRoot) ||
+					    string.Equals(serviceRoot, state.ControllerRoot, StringComparison.OrdinalIgnoreCase))
+					{
+						allow.Add(serviceNode.Id);
+					}
+					else
+					{
+						continue;
+					}
+				}
 
 				if (IsInfrastructureNoiseService(serviceNode))
 				{

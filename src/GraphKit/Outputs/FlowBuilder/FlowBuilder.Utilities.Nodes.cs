@@ -9,15 +9,15 @@ namespace GraphKit.Outputs
 {
     public static partial class Utilities
     {
-
         public static class Nodes
         {
             public static void AppendGenericServiceNode(StringBuilder builder,
-        FlowBuilder.FlowRenderState state,
-        GraphNode node,
-        string? invokedMethod,
-        int indent,
-        bool suppressSelfHeuristic = false)
+                FlowBuilder.FlowRenderState state,
+                GraphNode node,
+                string? invokedMethod,
+                int indent,
+                bool suppressSelfHeuristic = false
+            )
             {
                 if (state.MaxDepth.HasValue && indent >= state.MaxDepth.Value)
                 {
@@ -45,6 +45,15 @@ namespace GraphKit.Outputs
                     if (!state.NodesById.TryGetValue(serviceEdge.To, out var serviceNode))
                     {
                         continue;
+                    }
+                    var preferredServiceNode = FlowBuilder.PreferControllerRootServiceNode(state, serviceNode);
+                    if (preferredServiceNode is null)
+                    {
+                        continue;
+                    }
+                    if (!ReferenceEquals(preferredServiceNode, serviceNode))
+                    {
+                        serviceNode = preferredServiceNode;
                     }
 
                     if (IsInfrastructureNoiseService(serviceNode))
@@ -199,6 +208,29 @@ namespace GraphKit.Outputs
                     if (!state.NodesById.TryGetValue(serviceEdge.To, out var serviceNode))
                     {
                         continue;
+                    }
+                    var preferredServiceNode = FlowBuilder.PreferControllerRootServiceNode(state, serviceNode);
+                    if (preferredServiceNode is null)
+                    {
+                        continue;
+                    }
+                    if (!ReferenceEquals(preferredServiceNode, serviceNode))
+                    {
+                        serviceNode = preferredServiceNode;
+                    }
+                    if (state.AllowedIds is { } allow && !allow.Contains(serviceNode.Id))
+                    {
+                        var serviceRoot = GetAssemblyRoot(serviceNode.Assembly);
+                        if (string.IsNullOrWhiteSpace(state.ControllerRoot) ||
+                            string.IsNullOrWhiteSpace(serviceRoot) ||
+                            string.Equals(serviceRoot, state.ControllerRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            allow.Add(serviceNode.Id);
+                        }
+                        else
+                        {
+                            continue;
+                        }
                     }
 
                     if (IsInfrastructureNoiseService(serviceNode))

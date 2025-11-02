@@ -306,7 +306,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (!TryResolveNodeReference(mapping.DestinationType, out var destination))
+                if (!TryResolveNodeReference(mapping.DestinationType, out var destination, repository.Assembly, repository.Project))
                 {
                     continue;
                 }

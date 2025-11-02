@@ -48,6 +48,8 @@ public static partial class FlowBuilder
         public HashSet<string> NotificationStack { get; } = new(StringComparer.Ordinal);
         public HashSet<string> TargetServiceVisited { get; } = new(StringComparer.Ordinal);
         public HashSet<string> ServiceStack { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> DomainNodeStack { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> DomainEventStack { get; } = new(StringComparer.Ordinal);
         // Deduplication sets to suppress repeated request dispatch and handler expansion noise within a single flow render
         public HashSet<string>? DedupRequests { get; set; }
         public HashSet<string>? ExpandedImplementations { get; set; }
@@ -65,6 +67,7 @@ public static partial class FlowBuilder
         public ImpactAccumulator? CurrentImpact => _impactStack.Count > 0 ? _impactStack.Peek() : null;
         public void PushImpact(ImpactAccumulator impact) => _impactStack.Push(impact);
         public ImpactAccumulator? PopImpact() => _impactStack.Count > 0 ? _impactStack.Pop() : null;
+        public string? ControllerRoot { get; set; }
 
         public void ResetPerFlowState()
         {
@@ -80,6 +83,9 @@ public static partial class FlowBuilder
             HandlerStack.Clear();
             NotificationStack.Clear();
             ServiceStack.Clear();
+            DomainNodeStack.Clear();
+            DomainEventStack.Clear();
+            ControllerRoot = null;
         }
 
         public IEnumerable<GraphNode> FindCandidateImplementations(GraphNode serviceNode)

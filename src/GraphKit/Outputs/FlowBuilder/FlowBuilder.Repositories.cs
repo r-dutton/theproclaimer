@@ -153,6 +153,8 @@ public static partial class FlowBuilder
         {
             AppendMappingEdge(builder, state, mapEdge, indent);
         }
+
+        AppendDomainNodeFlow(builder, state, entity, indent);
     }
 
     public static void AppendConversion(

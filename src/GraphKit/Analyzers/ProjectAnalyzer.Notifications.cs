@@ -310,7 +310,7 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var repositoryCall in handler.RepositoryCalls)
             {
-                if (!TryResolveNodeReference(repositoryCall.RepositoryType, out var repository))
+                if (!TryResolveNodeReference(repositoryCall.RepositoryType, out var repository, handler.Assembly, handler.Project))
                 {
                     continue;
                 }
@@ -343,7 +343,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (!TryResolveNodeReference(mapping.DestinationType, out var destination))
+                if (!TryResolveNodeReference(mapping.DestinationType, out var destination, handler.Assembly, handler.Project))
                 {
                     continue;
                 }

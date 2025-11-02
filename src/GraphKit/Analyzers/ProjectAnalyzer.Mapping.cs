@@ -103,7 +103,9 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var mapping in _mappings)
         {
-            if (!TryResolveNodeReference(mapping.SourceType, out var sourceNode) || !TryResolveNodeReference(mapping.DestinationType, out var destinationNode))
+            var preferredAssembly = GuessAssemblyName(mapping.ProfileFqdn);
+            if (!TryResolveNodeReference(mapping.SourceType, out var sourceNode, preferredAssembly) ||
+                !TryResolveNodeReference(mapping.DestinationType, out var destinationNode, preferredAssembly))
             {
                 continue;
             }
