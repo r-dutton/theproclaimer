@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using GraphKit.Facts;
 using GraphKit.Graph;
 using GraphKit.Workspace;
@@ -68,7 +69,7 @@ public sealed partial class ProjectAnalyzer
     private static readonly int MaxFileParseConcurrency = Math.Max(1, Environment.ProcessorCount - 1);
     private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
     private readonly FactWriter _facts;
-    private readonly ConcurrentDictionary<SyntaxTree, string> _treeRelativePaths = new();
+    private readonly AsyncLocal<ConcurrentDictionary<SyntaxTree, string>?> _treeRelativePaths = new();
 
     public ProjectAnalyzer(string workspaceRoot, FactWriter? facts = null)
     {
@@ -87,53 +88,64 @@ public sealed partial class ProjectAnalyzer
 
     public async Task AnalyzeProjectAsync(ProjectInfo project, RoslynProjectInfo? roslynProject, CancellationToken cancellationToken)
     {
-        LoadConfigurationValues(project);
-        _projectsByAssembly[project.AssemblyName] = project;
-        _treeRelativePaths.Clear();
+        var previousTreeRelativePaths = _treeRelativePaths.Value;
+        var projectTreeRelativePaths = new ConcurrentDictionary<SyntaxTree, string>();
+        _treeRelativePaths.Value = projectTreeRelativePaths;
 
-        var documentEntries = await ParseProjectDocumentsAsync(project, roslynProject, cancellationToken).ConfigureAwait(false);
-
-        foreach (var (_, root, _) in documentEntries)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            LoadConfigurationValues(project);
+            _projectsByAssembly[project.AssemblyName] = project;
 
-            var tree = root.SyntaxTree;
-            if (tree is null)
+            var documentEntries = await ParseProjectDocumentsAsync(project, roslynProject, cancellationToken).ConfigureAwait(false);
+
+            foreach (var (_, root, _) in documentEntries)
             {
-                continue;
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var tree = root.SyntaxTree;
+                if (tree is null)
+                {
+                    continue;
+                }
+
+                CollectStringConstants(project, tree, root, cancellationToken);
             }
 
-            CollectStringConstants(project, tree, root, cancellationToken);
+            foreach (var (document, root, model) in documentEntries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var tree = root.SyntaxTree;
+                if (tree is null)
+                {
+                    continue;
+                }
+
+                _ = GetRelativePath(document, tree);
+
+                foreach (var member in root.Members)
+                {
+                    ProcessMember(project, tree, member, null, cancellationToken);
+                }
+
+                AnalyzeServiceRegistrations(project, tree);
+                AnalyzeHttpClientRegistrations(project, tree);
+
+                var filePath = document.FilePath ?? tree.FilePath ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(filePath) &&
+                    Path.GetFileName(filePath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
+                {
+                    AnalyzeMinimalEndpoints(project, tree);
+                }
+
+                _ = model;
+            }
         }
-
-        foreach (var (document, root, model) in documentEntries)
+        finally
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var tree = root.SyntaxTree;
-            if (tree is null)
-            {
-                continue;
-            }
-
-            _ = GetRelativePath(document, tree);
-
-            foreach (var member in root.Members)
-            {
-                ProcessMember(project, tree, member, null, cancellationToken);
-            }
-
-            AnalyzeServiceRegistrations(project, tree);
-            AnalyzeHttpClientRegistrations(project, tree);
-
-            var filePath = document.FilePath ?? tree.FilePath ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(filePath) &&
-                Path.GetFileName(filePath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
-            {
-                AnalyzeMinimalEndpoints(project, tree);
-            }
-
-            _ = model;
+            projectTreeRelativePaths.Clear();
+            _treeRelativePaths.Value = previousTreeRelativePaths;
         }
     }
 
@@ -700,13 +712,18 @@ public sealed partial class ProjectAnalyzer
         }
 
         var relative = GetRelativePath(absolutePath);
-        _treeRelativePaths[tree] = relative;
+        var cache = _treeRelativePaths.Value;
+        if (cache is not null)
+        {
+            cache[tree] = relative;
+        }
         return relative;
     }
 
     private string GetRelativePath(SyntaxTree tree)
     {
-        if (_treeRelativePaths.TryGetValue(tree, out var cached))
+        var cache = _treeRelativePaths.Value;
+        if (cache is not null && cache.TryGetValue(tree, out var cached))
         {
             return cached;
         }
