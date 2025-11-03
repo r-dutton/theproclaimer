@@ -822,7 +822,7 @@ public sealed partial class ProjectAnalyzer
                 legacyProject.Id,
                 documentName,
                 tree.GetText(cancellationToken),
-                filePath);
+                filePath: filePath);
 
             var model = project.GetModel(tree);
             results.Add((document, root, model));
