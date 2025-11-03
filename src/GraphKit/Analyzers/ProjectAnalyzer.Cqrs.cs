@@ -513,8 +513,9 @@ public sealed partial class ProjectAnalyzer
             return;
         }
 
-        var pointsTo = new FlowPointsToFacade();
-        var valueContent = new FlowValueContentFacade();
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var pointsTo = CreatePointsToFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
 
         foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
         {
@@ -542,8 +543,8 @@ public sealed partial class ProjectAnalyzer
                 project.Compilation,
                 model,
                 method,
-                new FlowInterproceduralConfig(4, 2),
-                ShouldExpandForCqrsEfHttpMap,
+                InterproceduralConfiguration,
+                callsitePredicate,
                 visitor);
         }
     }

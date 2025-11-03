@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.IO;
 using FlowGrep.Options;
 using GraphKit;
+using GraphKit.Analyzers;
 using GraphKit.Graph;
 using GraphKit.Outputs;
 using GraphKit.Outputs.Abstractions;
@@ -16,6 +17,7 @@ using GraphKit.Outputs.Narrative;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
+using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
 
 var argsList = args.ToList();
 string workspace = Environment.CurrentDirectory;
@@ -32,6 +34,9 @@ bool noDb  = argsList.Remove("--no-db");
 bool noCache = argsList.Remove("--no-cache");
 bool turbo = argsList.Remove("--turbo") || argsList.Remove("-t"); // preserved for compatibility, currently no effect
 bool useRoslyn = argsList.Remove("--use-roslyn");
+int? interprocCallChain = null;
+int? interprocLambdaDepth = null;
+InterproceduralAnalysisKind? interprocKind = null;
 if (argsList.Remove("--legacy"))
 {
     renderOptions.Source = RenderSource.Legacy;
@@ -85,12 +90,65 @@ for (int i = 0; i < argsList.Count; i++)
                 maxDepth = md;
             }
             break;
+        case "--interproc-call-chain":
+            if (int.TryParse(argsList[++i], out var callDepth) && callDepth >= 0)
+            {
+                interprocCallChain = callDepth;
+            }
+            else
+            {
+                Console.Error.WriteLine($"[warn] Ignoring invalid interproc call-chain length '{argsList[i]}'.");
+            }
+            break;
+        case "--interproc-lambda-depth":
+            if (int.TryParse(argsList[++i], out var lambdaDepth) && lambdaDepth >= 0)
+            {
+                interprocLambdaDepth = lambdaDepth;
+            }
+            else
+            {
+                Console.Error.WriteLine($"[warn] Ignoring invalid interproc lambda depth '{argsList[i]}'.");
+            }
+            break;
+        case "--interproc-kind":
+            var kindValue = argsList[++i];
+            if (Enum.TryParse<InterproceduralAnalysisKind>(kindValue, ignoreCase: true, out var parsedKind))
+            {
+                interprocKind = parsedKind;
+            }
+            else
+            {
+                Console.Error.WriteLine($"[warn] Unknown interprocedural analysis kind '{kindValue}'.");
+            }
+            break;
     }
 }
 
 renderStyle = renderStyle.Equals("graph", StringComparison.OrdinalIgnoreCase)
     ? "graph"
     : "narrative";
+
+ProjectAnalyzer.ProjectAnalyzerConfiguration? analyzerConfiguration = null;
+if (interprocCallChain is not null || interprocLambdaDepth is not null || interprocKind is not null)
+{
+    var configuration = ProjectAnalyzer.ProjectAnalyzerConfiguration.Default;
+    if (interprocCallChain is { } callChainValue)
+    {
+        configuration = configuration with { MaxInterproceduralCallChainLength = callChainValue };
+    }
+
+    if (interprocLambdaDepth is { } lambdaDepthValue)
+    {
+        configuration = configuration with { MaxInterproceduralLambdaOrLocalFunctionDepth = lambdaDepthValue };
+    }
+
+    if (interprocKind is { } kindValue)
+    {
+        configuration = configuration with { InterproceduralAnalysisKind = kindValue };
+    }
+
+    analyzerConfiguration = configuration.Normalize();
+}
 
 MSBuildWorkspace? roslynWorkspace = null;
 
@@ -118,7 +176,8 @@ try
         renderOptions.OutputPath,
         solutions.Count > 0 ? solutions : null,
         useRoslyn,
-        roslynWorkspace));
+        roslynWorkspace,
+        analyzerConfiguration));
     var document = result.Document;
     var factBag = result.Facts;
     var outputDirFull = Path.GetFullPath(Path.Combine(workspace, renderOptions.OutputPath));

@@ -57,7 +57,7 @@ public sealed class GraphGenerator
         }
 
         var factWriter = new FactWriter();
-        var analyzer = new ProjectAnalyzer(options.WorkspacePath, factWriter);
+        var analyzer = new ProjectAnalyzer(options.WorkspacePath, factWriter, options.AnalyzerConfiguration);
         await Parallel.ForEachAsync(projects, cancellationToken, async (project, ct) =>
         {
             var projectKey = GetLookupKey(project);

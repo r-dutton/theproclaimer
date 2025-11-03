@@ -1953,6 +1953,37 @@ private static bool NamespaceRootMatches(string candidateType, string referenceT
     private static bool IsLoggerType(string? typeName)
         => !string.IsNullOrWhiteSpace(typeName) && typeName.Contains("ILogger", StringComparison.Ordinal);
 
+    private static bool IsMetricsType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        return typeName.Contains("System.Diagnostics.Metrics", StringComparison.Ordinal)
+            || typeName.Contains("Microsoft.Extensions.Diagnostics.Metrics", StringComparison.Ordinal)
+            || typeName.Contains("Prometheus", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("OpenTelemetry", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("IMeter", StringComparison.Ordinal)
+            || typeName.Contains("IMetrics", StringComparison.Ordinal)
+            || typeName.Contains("MeterProvider", StringComparison.Ordinal)
+            || typeName.Contains("MeterFactory", StringComparison.Ordinal);
+    }
+
+    private static bool IsTelemetryType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        return typeName.Contains("Telemetry", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("ActivitySource", StringComparison.Ordinal)
+            || typeName.Contains("DiagnosticListener", StringComparison.Ordinal)
+            || typeName.Contains("Tracer", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("Tracing", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? TryExtractLogLevel(string? methodName)
     {
         if (string.IsNullOrWhiteSpace(methodName))

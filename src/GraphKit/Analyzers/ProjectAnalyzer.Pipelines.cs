@@ -36,8 +36,9 @@ public sealed partial class ProjectAnalyzer
         var info = new PipelineBehaviorInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, requestType, responseType);
         CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations, project.AssemblyName, project.RelativeDirectory);
         var model = project.GetModel(tree);
-        var pointsTo = new FlowPointsToFacade();
-        var valueContent = new FlowValueContentFacade();
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var pointsTo = CreatePointsToFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -72,8 +73,8 @@ public sealed partial class ProjectAnalyzer
                 project.Compilation,
                 model,
                 methodSymbol,
-                new FlowInterproceduralConfig(4, 2),
-                ShouldExpandForCqrsEfHttpMap,
+                InterproceduralConfiguration,
+                callsitePredicate,
                 visitor);
         }
 
@@ -127,8 +128,9 @@ public sealed partial class ProjectAnalyzer
         var info = new RequestProcessorInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, requestType, responseType, kind);
         CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations, project.AssemblyName, project.RelativeDirectory);
         var model = project.GetModel(tree);
-        var pointsTo = new FlowPointsToFacade();
-        var valueContent = new FlowValueContentFacade();
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var pointsTo = CreatePointsToFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -163,8 +165,8 @@ public sealed partial class ProjectAnalyzer
                 project.Compilation,
                 model,
                 methodSymbol,
-                new FlowInterproceduralConfig(4, 2),
-                ShouldExpandForCqrsEfHttpMap,
+                InterproceduralConfiguration,
+                callsitePredicate,
                 visitor);
         }
 

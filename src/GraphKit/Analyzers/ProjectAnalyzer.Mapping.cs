@@ -38,8 +38,9 @@ public sealed partial class ProjectAnalyzer
 
         var model = project.GetModel(tree);
         var compilation = project.Compilation;
-        var pointsToFacade = new FlowPointsToFacade();
-        var valueContentFacade = new FlowValueContentFacade();
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var pointsToFacade = CreatePointsToFacade(callsitePredicate);
+        var valueContentFacade = CreateValueContentFacade(callsitePredicate);
         var registeredMappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var invocation in Descendants<InvocationExpressionSyntax>(classDeclaration))
@@ -85,8 +86,8 @@ public sealed partial class ProjectAnalyzer
                     compilation,
                     model,
                     ctorSymbol,
-                    new FlowInterproceduralConfig(2, 1),
-                    ShouldExpandForCqrsEfHttpMap,
+                    InterproceduralConfiguration,
+                    callsitePredicate,
                     visitor);
             }
         }
@@ -110,8 +111,8 @@ public sealed partial class ProjectAnalyzer
                     compilation,
                     model,
                     methodSymbol,
-                    new FlowInterproceduralConfig(2, 1),
-                    ShouldExpandForCqrsEfHttpMap,
+                    InterproceduralConfiguration,
+                    callsitePredicate,
                     visitor);
             }
         }

@@ -35,8 +35,9 @@ public sealed partial class ProjectAnalyzer
         var actionInfos = new List<ControllerActionInfo>();
         var model = project.GetModel(tree);
         var compilation = project.Compilation;
-        var pointsToFacade = new FlowPointsToFacade();
-        var valueContentFacade = new FlowValueContentFacade();
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var pointsToFacade = CreatePointsToFacade(callsitePredicate);
+        var valueContentFacade = CreateValueContentFacade(callsitePredicate);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -120,8 +121,8 @@ public sealed partial class ProjectAnalyzer
                     compilation,
                     model,
                     methodSymbol,
-                    new FlowInterproceduralConfig(4, 2),
-                    ShouldExpandForCqrsEfHttpMap,
+                    InterproceduralConfiguration,
+                    callsitePredicate,
                     visitor);
             }
 
