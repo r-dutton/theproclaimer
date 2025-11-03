@@ -36,7 +36,7 @@ public sealed class WorkspaceLoader
         }
     }
 
-    public async Task<IReadOnlyList<ProjectInfo>> LoadAsync(CancellationToken cancellationToken = default)
+    public async Task<WorkspaceLoadResult> LoadAsync(CancellationToken cancellationToken = default)
     {
         var solutionPaths = await ResolveSolutionPathsAsync(cancellationToken).ConfigureAwait(false);
 
@@ -46,7 +46,8 @@ public sealed class WorkspaceLoader
             return await roslynLoader.LoadAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        return await LoadLegacyAsync(solutionPaths, cancellationToken).ConfigureAwait(false);
+        var legacyProjects = await LoadLegacyAsync(solutionPaths, cancellationToken).ConfigureAwait(false);
+        return new WorkspaceLoadResult(legacyProjects, Array.Empty<RoslynProjectInfo>());
     }
 
     private async Task<List<string>> ResolveSolutionPathsAsync(CancellationToken cancellationToken)

@@ -80,8 +80,12 @@ public sealed partial class ProjectAnalyzer
     public int EdgeCount => _edges.Count;
     public FactWriter Facts => _facts;
 
-    public async Task AnalyzeProjectAsync(ProjectInfo project, CancellationToken cancellationToken)
+    public Task AnalyzeProjectAsync(ProjectInfo project, CancellationToken cancellationToken)
+        => AnalyzeProjectAsync(project, roslynProject: null, cancellationToken);
+
+    public async Task AnalyzeProjectAsync(ProjectInfo project, RoslynProjectInfo? roslynProject, CancellationToken cancellationToken)
     {
+        _ = roslynProject;
         LoadConfigurationValues(project);
         _projectsByAssembly[project.AssemblyName] = project;
 
