@@ -89,7 +89,7 @@ public sealed partial class ProjectAnalyzer
                 if (invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax identifier } access &&
                     fieldLookup.TryGetValue(identifier.Identifier.Text.TrimStart('_'), out var descriptor))
                 {
-                    var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                    var resolvedType = ResolveImplementationType(descriptor.Type, repository.Assembly, repository.Project) ?? descriptor.Type;
                     if (IsConfigurationType(resolvedType) || IsConfigurationType(descriptor.Type))
                     {
                         if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
@@ -216,7 +216,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                var resolvedType = ResolveImplementationType(descriptor.Type, repository.Assembly, repository.Project) ?? descriptor.Type;
                 if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
                 {
                     continue;

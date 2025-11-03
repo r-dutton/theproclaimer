@@ -267,7 +267,7 @@ public sealed partial class ProjectAnalyzer
 
                         if (targetType is not null)
                         {
-                            var resolvedTarget = ResolveImplementationType(targetType);
+                            var resolvedTarget = ResolveImplementationType(targetType, info.Assembly, info.Project);
                             if (!IsRequestProcessorType(resolvedTarget) && !IsRequestProcessorType(targetType))
                             {
                                 isRequestProcessorInvocation = false;
@@ -480,7 +480,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                var resolvedType = ResolveImplementationType(descriptor.Type, info.Assembly, info.Project) ?? descriptor.Type;
                 if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
                 {
                     continue;
@@ -682,7 +682,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var baseTypeName = GetTypeNameWithoutGenerics(qualifiedType);
-        var resolvedType = ResolveImplementationType(qualifiedType) ?? qualifiedType;
+        var resolvedType = ResolveImplementationType(qualifiedType, info.Assembly, info.Project) ?? qualifiedType;
         if (IsConfigurationType(resolvedType) || IsConfigurationType(qualifiedType))
         {
             if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? qualifiedType, tree) is { } configurationUsage)
@@ -734,7 +734,7 @@ public sealed partial class ProjectAnalyzer
         {
             repositoryEntityResolved = true;
             qualifiedType = expressionDomainType;
-            resolvedType = ResolveImplementationType(expressionDomainType) ?? expressionDomainType;
+            resolvedType = ResolveImplementationType(expressionDomainType, info.Assembly, info.Project) ?? expressionDomainType;
 
         }
 
@@ -747,12 +747,12 @@ public sealed partial class ProjectAnalyzer
                 if (info.DomainLocalTypes.TryGetValue(rootIdentifier, out var rootDomainType) && !string.IsNullOrWhiteSpace(rootDomainType))
                 {
                     qualifiedType = rootDomainType;
-                    resolvedType = ResolveImplementationType(rootDomainType) ?? rootDomainType;
+                    resolvedType = ResolveImplementationType(rootDomainType, info.Assembly, info.Project) ?? rootDomainType;
                 }
                 else if (info.LocalVariables.TryGetValue(rootIdentifier, out var rootLocalType) && !string.IsNullOrWhiteSpace(rootLocalType))
                 {
                     qualifiedType = rootLocalType;
-                    resolvedType = ResolveImplementationType(rootLocalType) ?? rootLocalType;
+                    resolvedType = ResolveImplementationType(rootLocalType, info.Assembly, info.Project) ?? rootLocalType;
                 }
             }
         }
@@ -768,7 +768,7 @@ public sealed partial class ProjectAnalyzer
             !string.IsNullOrWhiteSpace(expressionMappedType))
         {
             qualifiedType = expressionMappedType;
-            resolvedType = ResolveImplementationType(expressionMappedType) ?? expressionMappedType;
+            resolvedType = ResolveImplementationType(expressionMappedType, info.Assembly, info.Project) ?? expressionMappedType;
         }
 
         if (access.Expression is InvocationExpressionSyntax innerInvocation &&
@@ -824,7 +824,7 @@ public sealed partial class ProjectAnalyzer
                         }
 
                         qualifiedType = qualifiedEntity;
-                        resolvedType = ResolveImplementationType(qualifiedEntity) ?? qualifiedEntity;
+                        resolvedType = ResolveImplementationType(qualifiedEntity, info.Assembly, info.Project) ?? qualifiedEntity;
                         repositoryEntityResolved = true;
 
                     }
@@ -1943,7 +1943,7 @@ public sealed partial class ProjectAnalyzer
                     .OrderBy(s => s.Line)
                     .First();
 
-                if (!TryEnsureServiceNode(primary.ServiceType, out var serviceId, out var registration, primary.TargetType))
+                if (!TryEnsureServiceNode(primary.ServiceType, out var serviceId, out var registration, primary.TargetType, action.Assembly, action.Project))
                 {
                     continue;
                 }

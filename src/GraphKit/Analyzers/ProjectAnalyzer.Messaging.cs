@@ -115,7 +115,7 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var qualifiedPublisherType = QualifyTypeName(publisherTypeCandidate!, project.AssemblyName, project.RelativeDirectory);
-                var resolvedPublisherType = ResolveImplementationType(qualifiedPublisherType) ?? qualifiedPublisherType;
+                var resolvedPublisherType = ResolveImplementationType(qualifiedPublisherType, project.AssemblyName, project.RelativeDirectory) ?? qualifiedPublisherType;
 
                     var messageType = ResolvePublishedMessageType(invocation, parameterTypes, localVariables, project.AssemblyName, project.RelativeDirectory);
                     if (!string.IsNullOrWhiteSpace(messageType))
@@ -295,12 +295,12 @@ public sealed partial class ProjectAnalyzer
                 AddCandidate(usage.TargetType);
                 if (!string.IsNullOrWhiteSpace(usage.ServiceType))
                 {
-                    AddCandidate(ResolveImplementationType(usage.ServiceType!));
+                    AddCandidate(ResolveImplementationType(usage.ServiceType!, handler.Assembly, handler.Project));
                 }
 
                 if (!string.IsNullOrWhiteSpace(usage.TargetType))
                 {
-                    AddCandidate(ResolveImplementationType(usage.TargetType!));
+                    AddCandidate(ResolveImplementationType(usage.TargetType!, handler.Assembly, handler.Project));
                 }
 
                 var expandedCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -333,7 +333,7 @@ public sealed partial class ProjectAnalyzer
                                 }
                             }
 
-                            var publisherType = ResolveImplementationType(call.PublisherType) ?? call.PublisherType;
+                            var publisherType = ResolveImplementationType(call.PublisherType, handler.Assembly, handler.Project) ?? call.PublisherType;
                             var key = $"{publisherType}|{call.MessageType}|{usage.Line}";
                             if (!seen.Add(key))
                             {

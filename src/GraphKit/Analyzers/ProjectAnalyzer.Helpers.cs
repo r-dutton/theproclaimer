@@ -826,22 +826,46 @@ public sealed partial class ProjectAnalyzer
         return matches.Count == 1 ? matches[0] : null;
     }
 
-    private string? ResolveImplementationType(string typeName)
+    private string? ResolveImplementationType(string typeName, string? preferredAssembly = null, string? preferredProject = null)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
             return null;
         }
 
-        var registration = FindServiceRegistration(typeName);
+        var registration = FindServiceRegistration(typeName, preferredAssembly: preferredAssembly, preferredProject: preferredProject);
         if (registration is not null && !string.IsNullOrWhiteSpace(registration.ImplementationType))
         {
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                var implementationRoot = GetAssemblyRootFromTypeName(registration.ImplementationType);
+                var preferredRoot = GetAssemblyRoot(preferredAssembly);
+                if (!string.IsNullOrWhiteSpace(preferredRoot) &&
+                    !string.Equals(implementationRoot, preferredRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    var preferredImplementation = ResolveServiceByPreferences(typeName, preferredAssembly, preferredProject);
+                    if (!string.IsNullOrWhiteSpace(preferredImplementation))
+                    {
+                        return preferredImplementation;
+                    }
+                }
+            }
+
             return registration.ImplementationType;
         }
 
-        if (TryResolveGenericImplementation(typeName, out var implementationType))
+        if (TryResolveGenericImplementation(typeName, out var implementationType, preferredAssembly, preferredProject))
         {
             return implementationType;
+        }
+
+        if (!string.IsNullOrWhiteSpace(preferredAssembly) || !string.IsNullOrWhiteSpace(preferredProject))
+        {
+            var preferredImplementation = ResolveServiceByPreferences(typeName, preferredAssembly, preferredProject);
+            if (!string.IsNullOrWhiteSpace(preferredImplementation))
+            {
+                return preferredImplementation;
+            }
         }
 
         if (typeName.StartsWith("IControlledRepository", StringComparison.Ordinal))
@@ -863,7 +887,109 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private bool TryResolveGenericImplementation(string typeName, out string? implementationType)
+    private string? ResolveServiceByPreferences(string serviceType, string? preferredAssembly, string? preferredProject)
+    {
+        if (_services.Count == 0)
+        {
+            return null;
+        }
+
+        var simple = GetTopLevelSimpleIdentifier(serviceType);
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+
+        ServiceInfo? best = null;
+        var bestScore = int.MinValue;
+
+        foreach (var service in _services.Values)
+        {
+            if (!ServiceNameMatches(service, serviceType, simple))
+            {
+                continue;
+            }
+
+            var score = 0;
+
+            if (string.Equals(service.Fqdn, serviceType, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 600;
+            }
+
+            if (!string.IsNullOrWhiteSpace(simple) && string.Equals(service.Name, simple, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 300;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                if (string.Equals(service.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 800;
+                }
+                else if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot))
+                {
+                    var serviceRoot = GetAssemblyRoot(service.Assembly);
+                    if (!string.IsNullOrWhiteSpace(serviceRoot) && string.Equals(serviceRoot, preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                    {
+                        score += 500;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject) &&
+                !string.IsNullOrWhiteSpace(service.Project) &&
+                string.Equals(service.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 400;
+            }
+
+            var serviceNamespace = GetTypeNamespace(service.Fqdn);
+            var requestedNamespace = GetTypeNamespace(serviceType);
+            if (!string.IsNullOrWhiteSpace(serviceNamespace) && !string.IsNullOrWhiteSpace(requestedNamespace))
+            {
+                score += LongestCommonPrefixLength(serviceNamespace, requestedNamespace);
+            }
+
+            if (best is null || score > bestScore)
+            {
+                best = service;
+                bestScore = score;
+            }
+        }
+
+        return best?.Fqdn;
+    }
+
+    private static bool ServiceNameMatches(ServiceInfo service, string serviceType, string? simple)
+    {
+        if (string.Equals(service.Fqdn, serviceType, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(service.Name, serviceType, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(simple))
+        {
+            if (string.Equals(service.Name, simple, StringComparison.OrdinalIgnoreCase) ||
+                service.Fqdn.EndsWith($".{simple}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (simple.Length > 1 && simple[0] == 'I' && char.IsUpper(simple[1]))
+            {
+                var trimmed = simple[1..];
+                if (string.Equals(service.Name, trimmed, StringComparison.OrdinalIgnoreCase) ||
+                    service.Fqdn.EndsWith($".{trimmed}", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveGenericImplementation(string typeName, out string? implementationType, string? preferredAssembly = null, string? preferredProject = null)
     {
         implementationType = null;
         if (!TryMakeOpenGenericType(typeName, out var openServiceType, out var typeArguments) || typeArguments.Count == 0)
@@ -871,11 +997,11 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
-        var registration = FindServiceRegistration(openServiceType);
+        var registration = FindServiceRegistration(openServiceType, preferredAssembly: preferredAssembly, preferredProject: preferredProject);
         if (registration is null)
         {
             var simpleOpen = GetSimpleIdentifier(openServiceType);
-            registration = FindServiceRegistration(simpleOpen);
+            registration = FindServiceRegistration(simpleOpen, preferredAssembly: preferredAssembly, preferredProject: preferredProject);
         }
 
         if (registration is null || string.IsNullOrWhiteSpace(registration.ImplementationType))

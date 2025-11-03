@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.IO;
 using FlowGrep.Options;
@@ -111,6 +112,9 @@ if (flowPatterns.Count > 0)
     string flow;
 
     var graph = FlowBuilderCore.BuildGraph(provider);
+    var narratives = LegacyNarrativeRenderer.Collect(factBag, workspace);
+    var narrativeLookup = narratives.ToDictionary(n => n.Endpoint.Id, StringComparer.Ordinal);
+
     if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
     {
         var flows = graph.Nodes
@@ -135,7 +139,8 @@ if (flowPatterns.Count > 0)
                         edge.FromId,
                         Props = edge.Props
                     })
-                    .ToArray()
+                    .ToArray(),
+                Narrative = narrativeLookup.TryGetValue(node.Id, out var entry) ? entry.Text : null
             })
             .ToArray();
 
@@ -143,7 +148,48 @@ if (flowPatterns.Count > 0)
     }
     else
     {
-        flow = FlowBuilderMarkdown.Render(graph, predicate);
+        var matchedNodes = graph.Nodes.Where(predicate).ToList();
+        var matchedIds = new HashSet<string>(matchedNodes.Select(n => n.Id), StringComparer.Ordinal);
+        var sb = new StringBuilder();
+        var wroteAny = false;
+
+        foreach (var entry in narratives)
+        {
+            if (matchedIds.Count > 0 && !matchedIds.Contains(entry.Endpoint.Id))
+            {
+                continue;
+            }
+
+            sb.Append(entry.Text.TrimEnd());
+            sb.AppendLine();
+            sb.AppendLine();
+            wroteAny = true;
+            matchedIds.Remove(entry.Endpoint.Id);
+        }
+
+        if (matchedIds.Count > 0)
+        {
+            foreach (var node in matchedNodes)
+            {
+                if (!matchedIds.Contains(node.Id))
+                {
+                    continue;
+                }
+
+                var fallback = FlowBuilderMarkdown.Render(graph, n => string.Equals(n.Id, node.Id, StringComparison.Ordinal));
+                if (!string.IsNullOrWhiteSpace(fallback))
+                {
+                    sb.Append(fallback.TrimEnd());
+                    sb.AppendLine();
+                    sb.AppendLine();
+                    wroteAny = true;
+                }
+
+                matchedIds.Remove(node.Id);
+            }
+        }
+
+        flow = wroteAny ? sb.ToString().TrimEnd() : string.Empty;
     }
 
     if (string.IsNullOrWhiteSpace(flow))

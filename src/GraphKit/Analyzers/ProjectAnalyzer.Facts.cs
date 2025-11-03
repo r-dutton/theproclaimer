@@ -378,7 +378,7 @@ public sealed partial class ProjectAnalyzer
     private void RecordHandlerRepositoryFact(HandlerInfo handler, string repositoryType, string method, string operation, int line)
     {
         var handlerId = EnsureHandlerFactNode(handler);
-        var targetType = ResolveImplementationType(repositoryType) ?? repositoryType;
+        var targetType = ResolveImplementationType(repositoryType, handler.Assembly, handler.Project) ?? repositoryType;
         RepositoryInfo? repository = null;
         if (!string.IsNullOrWhiteSpace(targetType))
         {
@@ -680,7 +680,7 @@ public sealed partial class ProjectAnalyzer
     private void RecordNotificationHandlerRepositoryFact(NotificationHandlerInfo handler, string repositoryType, string methodName, string operation, int line)
     {
         var handlerId = EnsureNotificationHandlerFactNode(handler);
-        var targetType = ResolveImplementationType(repositoryType) ?? repositoryType;
+        var targetType = ResolveImplementationType(repositoryType, handler.Assembly, handler.Project) ?? repositoryType;
         RepositoryInfo? repository = null;
         if (!string.IsNullOrWhiteSpace(targetType))
         {
@@ -806,7 +806,7 @@ public sealed partial class ProjectAnalyzer
     private void RecordDomainEventHandlerRepositoryFact(DomainEventHandlerInfo handler, string repositoryType, string methodName, string operation, int line)
     {
         var handlerId = EnsureDomainEventHandlerFactNode(handler);
-        var targetType = ResolveImplementationType(repositoryType) ?? repositoryType;
+        var targetType = ResolveImplementationType(repositoryType, handler.Assembly, handler.Project) ?? repositoryType;
         RepositoryInfo? repository = null;
         if (!string.IsNullOrWhiteSpace(targetType))
         {

@@ -1,15 +1,17 @@
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Linq;
+using GraphKit.Facts;
 using GraphKit.Graph;
 using GraphKit.Outputs.Abstractions;
-using GraphKit.Outputs.FlowBuilder;
 using GraphKit.Outputs.Legacy;
+using GraphKit.Outputs.Narrative;
 using GraphKit.Workspace;
 
 namespace GraphKit.Outputs;
@@ -31,13 +33,13 @@ public sealed class GraphOutputWriter
         _workspaceIndex = FlowWorkspaceIndex.Load(_workspaceRoot);
     }
 
-    public async Task WriteAsync(GraphDocument document, string analyzerVersion, CancellationToken cancellationToken)
+    public async Task WriteAsync(GraphDocument document, FactBag factBag, string analyzerVersion, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_outputDirectory);
         await WriteGraphJsonAsync(document, cancellationToken);
         await WriteGraphCypherAsync(document, cancellationToken);
         await WriteGraphMarkdownAsync(document, analyzerVersion, cancellationToken);
-        await WriteControllerFlowsAsync(document, cancellationToken);
+        await WriteControllerFlowsAsync(factBag, cancellationToken);
         await WriteVersionAsync(analyzerVersion, cancellationToken);
         await WriteEvalAsync(document, cancellationToken);
     }
@@ -285,52 +287,114 @@ public sealed class GraphOutputWriter
         await File.WriteAllTextAsync(Path.Combine(_outputDirectory, "GRAPH.md"), sb.ToString(), cancellationToken);
     }
 
-    private async Task WriteControllerFlowsAsync(GraphDocument document, CancellationToken cancellationToken)
+    private async Task WriteControllerFlowsAsync(FactBag factBag, CancellationToken cancellationToken)
     {
-        var flowDirectory = Path.Combine(_outputDirectory, "flows");
-        Directory.CreateDirectory(flowDirectory);
-
-        IGraphProvider provider = new LegacyGraphProvider(document.Nodes, document.Edges);
-        var graph = FlowBuilderCore.BuildGraph(provider);
-        var endpoints = graph.Nodes
-            .Where(static n => n.Type.StartsWith("endpoint.", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(static n => n.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (endpoints.Count == 0)
+        var narratives = LegacyNarrativeRenderer.Collect(factBag, _workspaceRoot);
+        if (narratives.Count == 0)
         {
             return;
         }
 
-        var allPath = Path.Combine(flowDirectory, "controllers.all.md");
-        await using var stream = new FileStream(allPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await using var writer = new StreamWriter(stream);
+        var flowDirectory = Path.Combine(_outputDirectory, "flows");
+        Directory.CreateDirectory(flowDirectory);
 
-        foreach (var endpoint in endpoints)
+        var allBuilder = new StringBuilder();
+        foreach (var entry in narratives)
         {
-            var flow = FlowBuilderMarkdown.Render(graph, node => string.Equals(node.Id, endpoint.Id, StringComparison.Ordinal));
-            if (string.IsNullOrWhiteSpace(flow))
+            allBuilder.Append(entry.Text);
+            if (!entry.Text.EndsWith(Environment.NewLine, StringComparison.Ordinal))
             {
-                continue;
+                allBuilder.AppendLine();
             }
 
-            await writer.WriteLineAsync(flow);
-            if (!flow.EndsWith(Environment.NewLine, StringComparison.Ordinal))
-            {
-                await writer.WriteLineAsync();
-            }
-
-            var basis = !string.IsNullOrWhiteSpace(endpoint.DisplayName) ? endpoint.DisplayName : endpoint.Id;
-            if (string.IsNullOrWhiteSpace(basis))
-            {
-                continue;
-            }
-
-            var fileName = SanitizeFileName(basis) + ".md";
-            await File.WriteAllTextAsync(Path.Combine(flowDirectory, fileName), flow, cancellationToken);
+            allBuilder.AppendLine();
         }
 
-        await writer.FlushAsync();
+        var allContent = allBuilder.ToString().TrimEnd();
+        await File.WriteAllTextAsync(
+            Path.Combine(flowDirectory, "controllers.all.md"),
+            string.IsNullOrEmpty(allContent) ? string.Empty : allContent + Environment.NewLine,
+            cancellationToken);
+
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in narratives)
+        {
+            var baseName = BuildFlowFileName(entry);
+            var uniqueName = EnsureUniqueFileName(baseName, usedNames);
+            var content = entry.Text.TrimEnd();
+            await File.WriteAllTextAsync(
+                Path.Combine(flowDirectory, uniqueName + ".md"),
+                string.IsNullOrEmpty(content) ? string.Empty : content + Environment.NewLine,
+                cancellationToken);
+        }
+    }
+
+    private static string EnsureUniqueFileName(string baseName, HashSet<string> usedNames)
+    {
+        var candidate = baseName;
+        var index = 1;
+        while (!usedNames.Add(candidate))
+        {
+            candidate = $"{baseName}_{index++}";
+        }
+
+        return candidate;
+    }
+
+    private static string BuildFlowFileName(LegacyNarrativeRenderer.EndpointNarrative entry)
+    {
+        var controllerPart = string.IsNullOrWhiteSpace(entry.ControllerDisplay)
+            ? entry.Endpoint.Type ?? "controller"
+            : entry.ControllerDisplay;
+
+        var actionPart = string.IsNullOrWhiteSpace(entry.ActionName)
+            ? entry.Endpoint.Id
+            : entry.ActionName;
+
+        var verbPart = string.IsNullOrWhiteSpace(entry.Verb)
+            ? string.Empty
+            : entry.Verb.ToUpperInvariant();
+
+        var coreName = string.IsNullOrWhiteSpace(verbPart)
+            ? $"{controllerPart}_{actionPart}"
+            : $"{controllerPart}_{verbPart}_{actionPart}";
+
+        if (!string.IsNullOrWhiteSpace(entry.Route))
+        {
+            var routePart = entry.Route
+                .Replace('/', '_')
+                .Replace('{', '_')
+                .Replace('}', '_')
+                .Replace(':', '_')
+                .Replace('*', '_')
+                .Trim('_');
+
+            if (!string.IsNullOrWhiteSpace(routePart))
+            {
+                if (routePart.Length > 80)
+                {
+                    routePart = routePart[..80] + "_" + ShortHash(routePart);
+                }
+
+                coreName = $"{coreName}_{routePart}";
+            }
+        }
+
+        var sanitized = SanitizeFileName(coreName);
+        if (sanitized.Length > 200)
+        {
+            sanitized = sanitized[..150] + "_" + ShortHash(sanitized);
+        }
+
+        return sanitized;
+    }
+
+    private static string ShortHash(string value)
+    {
+        using var sha = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var hash = sha.ComputeHash(bytes);
+        return Convert.ToHexString(hash.AsSpan(0, 6)).ToLowerInvariant();
     }
 
     private async Task WriteVersionAsync(string analyzerVersion, CancellationToken cancellationToken)

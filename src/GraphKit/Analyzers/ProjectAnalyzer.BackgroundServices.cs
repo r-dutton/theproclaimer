@@ -41,7 +41,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var typeName = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                var typeName = ResolveImplementationType(descriptor.Type, info.Assembly, info.Project) ?? descriptor.Type;
                 var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                 if (IsConfigurationType(typeName) || IsConfigurationType(descriptor.Type))
                 {
@@ -90,7 +90,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                var resolvedType = ResolveImplementationType(descriptor.Type, info.Assembly, info.Project) ?? descriptor.Type;
                 if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
                 {
                     continue;
@@ -129,7 +129,7 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
-                if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType))
+                if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType, service.Assembly, service.Project))
                 {
                     continue;
                 }

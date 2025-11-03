@@ -34,7 +34,7 @@ public sealed partial class ProjectAnalyzer
         var span = ToGraphSpan(tree, classDeclaration);
 
         var info = new PipelineBehaviorInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, requestType, responseType);
-        CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations);
+        CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations, project.AssemblyName, project.RelativeDirectory);
         var model = project.GetModel(tree);
         var pointsTo = new FlowPointsToFacade();
         var valueContent = new FlowValueContentFacade();
@@ -125,7 +125,7 @@ public sealed partial class ProjectAnalyzer
         var span = ToGraphSpan(tree, classDeclaration);
 
         var info = new RequestProcessorInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, requestType, responseType, kind);
-        CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations);
+        CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations, project.AssemblyName, project.RelativeDirectory);
         var model = project.GetModel(tree);
         var pointsTo = new FlowPointsToFacade();
         var valueContent = new FlowValueContentFacade();
@@ -177,13 +177,16 @@ public sealed partial class ProjectAnalyzer
         IReadOnlyDictionary<string, FieldDescriptor> fieldTypes,
         List<ServiceUsage> serviceUsages,
         List<OptionsUsage> optionsUsages,
-        List<CacheInvocation> cacheInvocations)
+        List<CacheInvocation> cacheInvocations,
+        string assembly,
+        string projectPath)
     {
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
         foreach (var descriptor in fieldTypes.Values)
         {
-            serviceUsages.Add(new ServiceUsage(descriptor.Type, descriptor.Line));
+            var resolved = ResolveImplementationType(descriptor.Type, assembly, projectPath) ?? descriptor.Type;
+            serviceUsages.Add(new ServiceUsage(resolved, descriptor.Line));
         }
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
@@ -202,7 +205,7 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var typeName = descriptor.Type;
-                var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                var resolvedType = ResolveImplementationType(typeName, assembly, projectPath) ?? typeName;
 
                 if (IsCacheService(resolvedType) || IsCacheService(typeName))
                 {
@@ -307,7 +310,7 @@ public sealed partial class ProjectAnalyzer
                 });
             }
 
-            EmitBehaviorServiceEdges(behavior.ServiceUsages, behavior.FilePath, id);
+            EmitBehaviorServiceEdges(behavior.ServiceUsages, behavior.FilePath, id, behavior.Assembly, behavior.Project);
             EmitBehaviorOptionEdges(behavior.OptionsUsages, behavior.FilePath, id);
             EmitBehaviorCacheEdges(behavior.CacheInvocations, behavior.FilePath, id);
         }
@@ -386,19 +389,19 @@ public sealed partial class ProjectAnalyzer
                 });
             }
 
-            EmitBehaviorServiceEdges(processor.ServiceUsages, processor.FilePath, id);
+            EmitBehaviorServiceEdges(processor.ServiceUsages, processor.FilePath, id, processor.Assembly, processor.Project);
             EmitBehaviorOptionEdges(processor.OptionsUsages, processor.FilePath, id);
             EmitBehaviorCacheEdges(processor.CacheInvocations, processor.FilePath, id);
         }
     }
 
-    private void EmitBehaviorServiceEdges(IEnumerable<ServiceUsage> usages, string sourceFile, string fromId)
+    private void EmitBehaviorServiceEdges(IEnumerable<ServiceUsage> usages, string sourceFile, string fromId, string assembly, string project)
     {
         foreach (var usage in usages
             .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(u => u.Line).First()))
         {
-            if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType))
+            if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType, assembly, project))
             {
                 continue;
             }

@@ -28,14 +28,14 @@ namespace GraphKit.FlowAnalysis.Core
                 case IInvocationOperation inv: VisitInvocation(inv); break;
                 case IAssignmentOperation asg: VisitAssignment(asg); break;
                 default:
-                    foreach (var child in op.Children) Visit(child);
+                    foreach (var child in op.ChildOperations) Visit(child);
                     break;
             }
         }
 
         protected virtual void VisitAssignment(IAssignmentOperation op)
         {
-            foreach (var child in op.Children) Visit(child);
+            foreach (var child in op.ChildOperations) Visit(child);
         }
 
         protected virtual void VisitInvocation(IInvocationOperation op)

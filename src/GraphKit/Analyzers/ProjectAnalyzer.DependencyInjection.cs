@@ -477,7 +477,7 @@ public sealed partial class ProjectAnalyzer
                     var contractType = gname.TypeArgumentList.Arguments[0].ToString();
                     if (!string.IsNullOrWhiteSpace(contractType))
                     {
-                        if (TryEnsureServiceNode(contractType, out var serviceId, out _))
+                        if (TryEnsureServiceNode(contractType, out var serviceId, out _, preferredAssembly: project.AssemblyName, preferredProject: project.RelativeDirectory))
                         {
                             var span = ToGraphSpan(tree, invocation);
                             _edges.Add(new GraphEdge
@@ -971,6 +971,8 @@ public sealed partial class ProjectAnalyzer
 
     private void EmitServiceRegistrations()
     {
+        var emitted = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var pair in _serviceRegistrations)
         {
             var registrations = pair.Value.ToArray();
@@ -979,38 +981,45 @@ public sealed partial class ProjectAnalyzer
                 continue;
             }
 
-            var primary = registrations
-                .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(r => r.Span.StartLine)
-                .First();
-
-            if (!TryEnsureServiceNode(primary.ServiceType, out var serviceId, out _))
-            {
-                continue;
-            }
-
             foreach (var registration in registrations
                 .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => r.Span.StartLine))
             {
+                if (!TryEnsureServiceNode(registration.ServiceType, out var serviceId, out var resolvedRegistration, preferredAssembly: registration.Assembly, preferredProject: registration.Project))
+                {
+                    continue;
+                }
+
+                var effectiveRegistration = resolvedRegistration ?? registration;
+                if (string.IsNullOrWhiteSpace(effectiveRegistration.ImplementationType))
+                {
+                    continue;
+                }
+
                 string? implementationId;
-                if (TryResolveNodeReference(registration.ImplementationType, out var implementation, registration.Assembly, registration.Project))
+                if (TryResolveNodeReference(effectiveRegistration.ImplementationType, out var implementation, effectiveRegistration.Assembly, effectiveRegistration.Project))
                 {
                     implementationId = implementation.Id;
                 }
                 else
                 {
-                    implementationId = EnsureServiceImplementationNode(registration);
+                    implementationId = EnsureServiceImplementationNode(effectiveRegistration);
                     if (implementationId is null)
                     {
                         continue;
                     }
                 }
 
+                var edgeKey = $"{serviceId}|{implementationId}|{registration.FilePath}|{registration.Span.StartLine}";
+                if (!emitted.Add(edgeKey))
+                {
+                    continue;
+                }
+
                 var props = new Dictionary<string, object>
                 {
-                    ["lifetime"] = registration.Lifetime,
-                    ["implementation_type"] = registration.ImplementationType
+                    ["lifetime"] = effectiveRegistration.Lifetime,
+                    ["implementation_type"] = effectiveRegistration.ImplementationType
                 };
 
                 _edges.Add(new GraphEdge
@@ -1160,7 +1169,13 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
-    private bool TryEnsureServiceNode(string serviceType, out string? nodeId, out ServiceRegistrationInfo? registration, string? preferredTargetType = null)
+    private bool TryEnsureServiceNode(
+        string serviceType,
+        out string? nodeId,
+        out ServiceRegistrationInfo? registration,
+        string? preferredTargetType = null,
+        string? preferredAssembly = null,
+        string? preferredProject = null)
     {
         var targetAwareServiceType = serviceType;
         registration = null;
@@ -1168,7 +1183,7 @@ public sealed partial class ProjectAnalyzer
         if (!string.IsNullOrWhiteSpace(preferredTargetType) && !serviceType.Contains('<'))
         {
             var closedCandidate = $"{GetTypeNameWithoutGenerics(serviceType)}<{preferredTargetType}>";
-            var closedRegistration = FindServiceRegistration(closedCandidate, preferredTargetType);
+            var closedRegistration = FindServiceRegistration(closedCandidate, preferredTargetType, preferredAssembly, preferredProject);
             if (closedRegistration is not null)
             {
                 targetAwareServiceType = closedCandidate;
@@ -1176,10 +1191,10 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
-        registration ??= FindServiceRegistration(targetAwareServiceType, preferredTargetType);
+        registration ??= FindServiceRegistration(targetAwareServiceType, preferredTargetType, preferredAssembly, preferredProject);
         var effectiveServiceType = registration?.ServiceType ?? targetAwareServiceType;
-        var assembly = registration?.Assembly ?? GuessAssemblyName(effectiveServiceType);
-        var project = registration?.Project ?? string.Empty;
+        var assembly = registration?.Assembly ?? preferredAssembly ?? GuessAssemblyName(effectiveServiceType);
+        var project = registration?.Project ?? preferredProject ?? string.Empty;
         var filePath = registration?.FilePath ?? string.Empty;
         GraphSpan? span = registration?.Span;
 
@@ -1258,11 +1273,15 @@ public sealed partial class ProjectAnalyzer
         return string.IsNullOrWhiteSpace(fallbackRoot) ? withoutGenerics : fallbackRoot;
     }
 
-    private ServiceRegistrationInfo? FindServiceRegistration(string serviceType, string? preferredTargetType = null)
+    private ServiceRegistrationInfo? FindServiceRegistration(
+        string serviceType,
+        string? preferredTargetType = null,
+        string? preferredAssembly = null,
+        string? preferredProject = null)
     {
         if (_serviceRegistrations.TryGetValue(serviceType, out var registrations) && !registrations.IsEmpty)
         {
-            var best = SelectBestRegistration(serviceType, registrations, preferredTargetType);
+            var best = SelectBestRegistration(serviceType, registrations, preferredTargetType, preferredAssembly, preferredProject);
             if (best is not null)
             {
                 return best;
@@ -1273,7 +1292,7 @@ public sealed partial class ProjectAnalyzer
         {
             if (_serviceRegistrations.TryGetValue(openServiceType, out var openRegistrations) && !openRegistrations.IsEmpty)
             {
-                var bestOpen = SelectBestRegistration(serviceType, openRegistrations, preferredTargetType);
+                var bestOpen = SelectBestRegistration(serviceType, openRegistrations, preferredTargetType, preferredAssembly, preferredProject);
                 if (bestOpen is not null)
                 {
                     return bestOpen;
@@ -1283,7 +1302,7 @@ public sealed partial class ProjectAnalyzer
             var openSimple = GetTopLevelSimpleIdentifier(openServiceType);
             if (_serviceRegistrations.TryGetValue(openSimple, out var openSimpleRegistrations) && !openSimpleRegistrations.IsEmpty)
             {
-                var bestOpenSimple = SelectBestRegistration(serviceType, openSimpleRegistrations, preferredTargetType);
+                var bestOpenSimple = SelectBestRegistration(serviceType, openSimpleRegistrations, preferredTargetType, preferredAssembly, preferredProject);
                 if (bestOpenSimple is not null)
                 {
                     return bestOpenSimple;
@@ -1294,7 +1313,7 @@ public sealed partial class ProjectAnalyzer
         var simple = GetTopLevelSimpleIdentifier(serviceType);
         if (_serviceRegistrations.TryGetValue(simple, out var simpleRegistrations) && !simpleRegistrations.IsEmpty)
         {
-            var bestSimple = SelectBestRegistration(serviceType, simpleRegistrations, preferredTargetType);
+            var bestSimple = SelectBestRegistration(serviceType, simpleRegistrations, preferredTargetType, preferredAssembly, preferredProject);
             if (bestSimple is not null)
             {
                 return bestSimple;
@@ -1310,7 +1329,7 @@ public sealed partial class ProjectAnalyzer
             var trimmedSimple = simpleWithoutInterface[1..];
             if (_serviceRegistrations.TryGetValue(trimmedSimple, out var altSimpleRegistrations) && !altSimpleRegistrations.IsEmpty)
             {
-                var bestTrimmed = SelectBestRegistration(serviceType, altSimpleRegistrations, preferredTargetType);
+                var bestTrimmed = SelectBestRegistration(serviceType, altSimpleRegistrations, preferredTargetType, preferredAssembly, preferredProject);
                 if (bestTrimmed is not null)
                 {
                     return bestTrimmed;
@@ -1323,7 +1342,7 @@ public sealed partial class ProjectAnalyzer
                 var qualifiedTrimmed = $"{namespacePart}.{trimmedSimple}";
                 if (_serviceRegistrations.TryGetValue(qualifiedTrimmed, out var qualifiedRegistrations) && !qualifiedRegistrations.IsEmpty)
                 {
-                    var bestQualified = SelectBestRegistration(serviceType, qualifiedRegistrations, preferredTargetType);
+                    var bestQualified = SelectBestRegistration(serviceType, qualifiedRegistrations, preferredTargetType, preferredAssembly, preferredProject);
                     if (bestQualified is not null)
                     {
                         return bestQualified;
@@ -1335,7 +1354,12 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private ServiceRegistrationInfo? SelectBestRegistration(string requestedType, IEnumerable<ServiceRegistrationInfo> candidates, string? preferredTargetType = null)
+    private ServiceRegistrationInfo? SelectBestRegistration(
+        string requestedType,
+        IEnumerable<ServiceRegistrationInfo> candidates,
+        string? preferredTargetType = null,
+        string? preferredAssembly = null,
+        string? preferredProject = null)
     {
         var list = candidates as IList<ServiceRegistrationInfo> ?? candidates.ToList();
         if (list.Count == 0)
@@ -1346,6 +1370,38 @@ public sealed partial class ProjectAnalyzer
         var requestedSimple = GetTopLevelSimpleIdentifier(requestedType);
         var requestedNamespace = GetTypeNamespace(requestedType);
         var requestedAssemblyRoot = GetTypeAssemblyRoot(requestedType);
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+
+        if (!string.IsNullOrWhiteSpace(preferredProject))
+        {
+            var projectMatches = list
+                .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Project) &&
+                                     string.Equals(candidate.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (projectMatches.Count > 0)
+            {
+                list = projectMatches;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(preferredAssembly))
+        {
+            var assemblyMatches = list
+                .Where(candidate => string.Equals(candidate.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (assemblyMatches.Count == 0 && !string.IsNullOrWhiteSpace(preferredAssemblyRoot))
+            {
+                assemblyMatches = list
+                    .Where(candidate => string.Equals(GetAssemblyRoot(candidate.Assembly), preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            if (assemblyMatches.Count > 0)
+            {
+                list = assemblyMatches;
+            }
+        }
 
         ServiceRegistrationInfo? best = null;
         var bestScore = int.MinValue;
@@ -1367,6 +1423,7 @@ public sealed partial class ProjectAnalyzer
             }
 
             var candidateNamespace = GetTypeNamespace(candidate.ServiceType);
+            var candidateAssemblyRoot = GetAssemblyRoot(candidate.Assembly);
             if (!string.IsNullOrWhiteSpace(requestedNamespace) && !string.IsNullOrWhiteSpace(candidateNamespace))
             {
                 score += LongestCommonPrefixLength(requestedNamespace, candidateNamespace);
@@ -1374,12 +1431,33 @@ public sealed partial class ProjectAnalyzer
 
             if (!string.IsNullOrWhiteSpace(requestedAssemblyRoot))
             {
-                var candidateAssemblyRoot = GetAssemblyRoot(candidate.Assembly);
                 if (!string.IsNullOrWhiteSpace(candidateAssemblyRoot) &&
                     string.Equals(candidateAssemblyRoot, requestedAssemblyRoot, StringComparison.OrdinalIgnoreCase))
                 {
                     score += 150;
                 }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                if (!string.IsNullOrWhiteSpace(candidate.Assembly) &&
+                    string.Equals(candidate.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 500;
+                }
+                else if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot) &&
+                         !string.IsNullOrWhiteSpace(candidateAssemblyRoot) &&
+                         string.Equals(candidateAssemblyRoot, preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 350;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject) &&
+                !string.IsNullOrWhiteSpace(candidate.Project) &&
+                string.Equals(candidate.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 200;
             }
 
             if (!string.IsNullOrWhiteSpace(candidate.Project) &&

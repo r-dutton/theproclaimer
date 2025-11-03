@@ -9,6 +9,7 @@ using GraphKit.Graph;
 using GraphKit.Outputs;
 using GraphKit.Outputs.Facts;
 using GraphKit.Workspace;
+using System.Text.Json;
 
 namespace GraphKit;
 
@@ -29,13 +30,12 @@ public sealed class GraphGenerator
         if (cachedDocument is not null)
         {
             Console.WriteLine("[graph] Cache hit. Skipping analysis and reusing existing graph.");
-            await outputWriter.WriteAsync(cachedDocument, AnalyzerVersion, cancellationToken);
-
             var cachedFacts = new FactWriter();
             PopulateFactsFromGraph(cachedDocument, cachedFacts, options.WorkspacePath);
             var cachedBag = FactsPipeline.Finalize(cachedFacts);
             var cacheFactsDirectory = Path.GetFullPath(Path.Combine(options.WorkspacePath, options.OutputDirectory));
             FactsJsonWriter.Write(cachedBag, Path.Combine(cacheFactsDirectory, "facts.json"));
+            await outputWriter.WriteAsync(cachedDocument, cachedBag, AnalyzerVersion, cancellationToken);
 
             return new GraphGenerationResult(cachedDocument, cachedBag);
         }
@@ -59,7 +59,7 @@ public sealed class GraphGenerator
         Console.WriteLine($"[facts] Collected Nodes={factBag.Nodes.Count} Edges={factBag.Edges.Count}");
         FactsJsonWriter.Write(factBag, factsPath);
 
-        await outputWriter.WriteAsync(document, AnalyzerVersion, cancellationToken);
+        await outputWriter.WriteAsync(document, factBag, AnalyzerVersion, cancellationToken);
         await cacheManager.SaveAsync(AnalyzerVersion, document, fingerprints, cancellationToken);
 
         return new GraphGenerationResult(document, factBag);
@@ -110,7 +110,7 @@ public sealed class GraphGenerator
             {
                 foreach (var kv in node.Props)
                 {
-                    props[kv.Key] = kv.Value;
+                    props[kv.Key] = NormalizeJsonValue(kv.Value);
                 }
             }
 
@@ -214,6 +214,57 @@ public sealed class GraphGenerator
         }
 
         return null;
+    }
+
+    private static object? NormalizeJsonValue(object? value)
+        => value is JsonElement element ? NormalizeJsonElement(element) : value;
+
+    private static object? NormalizeJsonElement(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Null:
+                return null;
+            case JsonValueKind.String:
+                return element.GetString();
+            case JsonValueKind.Number:
+                if (element.TryGetInt64(out var l))
+                {
+                    return l;
+                }
+
+                if (element.TryGetDouble(out var d))
+                {
+                    return d;
+                }
+
+                return element.GetRawText();
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                return element.GetBoolean();
+            case JsonValueKind.Array:
+            {
+                var list = new List<object?>();
+                foreach (var item in element.EnumerateArray())
+                {
+                    list.Add(NormalizeJsonElement(item));
+                }
+
+                return list;
+            }
+            case JsonValueKind.Object:
+            {
+                var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in element.EnumerateObject())
+                {
+                    dict[prop.Name] = NormalizeJsonElement(prop.Value);
+                }
+
+                return dict;
+            }
+            default:
+                return element.GetRawText();
+        }
     }
 
     private static string? NormalizeToWorkspace(string workspaceRoot, string? path)

@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using GraphKit.Constants;
 using GraphKit.Facts;
 
@@ -9,23 +11,80 @@ namespace GraphKit.Outputs.Narrative
 {
     public static class LegacyNarrativeRenderer
     {
+        public sealed record EndpointNarrative(
+            NodeFact Endpoint,
+            string ControllerDisplay,
+            string ActionName,
+            string Text,
+            string? Route,
+            string Verb,
+            string? Auth);
+
         public static void Render(FactBag bag, string repoRoot, string outPath)
         {
+            var entries = Collect(bag, repoRoot);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+            using var writer = new StringWriter();
+            foreach (var entry in entries)
+            {
+                writer.Write(entry.Text);
+                if (!entry.Text.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+                {
+                    writer.WriteLine();
+                }
+
+                writer.WriteLine();
+            }
+
+            var content = writer.ToString().TrimEnd();
+            File.WriteAllText(outPath, string.IsNullOrEmpty(content) ? string.Empty : content + Environment.NewLine);
+        }
+
+        public static IReadOnlyList<EndpointNarrative> Collect(FactBag bag, string repoRoot)
+        {
             var idx = new Index(bag);
-            using var w = new StringWriter();
+            var entries = new List<EndpointNarrative>();
 
             foreach (var ep in idx.EndpointNodes())
             {
+                using var w = new StringWriter();
+                var controllerDisplay = FirstNonEmpty(
+                    Str(ep, "controller_display"),
+                    Str(ep, "fqdn"),
+                    Str(ep, "name"),
+                    ep.Type) ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(controllerDisplay))
+                {
+                    w.WriteLine($"## {controllerDisplay}");
+                    w.WriteLine();
+                }
+
                 PrintEndpointHeader(w, ep, repoRoot);
                 PrintUsesServiceTree(w, idx, ep.Id, 1, repoRoot);
                 PrintSendsRequestTree(w, idx, ep.Id, 1, repoRoot, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                 PrintHttpCallsTree(w, idx, ep.Id, 1, repoRoot);
                 PrintEfTouches(w, idx, ep.Id, 1, repoRoot);
-                w.WriteLine();
+                var text = w.ToString().TrimEnd();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    text += Environment.NewLine;
+                }
+
+                var actionName = FirstNonEmpty(Str(ep, "name"), Str(ep, "fqdn"), ep.Type) ?? ep.Id;
+                var route = FirstNonEmpty(Str(ep, PropKeys.Route), Str(ep, "route"));
+                var verb = FirstNonEmpty(Str(ep, PropKeys.Verb), Str(ep, "http_method")) ?? string.Empty;
+                var auth = FirstNonEmpty(Str(ep, "auth"));
+
+                entries.Add(new EndpointNarrative(ep, controllerDisplay, actionName, text, route, verb, auth));
             }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
-            File.WriteAllText(outPath, w.ToString());
+            return entries
+                .OrderBy(e => e.ControllerDisplay, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(e => e.Route, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(e => e.Verb, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(e => e.ActionName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         private static void PrintEndpointHeader(StringWriter w, NodeFact ep, string repoRoot)
@@ -97,12 +156,16 @@ namespace GraphKit.Outputs.Narrative
                 return;
             }
 
+            var callerNode = idx.Node(fromId);
+            var preferredAssembly = Str(callerNode, "assembly");
+            var preferredProject = Str(callerNode, "project");
+
             foreach (var e in idx.Out(fromId, EdgeKinds.SendsRequest))
             {
                 var serviceName = FirstNonEmpty(Str(e, "service"));
                 if (IsRequestProcessorService(serviceName))
                 {
-                    RenderRequestProcessorInvocation(w, idx, fromId, e, indent, repoRoot, visited);
+                    RenderRequestProcessorInvocation(w, idx, fromId, e, indent, repoRoot, visited, preferredAssembly, preferredProject);
                     continue;
                 }
 
@@ -145,13 +208,13 @@ namespace GraphKit.Outputs.Narrative
                     }
                 }
 
-                RenderHandlerBlock(w, idx, e.ToId, indent + 1, repoRoot, visited);
+                RenderHandlerBlock(w, idx, e.ToId, indent + 1, repoRoot, visited, preferredAssembly, preferredProject);
             }
 
             visited.Remove(fromId);
         }
 
-        private static void RenderRequestProcessorInvocation(StringWriter w, Index idx, string fromId, EdgeFact dispatchEdge, int indent, string repoRoot, HashSet<string> visited)
+        private static void RenderRequestProcessorInvocation(StringWriter w, Index idx, string fromId, EdgeFact dispatchEdge, int indent, string repoRoot, HashSet<string> visited, string? preferredAssembly, string? preferredProject)
         {
             var serviceEdge = FindMatchingRequestProcessorServiceEdge(idx, fromId, dispatchEdge);
             var serviceLink = serviceEdge is not null ? SourceLink(serviceEdge, repoRoot) : SourceLink(dispatchEdge, repoRoot);
@@ -181,10 +244,10 @@ namespace GraphKit.Outputs.Narrative
             }
 
             var executionMethod = FirstNonEmpty(contractMethod, Str(dispatchEdge, "invocation"), methodName, "ProcessAsync")!;
-            RenderRequestProcessorDispatch(w, idx, dispatchEdge, indent + 2, executionMethod, repoRoot, visited);
+            RenderRequestProcessorDispatch(w, idx, dispatchEdge, indent + 2, executionMethod, repoRoot, visited, preferredAssembly, preferredProject);
         }
 
-        private static void RenderRequestProcessorDispatch(StringWriter w, Index idx, EdgeFact dispatchEdge, int indent, string executionMethod, string repoRoot, HashSet<string> visited)
+        private static void RenderRequestProcessorDispatch(StringWriter w, Index idx, EdgeFact dispatchEdge, int indent, string executionMethod, string repoRoot, HashSet<string> visited, string? preferredAssembly, string? preferredProject)
         {
             var req = Str(dispatchEdge, "request_type");
             var resp = Str(dispatchEdge, "response_type");
@@ -220,18 +283,18 @@ namespace GraphKit.Outputs.Narrative
                 Indent(w, indent + 2);
                 w.WriteLine($"- generic_pipeline_behaviors {behaviors.Count}");
                 foreach (var b in behaviors)
-                {
-                    Indent(w, indent + 3);
-                    w.WriteLine($"- {b}");
-                }
+            {
+                Indent(w, indent + 3);
+                w.WriteLine($"- {b}");
+            }
             }
 
-            RenderHandlerBlock(w, idx, dispatchEdge.ToId, indent + 2, repoRoot, visited);
+            RenderHandlerBlock(w, idx, dispatchEdge.ToId, indent + 2, repoRoot, visited, preferredAssembly, preferredProject);
         }
 
-        private static void RenderHandlerBlock(StringWriter w, Index idx, string requestNodeId, int indent, string repoRoot, HashSet<string> visited)
+        private static void RenderHandlerBlock(StringWriter w, Index idx, string requestNodeId, int indent, string repoRoot, HashSet<string> visited, string? preferredAssembly, string? preferredProject)
         {
-            var handlerInfo = idx.FindHandlerForRequest(requestNodeId);
+            var handlerInfo = idx.FindHandlerForRequest(requestNodeId); // to add: preferredAssembly, preferredProject
             if (handlerInfo is null)
             {
                 return;
@@ -381,6 +444,10 @@ namespace GraphKit.Outputs.Narrative
                     Str(serviceNode, "name"),
                     Str(serviceNode, "fqdn"),
                     serviceNode?.Type) ?? "service";
+                if (IsRequestProcessorService(serviceLabel))
+                {
+                    continue;
+                }
                 var details = FirstNonEmpty(Str(service, "method"));
                 var link = SourceLink(service, repoRoot);
                 Indent(w, indent);
@@ -400,6 +467,15 @@ namespace GraphKit.Outputs.Narrative
                     ? entityLabel
                     : $"{operation} {entityLabel}";
                 w.WriteLine($"- [{label}]({link})");
+
+                foreach (var tableEdge in idx.Out(read.ToId, EdgeKinds.ReadsFrom))
+                {
+                    var tableNode = idx.Node(tableEdge.ToId);
+                    var tableLabel = FirstNonEmpty(Str(tableNode, "table"), Str(tableNode, "name"), Str(tableNode, "fqdn"), tableNode?.Type) ?? "table";
+                    var tableLink = SourceLink(tableEdge, repoRoot);
+                    Indent(w, indent + 1);
+                    w.WriteLine($"- [reads_from {tableLabel}]({tableLink})");
+                }
             }
 
             foreach (var use in idx.Out(fromId, EdgeKinds.UsesStorage))
@@ -425,6 +501,17 @@ namespace GraphKit.Outputs.Narrative
                 var link = SourceLink(publish, repoRoot);
                 Indent(w, indent);
                 w.WriteLine($"- [publishes {Short(messageType)}]({link})");
+            }
+
+            foreach (var domainEvent in idx.Out(fromId, EdgeKinds.PublishesDomainEvent))
+            {
+                var domainType = FirstNonEmpty(
+                    Str(domainEvent, "event_type"),
+                    Str(idx.Node(domainEvent.ToId), "name"),
+                    Str(idx.Node(domainEvent.ToId), "fqdn")) ?? "domain_event";
+                var link = SourceLink(domainEvent, repoRoot);
+                Indent(w, indent);
+                w.WriteLine($"- [publishes_domain_event {Short(domainType)}]({link})");
             }
 
             foreach (var notif in idx.Out(fromId, EdgeKinds.PublishesNotification))
@@ -543,10 +630,14 @@ namespace GraphKit.Outputs.Narrative
         {
             private readonly Dictionary<string, NodeFact> _nodes;
             private readonly ILookup<string, EdgeFact> _out;
+            private readonly Dictionary<string, List<string>> _pipelineBehaviors;
+            private static readonly IReadOnlyList<string> EmptyBehaviors = Array.Empty<string>();
+
             public Index(FactBag bag)
             {
                 _nodes = bag.Nodes.ToDictionary(n => n.Id);
                 _out = bag.Edges.ToLookup(e => e.FromId);
+                _pipelineBehaviors = BuildPipelineBehaviorIndex(bag.Edges);
             }
 
             public NodeFact? Node(string id) => _nodes.TryGetValue(id, out var n) ? n : null;
@@ -576,19 +667,124 @@ namespace GraphKit.Outputs.Narrative
                 return null;
             }
 
-            public List<string> PipelineBehaviorsForRequest(string requestNodeId)
+            public IReadOnlyList<string> PipelineBehaviorsForRequest(string requestNodeId)
             {
-                var list = new List<string>();
-                foreach (var e in _out.SelectMany(g => g).Where(e => e.Kind == EdgeKinds.SendsRequest && e.ToId == requestNodeId))
+                return _pipelineBehaviors.TryGetValue(requestNodeId, out var list)
+                    ? list
+                    : EmptyBehaviors;
+            }
+
+            private static Dictionary<string, List<string>> BuildPipelineBehaviorIndex(IEnumerable<EdgeFact> edges)
+            {
+                var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+                foreach (var edge in edges)
                 {
-                    if (e.Props.TryGetValue("pipeline_behaviors", out var pb) && pb is string s)
+                    if (!string.Equals(edge.Kind, EdgeKinds.SendsRequest, StringComparison.Ordinal))
                     {
-                        list.AddRange(s.Split(',').Select(x => x.Trim()).Where(x => x.Length > 0));
+                        continue;
+                    }
+
+                    if (!edge.Props.TryGetValue("pipeline_behaviors", out var raw) || raw is null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var label in ExtractPipelineLabels(raw))
+                    {
+                        if (string.IsNullOrWhiteSpace(label))
+                        {
+                            continue;
+                        }
+
+                        if (!result.TryGetValue(edge.ToId, out var list))
+                        {
+                            list = new List<string>();
+                            result[edge.ToId] = list;
+                        }
+
+                        if (!list.Any(existing => string.Equals(existing, label, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            list.Add(label);
+                        }
                     }
                 }
-                return list
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+
+                return result;
+            }
+
+            private static IEnumerable<string> ExtractPipelineLabels(object? value)
+            {
+                switch (value)
+                {
+                    case null:
+                        yield break;
+                    case string s:
+                        foreach (var item in SplitPipelineString(s))
+                        {
+                            yield return item;
+                        }
+                        yield break;
+                    case JsonElement element:
+                        switch (element.ValueKind)
+                        {
+                            case JsonValueKind.Array:
+                                foreach (var child in element.EnumerateArray())
+                                {
+                                    foreach (var label in ExtractPipelineLabels(child))
+                                    {
+                                        yield return label;
+                                    }
+                                }
+                                yield break;
+                            case JsonValueKind.String:
+                                foreach (var item in SplitPipelineString(element.GetString()))
+                                {
+                                    yield return item;
+                                }
+                                yield break;
+                            default:
+                                var text = element.ToString();
+                                if (!string.IsNullOrWhiteSpace(text))
+                                {
+                                    foreach (var item in SplitPipelineString(text))
+                                    {
+                                        yield return item;
+                                    }
+                                }
+                                yield break;
+                        }
+                    case IEnumerable enumerable when value is not string:
+                        foreach (var item in enumerable)
+                        {
+                            foreach (var label in ExtractPipelineLabels(item))
+                            {
+                                yield return label;
+                            }
+                        }
+                        yield break;
+                    default:
+                        foreach (var item in SplitPipelineString(value.ToString()))
+                        {
+                            yield return item;
+                        }
+                        yield break;
+                }
+            }
+
+            private static IEnumerable<string> SplitPipelineString(string? raw)
+            {
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    yield break;
+                }
+
+                foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!string.IsNullOrWhiteSpace(part))
+                    {
+                        yield return part;
+                    }
+                }
             }
         }
     }

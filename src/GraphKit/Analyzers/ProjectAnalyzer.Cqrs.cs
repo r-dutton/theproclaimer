@@ -140,7 +140,7 @@ public sealed partial class ProjectAnalyzer
                 if (fieldLookup.TryGetValue(fieldName, out var descriptor))
                 {
                     var typeName = descriptor.Type;
-                    var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                    var resolvedType = ResolveImplementationType(typeName, handlerInfo.Assembly, handlerInfo.Project) ?? typeName;
                     var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                     if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
                     {
@@ -418,7 +418,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                var resolvedType = ResolveImplementationType(descriptor.Type, handlerInfo.Assembly, handlerInfo.Project) ?? descriptor.Type;
                 if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
                 {
                     continue;
@@ -716,7 +716,7 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var repositoryCall in handler.RepositoryCalls)
             {
-                var targetType = ResolveImplementationType(repositoryCall.RepositoryType) ?? repositoryCall.RepositoryType;
+                var targetType = ResolveImplementationType(repositoryCall.RepositoryType, handler.Assembly, handler.Project) ?? repositoryCall.RepositoryType;
                 var repositoryName = GetTopLevelSimpleIdentifier(targetType);
 
                 if (_repositories.Values.FirstOrDefault(r => r.Name.Equals(repositoryName, StringComparison.Ordinal)) is { } repository)
@@ -852,12 +852,12 @@ public sealed partial class ProjectAnalyzer
                     props["target_service"] = targetService!;
                 }
 
-                EnrichClientPropsFromHttpClient(preferredInvocation, props, handler.Assembly);
+                EnrichClientPropsFromHttpClient(preferredInvocation, props, handler.Assembly, handler.Project);
 
                 var propsOrNull = props.Count > 0 ? props : null;
                 var invocationLine = preferredInvocation.Line;
 
-                if (TryResolveHttpClient(preferredInvocation.ClientType, out var clientInfo, handler.Assembly))
+                if (TryResolveHttpClient(preferredInvocation.ClientType, out var clientInfo, handler.Assembly, handler.Project))
                 {
                     var clientId = StableId.For("http.client", clientInfo.Fqdn, clientInfo.Assembly, clientInfo.SymbolId);
                     _edges.Add(new GraphEdge
@@ -904,7 +904,7 @@ public sealed partial class ProjectAnalyzer
                     .OrderBy(u => u.Line)
                     .First();
 
-                if (!TryEnsureServiceNode(primary.ServiceType, out var serviceId, out var registration, primary.TargetType))
+                if (!TryEnsureServiceNode(primary.ServiceType, out var serviceId, out var registration, primary.TargetType, handler.Assembly, handler.Project))
                 {
                     continue;
                 }
@@ -1395,9 +1395,9 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private void EnrichClientPropsFromHttpClient(HandlerClientInvocation invocation, IDictionary<string, object> props, string? contextAssembly)
+    private void EnrichClientPropsFromHttpClient(HandlerClientInvocation invocation, IDictionary<string, object> props, string? contextAssembly, string? contextProject)
     {
-        if (!TryResolveHttpClient(invocation.ClientType, out var client, contextAssembly) || client.OutboundCalls.Count == 0)
+        if (!TryResolveHttpClient(invocation.ClientType, out var client, contextAssembly, contextProject) || client.OutboundCalls.Count == 0)
         {
             return;
         }
@@ -1479,7 +1479,7 @@ public sealed partial class ProjectAnalyzer
         }
     }
 
-    private bool TryResolveHttpClient(string clientType, [NotNullWhen(true)] out HttpClientInfo? client, string? preferredAssembly = null)
+    private bool TryResolveHttpClient(string clientType, [NotNullWhen(true)] out HttpClientInfo? client, string? preferredAssembly = null, string? preferredProject = null)
     {
         client = null;
         if (string.IsNullOrWhiteSpace(clientType))
@@ -1543,7 +1543,7 @@ public sealed partial class ProjectAnalyzer
 
         RecordWithQualifiers(clientType);
 
-        var resolvedType = ResolveImplementationType(clientType);
+        var resolvedType = ResolveImplementationType(clientType, preferredAssembly, preferredProject);
         if (!string.IsNullOrWhiteSpace(resolvedType))
         {
             RecordWithQualifiers(resolvedType);
@@ -1554,7 +1554,7 @@ public sealed partial class ProjectAnalyzer
         {
             RecordWithQualifiers(qualifiedOriginal);
 
-            var resolvedQualified = ResolveImplementationType(qualifiedOriginal);
+            var resolvedQualified = ResolveImplementationType(qualifiedOriginal, preferredAssembly, preferredProject);
             if (!string.IsNullOrWhiteSpace(resolvedQualified))
             {
                 RecordWithQualifiers(resolvedQualified);
@@ -1698,6 +1698,18 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(preferredProject))
+        {
+            var projectMatches = matches
+                .Where(match => !string.IsNullOrWhiteSpace(match.Client.Project) &&
+                                 string.Equals(match.Client.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (projectMatches.Count > 0)
+            {
+                matches = projectMatches;
+            }
+        }
+
         if (matches.Count == 0)
         {
             client = null;
@@ -1753,6 +1765,13 @@ public sealed partial class ProjectAnalyzer
                 {
                     score += 350;
                 }
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject) &&
+                !string.IsNullOrWhiteSpace(match.Project) &&
+                string.Equals(match.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 500;
             }
 
             if (!string.IsNullOrWhiteSpace(clientNamespaceRoot))

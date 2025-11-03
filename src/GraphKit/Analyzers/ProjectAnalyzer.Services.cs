@@ -184,7 +184,7 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var typeName = descriptor.Type;
-                var resolvedType = ResolveImplementationType(typeName) ?? typeName;
+                var resolvedType = ResolveImplementationType(typeName, serviceInfo.Assembly, serviceInfo.Project) ?? typeName;
                 var invocation = memberAccess.Parent as InvocationExpressionSyntax;
 
                 if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
@@ -238,7 +238,7 @@ public sealed partial class ProjectAnalyzer
                     methodName is not null &&
                     BaseServiceInvocationNames.Contains(methodName))
                 {
-                    var baseServiceType = ResolveImplementationType(typeName) ?? typeName;
+                    var baseServiceType = ResolveImplementationType(typeName, serviceInfo.Assembly, serviceInfo.Project) ?? typeName;
                     if (CaptureBaseServiceInvocation(
                         serviceInfo,
                         baseServiceType,
@@ -406,7 +406,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var resolvedType = ResolveImplementationType(descriptor.Type) ?? descriptor.Type;
+                var resolvedType = ResolveImplementationType(descriptor.Type, serviceInfo.Assembly, serviceInfo.Project) ?? descriptor.Type;
                 if (!IsConfigurationType(resolvedType) && !IsConfigurationType(descriptor.Type))
                 {
                     continue;
@@ -543,7 +543,7 @@ public sealed partial class ProjectAnalyzer
 
             foreach (var repositoryCall in service.RepositoryCalls)
             {
-                var targetType = ResolveImplementationType(repositoryCall.RepositoryType) ?? repositoryCall.RepositoryType;
+                var targetType = ResolveImplementationType(repositoryCall.RepositoryType, service.Assembly, service.Project) ?? repositoryCall.RepositoryType;
                 var repositoryName = GetTopLevelSimpleIdentifier(targetType);
 
                 if (_repositories.Values.FirstOrDefault(r => r.Name.Equals(repositoryName, StringComparison.Ordinal)) is { } repository)
@@ -712,7 +712,7 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
-                if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType))
+                if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType, service.Assembly, service.Project))
                 {
                     continue;
                 }
