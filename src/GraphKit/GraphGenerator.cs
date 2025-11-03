@@ -18,7 +18,11 @@ public sealed class GraphGenerator
 
     public async Task<GraphGenerationResult> GenerateAsync(GraphGenerationOptions options, CancellationToken cancellationToken = default)
     {
-        var loader = new WorkspaceLoader(options.WorkspacePath, options.Solutions);
+        var loader = new WorkspaceLoader(
+            options.WorkspacePath,
+            options.Solutions,
+            options.UseRoslyn,
+            options.RoslynWorkspace);
         var projects = await loader.LoadAsync(cancellationToken); // process all solutions/projects without filtering
     Console.WriteLine($"[graph] Loaded {projects.Count} projects. Memory={GC.GetTotalMemory(false)/1024/1024:F1}MB");
 
