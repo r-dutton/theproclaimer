@@ -168,7 +168,8 @@ public sealed class WorkspaceLoader
             var defineConstants = GetProjectProperty(projectXml, ns, "DefineConstants");
             var nullableValue = GetProjectProperty(projectXml, ns, "Nullable");
             var parseOptions = CreateParseOptions(langVersionValue, defineConstants);
-            var compilationOptions = CreateCompilationOptions(nullableValue);
+            var outputType = GetProjectProperty(projectXml, ns, "OutputType");
+            var compilationOptions = CreateCompilationOptions(nullableValue, outputType);
 
             bag.Add(new ProjectInfo(
                 projectPath,
@@ -243,14 +244,34 @@ public sealed class WorkspaceLoader
         return options;
     }
 
-    private static CSharpCompilationOptions CreateCompilationOptions(string? nullableValue)
+    private static CSharpCompilationOptions CreateCompilationOptions(string? nullableValue, string? outputType)
     {
         var nullable = MapNullableOption(nullableValue);
+        var outputKind = MapOutputKind(outputType);
 
-        return new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        return new CSharpCompilationOptions(outputKind)
             .WithNullableContextOptions(nullable)
             .WithOptimizationLevel(OptimizationLevel.Debug)
             .WithMetadataImportOptions(MetadataImportOptions.Public);
+    }
+
+    private static OutputKind MapOutputKind(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return OutputKind.DynamicallyLinkedLibrary;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "exe" => OutputKind.ConsoleApplication,
+            "winexe" => OutputKind.WindowsApplication,
+            "appcontainerexe" => OutputKind.WindowsRuntimeApplication,
+            "library" => OutputKind.DynamicallyLinkedLibrary,
+            "netmodule" => OutputKind.NetModule,
+            "winmdobj" => OutputKind.WindowsRuntimeMetadata,
+            _ => OutputKind.DynamicallyLinkedLibrary
+        };
     }
 
     private static NullableContextOptions MapNullableOption(string? value)
