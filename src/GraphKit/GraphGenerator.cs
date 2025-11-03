@@ -24,8 +24,20 @@ public sealed class GraphGenerator
             options.Solutions,
             options.UseRoslyn,
             options.RoslynWorkspace);
-        var projects = await loader.LoadAsync(cancellationToken); // process all solutions/projects without filtering
-    Console.WriteLine($"[graph] Loaded {projects.Count} projects. Memory={GC.GetTotalMemory(false)/1024/1024:F1}MB");
+        var loadResult = await loader.LoadAsync(cancellationToken); // process all solutions/projects without filtering
+        var projects = loadResult.Projects;
+        var roslynProjects = loadResult.RoslynProjects;
+
+        static string GetLookupKey(ProjectInfo projectInfo)
+            => string.IsNullOrWhiteSpace(projectInfo.ProjectPath)
+                ? projectInfo.AssemblyName
+                : projectInfo.ProjectPath;
+
+        var roslynLookup = roslynProjects.Count > 0
+            ? roslynProjects.ToDictionary(static entry => GetLookupKey(entry.Project), static entry => entry, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        Console.WriteLine($"[graph] Loaded {projects.Count} projects. Memory={GC.GetTotalMemory(false)/1024/1024:F1}MB");
 
         var fingerprints = await ProjectFingerprint.ComputeAsync(projects, options.WorkspacePath, cancellationToken);
         var cacheManager = new WorkspaceCacheManager(options.WorkspacePath, options.OutputDirectory);
@@ -48,7 +60,9 @@ public sealed class GraphGenerator
         var analyzer = new ProjectAnalyzer(options.WorkspacePath, factWriter);
         await Parallel.ForEachAsync(projects, cancellationToken, async (project, ct) =>
         {
-            await analyzer.AnalyzeProjectAsync(project, cancellationToken);
+            var projectKey = GetLookupKey(project);
+            roslynLookup?.TryGetValue(projectKey, out var roslynProject);
+            await analyzer.AnalyzeProjectAsync(project, roslynProject, ct);
             Console.WriteLine($"[graph] Analyzed project {project.AssemblyName} ({project.SourceFiles.Count} files). Nodes={analyzer.NodeCount} Edges={analyzer.EdgeCount} Mem={GC.GetTotalMemory(false) / 1024 / 1024:F1}MB");
         });
 

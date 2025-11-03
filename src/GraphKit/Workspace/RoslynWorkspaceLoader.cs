@@ -23,14 +23,15 @@ public sealed class RoslynWorkspaceLoader
         _solutionPaths = solutionPaths ?? throw new ArgumentNullException(nameof(solutionPaths));
     }
 
-    public async Task<IReadOnlyList<ProjectInfo>> LoadAsync(CancellationToken cancellationToken = default)
+    public async Task<WorkspaceLoadResult> LoadAsync(CancellationToken cancellationToken = default)
     {
         if (_solutionPaths.Count == 0)
         {
-            return Array.Empty<ProjectInfo>();
+            return WorkspaceLoadResult.Empty;
         }
 
         var projects = new Dictionary<string, ProjectInfo>(StringComparer.OrdinalIgnoreCase);
+        var orderedEntries = new List<(ProjectInfo ProjectInfo, RoslynProjectInfo RoslynInfo)>();
         var processedSolutions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var solutionPath in _solutionPaths)
@@ -118,7 +119,7 @@ public sealed class RoslynWorkspaceLoader
                 var assemblyName = project.AssemblyName ?? project.Name;
                 var rootNamespace = project.DefaultNamespace ?? assemblyName;
 
-                projects[key] = new ProjectInfo(
+                var projectInfo = new ProjectInfo(
                     projectPath,
                     assemblyName,
                     rootNamespace,
@@ -130,6 +131,10 @@ public sealed class RoslynWorkspaceLoader
                     documentFilePaths,
                     documentVersions,
                     project.Version);
+
+                var roslynInfo = new RoslynProjectInfo(projectInfo, project);
+                projects[key] = projectInfo;
+                orderedEntries.Add((projectInfo, roslynInfo));
             }
         }
 
@@ -138,10 +143,19 @@ public sealed class RoslynWorkspaceLoader
             _workspace.CloseSolution();
         }
 
-        return projects
-            .Values
-            .OrderBy(p => p.ProjectPath, StringComparer.OrdinalIgnoreCase)
+        var ordered = orderedEntries
+            .OrderBy(static entry => entry.ProjectInfo.ProjectPath, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var orderedProjects = ordered
+            .Select(static entry => entry.ProjectInfo)
+            .ToList();
+
+        var orderedRoslyn = ordered
+            .Select(static entry => entry.RoslynInfo)
+            .ToList();
+
+        return new WorkspaceLoadResult(orderedProjects, orderedRoslyn);
     }
 
     private string ResolveRelativeDirectory(string projectPath)
