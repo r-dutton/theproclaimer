@@ -29,8 +29,9 @@ public sealed partial class ProjectAnalyzer
         var span = ToGraphSpan(tree, classDeclaration);
 
         var model = project.GetModel(tree);
-        var pointsTo = new FlowPointsToFacade();
-        var valueContent = new FlowValueContentFacade();
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var pointsTo = CreatePointsToFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
 
         var fieldLookup = new Dictionary<string, FieldDescriptor>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in fieldTypes)
@@ -169,8 +170,8 @@ public sealed partial class ProjectAnalyzer
                     project.Compilation,
                     model,
                     methodSymbol,
-                    new FlowInterproceduralConfig(4, 2),
-                    ShouldExpandForCqrsEfHttpMap,
+                    InterproceduralConfiguration,
+                    callsitePredicate,
                     visitor);
             }
         }

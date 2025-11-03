@@ -1,14 +1,101 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
+    private readonly ProjectAnalyzerConfiguration _configuration;
+    private readonly InterproceduralAnalysisConfiguration _interproceduralConfiguration;
+
+    internal InterproceduralAnalysisConfiguration InterproceduralConfiguration => _interproceduralConfiguration;
+
+    private static ProjectAnalyzerConfiguration EnsureConfiguration(ProjectAnalyzerConfiguration? configuration)
+    {
+        var normalized = (configuration ?? ProjectAnalyzerConfiguration.Default).Normalize();
+        return normalized;
+    }
+
+    private FlowPointsToFacade CreatePointsToFacade(FlowCallsitePredicate predicate)
+        => new(_interproceduralConfiguration, predicate);
+
+    private FlowValueContentFacade CreateValueContentFacade(FlowCallsitePredicate predicate)
+        => new(_interproceduralConfiguration, predicate);
+
+    private static FlowCallsitePredicate ComposeInterproceduralPredicate(FlowCallsitePredicate predicate)
+        => invocation => !ShouldPruneInterproceduralInvocation(invocation) && predicate(invocation);
+
+    private static bool ShouldPruneInterproceduralInvocation(IInvocationOperation invocation)
+    {
+        if (invocation?.TargetMethod is not { } method)
+        {
+            return false;
+        }
+
+        var receiver = invocation.Instance?.Type?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        var containing = method.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+
+        if (IsLoggerType(receiver) || IsLoggerType(containing))
+        {
+            return true;
+        }
+
+        if (IsMetricsType(receiver) || IsMetricsType(containing))
+        {
+            return true;
+        }
+
+        if (IsTelemetryType(receiver) || IsTelemetryType(containing))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public sealed record ProjectAnalyzerConfiguration
+    {
+        public int MaxInterproceduralCallChainLength { get; init; } = 4;
+
+        public int MaxInterproceduralLambdaOrLocalFunctionDepth { get; init; } = 2;
+
+        public InterproceduralAnalysisKind InterproceduralAnalysisKind { get; init; } = InterproceduralAnalysisKind.ContextSensitive;
+
+        public static ProjectAnalyzerConfiguration Default { get; } = new();
+
+        public ProjectAnalyzerConfiguration Normalize()
+        {
+            var normalizedCallChain = Math.Max(0, MaxInterproceduralCallChainLength);
+            var normalizedLambdaDepth = Math.Max(0, MaxInterproceduralLambdaOrLocalFunctionDepth);
+
+            if (normalizedCallChain == MaxInterproceduralCallChainLength &&
+                normalizedLambdaDepth == MaxInterproceduralLambdaOrLocalFunctionDepth)
+            {
+                return this;
+            }
+
+            return this with
+            {
+                MaxInterproceduralCallChainLength = normalizedCallChain,
+                MaxInterproceduralLambdaOrLocalFunctionDepth = normalizedLambdaDepth
+            };
+        }
+
+        public InterproceduralAnalysisConfiguration ToInterproceduralConfiguration()
+            => InterproceduralAnalysisConfiguration.Create(
+                InterproceduralAnalysisKind,
+                maxInterproceduralCallChainLength: MaxInterproceduralCallChainLength,
+                maxInterproceduralLambdaOrLocalFunctionCallChainLength: MaxInterproceduralLambdaOrLocalFunctionDepth);
+    }
+
     private static bool IsConfigurationType(string? typeName)
         => !string.IsNullOrWhiteSpace(typeName)
             && typeName!.Contains("IConfiguration", StringComparison.Ordinal);

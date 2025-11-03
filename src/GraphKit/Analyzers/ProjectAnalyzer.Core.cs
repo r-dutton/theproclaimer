@@ -69,11 +69,13 @@ public sealed partial class ProjectAnalyzer
     private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
     private readonly FactWriter _facts;
 
-    public ProjectAnalyzer(string workspaceRoot, FactWriter? facts = null)
+    public ProjectAnalyzer(string workspaceRoot, FactWriter? facts = null, ProjectAnalyzerConfiguration? configuration = null)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         _workspaceIndex = FlowWorkspaceIndex.Load(_workspaceRoot);
         _facts = facts ?? new FactWriter();
+        _configuration = EnsureConfiguration(configuration);
+        _interproceduralConfiguration = _configuration.ToInterproceduralConfiguration();
         LoadFlowMap();
     }
 
