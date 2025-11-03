@@ -22,7 +22,7 @@ public sealed partial class ProjectAnalyzer
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var controllerRoute = ResolveRoute(classDeclaration.AttributeLists, className);
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -3132,7 +3132,7 @@ public sealed partial class ProjectAnalyzer
                 var verb = methodName.Replace("Map", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
                 var line = GetLineNumber(tree, invocation);
                 var symbolId = $"M:{namespaceName}.{classDeclaration.Identifier.Text}.{methodName}";
-                var info = new MinimalEndpointInfo(route, verb, project.AssemblyName, project.RelativeDirectory, GetRelativePath(tree.FilePath), new GraphSpan { StartLine = line, EndLine = line }, symbolId, methodName);
+                var info = new MinimalEndpointInfo(route, verb, project.AssemblyName, project.RelativeDirectory, GetRelativePath(tree), new GraphSpan { StartLine = line, EndLine = line }, symbolId, methodName);
                 ApplyMinimalEndpointAuthorization(tree, invocation, info);
                 _minimalEndpoints[$"{verb}:{CanonicalizeRoute(route)}"] = info;
             }
@@ -3156,7 +3156,7 @@ public sealed partial class ProjectAnalyzer
                 var verb = methodName.Replace("Map", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
                 var line = GetLineNumber(tree, invocation);
                 var symbolId = $"M:Program.{methodName}";
-                var info = new MinimalEndpointInfo(route, verb, project.AssemblyName, project.RelativeDirectory, GetRelativePath(tree.FilePath), new GraphSpan { StartLine = line, EndLine = line }, symbolId, methodName);
+                var info = new MinimalEndpointInfo(route, verb, project.AssemblyName, project.RelativeDirectory, GetRelativePath(tree), new GraphSpan { StartLine = line, EndLine = line }, symbolId, methodName);
                 ApplyMinimalEndpointAuthorization(tree, invocation, info);
                 _minimalEndpoints[$"{verb}:{CanonicalizeRoute(route)}"] = info;
             }

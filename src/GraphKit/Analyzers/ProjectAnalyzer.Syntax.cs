@@ -96,7 +96,7 @@ public sealed partial class ProjectAnalyzer
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, classDeclaration);
 
         var fieldTypes = new Dictionary<string, FieldDescriptor>(StringComparer.OrdinalIgnoreCase);
@@ -268,7 +268,7 @@ public sealed partial class ProjectAnalyzer
         var structName = structDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? structName : $"{namespaceName}.{structName}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, structDeclaration);
 
         CaptureStringConstants(structDeclaration, namespaceName, fqdn);
@@ -514,7 +514,7 @@ public sealed partial class ProjectAnalyzer
         var recordName = recordDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? recordName : $"{namespaceName}.{recordName}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, recordDeclaration);
 
         var implementedInterfaces = GetImplementedInterfaceTypes(recordDeclaration);
@@ -599,7 +599,7 @@ public sealed partial class ProjectAnalyzer
         var validatorName = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? validatorName : $"{namespaceName}.{validatorName}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, classDeclaration);
 
         _validators.Add(new ValidatorInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, validatorName, targetType));

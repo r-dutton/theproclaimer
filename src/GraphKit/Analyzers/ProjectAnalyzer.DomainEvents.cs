@@ -19,7 +19,7 @@ public sealed partial class ProjectAnalyzer
         var typeName = declaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? typeName : $"{namespaceName}.{typeName}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, declaration);
 
         var info = new DomainEventInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, typeName);
@@ -49,7 +49,7 @@ public sealed partial class ProjectAnalyzer
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, classDeclaration);
 
         eventType = QualifyTypeName(eventType!, project.AssemblyName, project.RelativeDirectory);
@@ -272,7 +272,7 @@ public sealed partial class ProjectAnalyzer
     {
         var typeName = typeDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? typeName : $"{namespaceName}.{typeName}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var assemblyName = project.AssemblyName;
         var projectPath = project.RelativeDirectory;
 

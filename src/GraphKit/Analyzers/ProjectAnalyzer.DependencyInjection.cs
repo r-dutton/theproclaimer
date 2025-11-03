@@ -348,7 +348,7 @@ public sealed partial class ProjectAnalyzer
                 serviceType!,
                 implementationType!,
                 methodName,
-                GetRelativePath(tree.FilePath),
+                GetRelativePath(tree),
                 span,
                 project.AssemblyName,
                 project.RelativeDirectory);
@@ -490,14 +490,14 @@ public sealed partial class ProjectAnalyzer
                                 Transform = new GraphTransform
                                 {
                                     Type = "ioc.locator",
-                                    Location = new GraphLocation { File = GetRelativePath(tree.FilePath), Line = span.StartLine }
+                                    Location = new GraphLocation { File = GetRelativePath(tree), Line = span.StartLine }
                                 },
                                 Props = new Dictionary<string, object>
                                 {
                                     ["method"] = gname.Identifier.Text,
                                     ["service_type"] = contractType
                                 },
-                                Evidence = CreateEvidence(GetRelativePath(tree.FilePath), span)
+                                Evidence = CreateEvidence(GetRelativePath(tree), span)
                             });
                         }
                     }
@@ -527,7 +527,7 @@ public sealed partial class ProjectAnalyzer
 
             var (baseUrl, configurationKey, configuration) = resolved.Value;
             var line = GetLineNumber(tree, invocation);
-            var address = new HttpClientBaseAddress(clientType!, baseUrl, GetRelativePath(tree.FilePath), line, configurationKey, configuration);
+            var address = new HttpClientBaseAddress(clientType!, baseUrl, GetRelativePath(tree), line, configurationKey, configuration);
             _httpClientBaseUrls[clientType!] = address;
 
             foreach (var alias in DeriveClientBindingKeys(clientType!))
@@ -604,7 +604,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var span = ToGraphSpan(tree, invocation);
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         RegisterServiceRegistration(hostedType, hostedType, "Hosted", filePath, span, project);
         return true;
     }
@@ -627,7 +627,7 @@ public sealed partial class ProjectAnalyzer
             : contextType;
 
         var span = ToGraphSpan(tree, invocation);
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var lifetime = methodName switch
         {
             "AddDbContextFactory" => "Singleton",
@@ -686,7 +686,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var span = ToGraphSpan(tree, invocation);
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var registered = false;
 
         foreach (var repository in _repositories.Values)
@@ -807,7 +807,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var span = ToGraphSpan(tree, registerInvocation);
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
 
         foreach (var serviceType in serviceTypes.Where(s => !string.IsNullOrWhiteSpace(s)))
         {

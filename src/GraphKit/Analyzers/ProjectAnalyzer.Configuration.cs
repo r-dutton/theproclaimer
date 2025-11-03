@@ -33,7 +33,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var line = GetLineNumber(tree, invocation);
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         return new ConfigurationUsage(configurationType, methodName!, key, line, filePath);
     }
 
@@ -50,7 +50,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var line = GetLineNumber(tree, elementAccess);
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         return new ConfigurationUsage(configurationType, "indexer", key, line, filePath);
     }
 
