@@ -184,7 +184,8 @@ public sealed class RoslynWorkspaceLoader
 
     private static bool IsCSharpDocument(Document document)
     {
-        if (!string.Equals(document.Language, LanguageNames.CSharp, StringComparison.OrdinalIgnoreCase))
+        var language = document.Project?.Language;
+        if (!string.Equals(language, LanguageNames.CSharp, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
