@@ -68,6 +68,7 @@ public sealed partial class ProjectAnalyzer
     private static readonly int MaxFileParseConcurrency = Math.Max(1, Environment.ProcessorCount - 1);
     private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
     private readonly FactWriter _facts;
+    private readonly ConcurrentDictionary<SyntaxTree, string> _treeRelativePaths = new();
 
     public ProjectAnalyzer(string workspaceRoot, FactWriter? facts = null)
     {
@@ -88,6 +89,7 @@ public sealed partial class ProjectAnalyzer
     {
         LoadConfigurationValues(project);
         _projectsByAssembly[project.AssemblyName] = project;
+        _treeRelativePaths.Clear();
 
         var documentEntries = await ParseProjectDocumentsAsync(project, roslynProject, cancellationToken).ConfigureAwait(false);
 
@@ -113,6 +115,8 @@ public sealed partial class ProjectAnalyzer
             {
                 continue;
             }
+
+            _ = GetRelativePath(document, tree);
 
             foreach (var member in root.Members)
             {
@@ -687,8 +691,38 @@ public sealed partial class ProjectAnalyzer
             .FirstOrDefault();
     }
 
-    private string GetRelativePath(string filePath)
-        => Path.GetRelativePath(_workspaceRoot, filePath).Replace('\\', '/');
+    private string GetRelativePath(Document? document, SyntaxTree tree)
+    {
+        var absolutePath = document?.FilePath;
+        if (string.IsNullOrWhiteSpace(absolutePath))
+        {
+            absolutePath = tree.FilePath;
+        }
+
+        var relative = GetRelativePath(absolutePath);
+        _treeRelativePaths[tree] = relative;
+        return relative;
+    }
+
+    private string GetRelativePath(SyntaxTree tree)
+    {
+        if (_treeRelativePaths.TryGetValue(tree, out var cached))
+        {
+            return cached;
+        }
+
+        return GetRelativePath(document: null, tree);
+    }
+
+    private string GetRelativePath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return string.Empty;
+        }
+
+        return Path.GetRelativePath(_workspaceRoot, filePath).Replace('\\', '/');
+    }
 
     private static GraphSpan ToGraphSpan(SyntaxTree tree, SyntaxNode node)
     {
@@ -800,6 +834,11 @@ public sealed partial class ProjectAnalyzer
         ProjectInfo project,
         CancellationToken cancellationToken)
     {
+        if (project.IsRoslyn)
+        {
+            return new List<(Document, CompilationUnitSyntax, SemanticModel)>();
+        }
+
         var parsedFiles = await ParseProjectFilesAsync(project, cancellationToken).ConfigureAwait(false);
         if (parsedFiles.Count == 0)
         {

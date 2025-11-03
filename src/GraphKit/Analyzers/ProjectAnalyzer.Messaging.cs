@@ -25,7 +25,7 @@ public sealed partial class ProjectAnalyzer
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, classDeclaration);
 
         var model = project.GetModel(tree);
@@ -219,7 +219,7 @@ public sealed partial class ProjectAnalyzer
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, classDeclaration);
 
         string? queueOrTopic = null;

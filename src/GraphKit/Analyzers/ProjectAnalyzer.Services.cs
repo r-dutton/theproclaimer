@@ -115,7 +115,7 @@ public sealed partial class ProjectAnalyzer
         var className = classDeclaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? className : $"{namespaceName}.{className}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, classDeclaration);
 
         var serviceInfo = new ServiceInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);

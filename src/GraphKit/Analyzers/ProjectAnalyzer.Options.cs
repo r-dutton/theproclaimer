@@ -19,7 +19,7 @@ public sealed partial class ProjectAnalyzer
         var typeName = declaration.Identifier.Text;
         var fqdn = string.IsNullOrWhiteSpace(namespaceName) ? typeName : $"{namespaceName}.{typeName}";
         var symbolId = $"T:{fqdn}";
-        var filePath = GetRelativePath(tree.FilePath);
+        var filePath = GetRelativePath(tree);
         var span = ToGraphSpan(tree, declaration);
         var sectionName = ResolveOptionsSectionName(declaration, typeName);
 

@@ -18,7 +18,7 @@ public sealed partial class ProjectAnalyzer
         var profileName = classDeclaration.Identifier.Text;
         var profileFqdn = string.IsNullOrWhiteSpace(namespaceName) ? profileName : $"{namespaceName}.{profileName}";
         var profileSymbolId = $"T:{profileFqdn}";
-        var profileFile = GetRelativePath(tree.FilePath);
+        var profileFile = GetRelativePath(tree);
         var profileSpan = ToGraphSpan(tree, classDeclaration);
 
         var profileId = StableId.For("mapping.automapper.profile", profileFqdn, project.AssemblyName, profileSymbolId);
