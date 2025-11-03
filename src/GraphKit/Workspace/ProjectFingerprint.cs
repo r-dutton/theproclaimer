@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
 
 namespace GraphKit.Workspace;
 
@@ -25,15 +27,14 @@ internal sealed record ProjectFingerprint(string RelativePath, string Hash, int 
             MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1)
         };
 
-        await Parallel.ForEachAsync(projects, options, (project, ct) =>
+        await Parallel.ForEachAsync(projects, options, async (project, ct) =>
         {
             ct.ThrowIfCancellationRequested();
 
             var relativePath = NormalizeRelativePath(workspaceRoot, project.ProjectPath);
-            var hash = ComputeHash(project, ct);
+            var hash = await ComputeHashAsync(project, ct).ConfigureAwait(false);
             var fingerprint = new ProjectFingerprint(relativePath, hash, project.SourceFiles.Count);
             fingerprints[relativePath] = fingerprint;
-            return ValueTask.CompletedTask;
         }).ConfigureAwait(false);
 
         return fingerprints;
@@ -45,10 +46,52 @@ internal sealed record ProjectFingerprint(string RelativePath, string Hash, int 
         return string.IsNullOrWhiteSpace(relative) ? Path.GetFileName(projectPath) : relative;
     }
 
-    private static string ComputeHash(ProjectInfo project, CancellationToken cancellationToken)
+    private static ValueTask<string> ComputeHashAsync(ProjectInfo project, CancellationToken cancellationToken)
+    {
+        if (project.IsRoslyn)
+        {
+            return ComputeRoslynHashAsync(project, cancellationToken);
+        }
+
+        return ValueTask.FromResult(ComputeLegacyHash(project, cancellationToken));
+    }
+
+    private static async ValueTask<string> ComputeRoslynHashAsync(ProjectInfo project, CancellationToken cancellationToken)
     {
         var incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         AppendString(incremental, project.ProjectPath);
+        AppendString(incremental, "roslyn");
+
+        if (project.RoslynProjectVersion is { } projectVersion)
+        {
+            AppendVersionStamp(incremental, projectVersion);
+        }
+
+        foreach (var kvp in project.DocumentFilePaths.OrderBy(static kv => kv.Value, StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            AppendString(incremental, kvp.Value);
+
+            if (project.DocumentVersions.TryGetValue(kvp.Key, out var version))
+            {
+                AppendVersionStamp(incremental, version);
+            }
+            else
+            {
+                AppendString(incremental, "noversion");
+            }
+        }
+
+        var hashBytes = incremental.GetHashAndReset();
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    private static string ComputeLegacyHash(ProjectInfo project, CancellationToken cancellationToken)
+    {
+        var incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendString(incremental, project.ProjectPath);
+        AppendString(incremental, "legacy");
 
         Span<byte> buffer = stackalloc byte[16];
 
@@ -93,4 +136,7 @@ internal sealed record ProjectFingerprint(string RelativePath, string Hash, int 
         var bytes = Encoding.UTF8.GetBytes(value);
         incremental.AppendData(bytes);
     }
+
+    private static void AppendVersionStamp(IncrementalHash incremental, VersionStamp version)
+        => AppendString(incremental, version.ToString());
 }

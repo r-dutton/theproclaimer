@@ -12,6 +12,9 @@ using GraphKit.Outputs.Facts;
 using GraphKit.Outputs.FlowBuilder;
 using GraphKit.Outputs.Legacy;
 using GraphKit.Outputs.Narrative;
+using Microsoft.Build.Locator;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.MSBuild;
 
 var argsList = args.ToList();
 string workspace = Environment.CurrentDirectory;
@@ -27,6 +30,7 @@ bool noMsg = argsList.Remove("--no-msg");
 bool noDb  = argsList.Remove("--no-db");
 bool noCache = argsList.Remove("--no-cache");
 bool turbo = argsList.Remove("--turbo") || argsList.Remove("-t"); // preserved for compatibility, currently no effect
+bool useRoslyn = argsList.Remove("--use-roslyn");
 if (argsList.Remove("--legacy"))
 {
     renderOptions.Source = RenderSource.Legacy;
@@ -87,109 +91,136 @@ renderStyle = renderStyle.Equals("graph", StringComparison.OrdinalIgnoreCase)
     ? "graph"
     : "narrative";
 
-var generator = new GraphGenerator();
-var result = await generator.GenerateAsync(new GraphGenerationOptions(
-    workspace,
-    renderOptions.OutputPath,
-    solutions.Count > 0 ? solutions : null));
-var document = result.Document;
-var factBag = result.Facts;
-var outputDirFull = Path.GetFullPath(Path.Combine(workspace, renderOptions.OutputPath));
+MSBuildWorkspace? roslynWorkspace = null;
 
-if (renderStyle == "narrative")
+try
 {
-    var narrativeOutputPath = Path.Combine(outputDirFull, "flow.md");
-    LegacyNarrativeRenderer.Render(factBag, workspace, narrativeOutputPath);
-}
-
-if (flowPatterns.Count > 0)
-{
-    var predicate = FlowFilter.BuildPredicate(flowPatterns);
-    IGraphProvider provider = renderOptions.Source == RenderSource.Facts
-        ? new FactsGraphProvider(factBag)
-        : new LegacyGraphProvider(document.Nodes, document.Edges);
-    string flow;
-
-    var graph = FlowBuilderCore.BuildGraph(provider);
-    if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
+    if (useRoslyn)
     {
-        var flows = graph.Nodes
-            .Where(predicate)
-            .Select(node => new
-            {
-                node.Id,
-                node.Type,
-                Props = node.Props,
-                Outgoing = graph.GetOutgoingEdges(node.Id)
-                    .Select(edge => new
-                    {
-                        edge.Kind,
-                        edge.ToId,
-                        Props = edge.Props
-                    })
-                    .ToArray(),
-                Incoming = graph.GetIncomingEdges(node.Id)
-                    .Select(edge => new
-                    {
-                        edge.Kind,
-                        edge.FromId,
-                        Props = edge.Props
-                    })
-                    .ToArray()
-            })
-            .ToArray();
-
-        flow = JsonSerializer.Serialize(new { flows }, new JsonSerializerOptions { WriteIndented = true });
-    }
-    else
-    {
-        flow = FlowBuilderMarkdown.Render(graph, predicate);
-    }
-
-    if (string.IsNullOrWhiteSpace(flow))
-    {
-        Console.WriteLine($"No matching flows found for patterns: {string.Join(", ", flowPatterns)}.");
-    }
-    else
-    {
-        Console.WriteLine(flow);
-    }
-}
-else if (!string.IsNullOrWhiteSpace(textFilter) || (tagFilter is { Count: > 0 }))
-{
-    IEnumerable<GraphNode> candidates = document.Nodes;
-    if (!string.IsNullOrWhiteSpace(textFilter))
-    {
-        candidates = candidates.Where(n => n.Name.Contains(textFilter, StringComparison.OrdinalIgnoreCase) || n.Fqdn.Contains(textFilter, StringComparison.OrdinalIgnoreCase) || (n.Props is { } props && props.Values.Any(v => v?.ToString()?.Contains(textFilter, StringComparison.OrdinalIgnoreCase) == true)));
-    }
-
-    if (tagFilter is { Count: > 0 })
-    {
-        candidates = candidates.Where(n => n.Tags.Any(tagFilter.Contains));
-    }
-
-    if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
-    {
-        var json = JsonSerializer.Serialize(candidates, new JsonSerializerOptions { WriteIndented = true });
-        Console.WriteLine(json);
-    }
-    else
-    {
-        foreach (var node in candidates.OrderBy(n => n.Fqdn, StringComparer.OrdinalIgnoreCase))
+        if (!MSBuildLocator.IsRegistered)
         {
-            Console.WriteLine($"- {node.Type}: {node.Fqdn} ({node.FilePath})");
+            MSBuildLocator.RegisterDefaults();
+        }
+
+        roslynWorkspace = MSBuildWorkspace.Create();
+        roslynWorkspace.WorkspaceFailed += (_, args) =>
+        {
+            var prefix = args.Diagnostic.Kind == WorkspaceDiagnosticKind.Warning ? "[roslyn][warn]" : "[roslyn][error]";
+            var writer = args.Diagnostic.Kind == WorkspaceDiagnosticKind.Warning ? Console.Out : Console.Error;
+            writer.WriteLine($"{prefix} {args.Diagnostic.Message}");
+        };
+    }
+
+    var generator = new GraphGenerator();
+    var result = await generator.GenerateAsync(new GraphGenerationOptions(
+        workspace,
+        renderOptions.OutputPath,
+        solutions.Count > 0 ? solutions : null,
+        useRoslyn,
+        roslynWorkspace));
+    var document = result.Document;
+    var factBag = result.Facts;
+    var outputDirFull = Path.GetFullPath(Path.Combine(workspace, renderOptions.OutputPath));
+
+    if (renderStyle == "narrative")
+    {
+        var narrativeOutputPath = Path.Combine(outputDirFull, "flow.md");
+        LegacyNarrativeRenderer.Render(factBag, workspace, narrativeOutputPath);
+    }
+
+    if (flowPatterns.Count > 0)
+    {
+        var predicate = FlowFilter.BuildPredicate(flowPatterns);
+        IGraphProvider provider = renderOptions.Source == RenderSource.Facts
+            ? new FactsGraphProvider(factBag)
+            : new LegacyGraphProvider(document.Nodes, document.Edges);
+        string flow;
+
+        var graph = FlowBuilderCore.BuildGraph(provider);
+        if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
+        {
+            var flows = graph.Nodes
+                .Where(predicate)
+                .Select(node => new
+                {
+                    node.Id,
+                    node.Type,
+                    Props = node.Props,
+                    Outgoing = graph.GetOutgoingEdges(node.Id)
+                        .Select(edge => new
+                        {
+                            edge.Kind,
+                            edge.ToId,
+                            Props = edge.Props
+                        })
+                        .ToArray(),
+                    Incoming = graph.GetIncomingEdges(node.Id)
+                        .Select(edge => new
+                        {
+                            edge.Kind,
+                            edge.FromId,
+                            Props = edge.Props
+                        })
+                        .ToArray()
+                })
+                .ToArray();
+
+            flow = JsonSerializer.Serialize(new { flows }, new JsonSerializerOptions { WriteIndented = true });
+        }
+        else
+        {
+            flow = FlowBuilderMarkdown.Render(graph, predicate);
+        }
+
+        if (string.IsNullOrWhiteSpace(flow))
+        {
+            Console.WriteLine($"No matching flows found for patterns: {string.Join(", ", flowPatterns)}.");
+        }
+        else
+        {
+            Console.WriteLine(flow);
+        }
+    }
+    else if (!string.IsNullOrWhiteSpace(textFilter) || (tagFilter is { Count: > 0 }))
+    {
+        IEnumerable<GraphNode> candidates = document.Nodes;
+        if (!string.IsNullOrWhiteSpace(textFilter))
+        {
+            candidates = candidates.Where(n => n.Name.Contains(textFilter, StringComparison.OrdinalIgnoreCase) || n.Fqdn.Contains(textFilter, StringComparison.OrdinalIgnoreCase) || (n.Props is { } props && props.Values.Any(v => v?.ToString()?.Contains(textFilter, StringComparison.OrdinalIgnoreCase) == true)));
+        }
+
+        if (tagFilter is { Count: > 0 })
+        {
+            candidates = candidates.Where(n => n.Tags.Any(tagFilter.Contains));
+        }
+
+        if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
+        {
+            var json = JsonSerializer.Serialize(candidates, new JsonSerializerOptions { WriteIndented = true });
+            Console.WriteLine(json);
+        }
+        else
+        {
+            foreach (var node in candidates.OrderBy(n => n.Fqdn, StringComparer.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"- {node.Type}: {node.Fqdn} ({node.FilePath})");
+            }
+        }
+    }
+    else
+    {
+        if (renderStyle == "graph")
+        {
+            Console.WriteLine($"Graph generated at {Path.Combine(renderOptions.OutputPath, "graph.json")}");
+        }
+        else
+        {
+            var relativeNarrative = Path.Combine(renderOptions.OutputPath, "flow.md");
+            Console.WriteLine($"Narrative generated at {relativeNarrative}");
         }
     }
 }
-else
+finally
 {
-    if (renderStyle == "graph")
-    {
-        Console.WriteLine($"Graph generated at {Path.Combine(renderOptions.OutputPath, "graph.json")}");
-    }
-    else
-    {
-        var relativeNarrative = Path.Combine(renderOptions.OutputPath, "flow.md");
-        Console.WriteLine($"Narrative generated at {relativeNarrative}");
-    }
+    roslynWorkspace?.Dispose();
 }
