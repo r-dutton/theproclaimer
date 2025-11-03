@@ -75,7 +75,8 @@ public sealed partial class ProjectAnalyzer
 
             _action.RequestInvocations.Add(new ControllerRequestInvocation(requestType, line));
             _analyzer.EnsureHandlerAnalysis(requestType);
-            _analyzer.RecordControllerRequestFact(_action, requestType, line);
+            var invocationName = invocation.TargetMethod?.Name;
+            _analyzer.RecordControllerRequestFact(_action, requestType, invocationName, line);
         }
 
         private void HandleMediatorPublish(IInvocationOperation invocation)

@@ -166,9 +166,22 @@ public sealed partial class ProjectAnalyzer
                                 info.LocalVariables,
                                 project.AssemblyName,
                                 project.RelativeDirectory);
-                            if (!string.IsNullOrWhiteSpace(guessedType))
+                            var genericReturn = initInvocation.Expression switch
                             {
-                                resolvedType = guessedType;
+                                MemberAccessExpressionSyntax memberAccess when memberAccess.Name is GenericNameSyntax genericName && genericName.TypeArgumentList.Arguments.Count > 0
+                                    => genericName.TypeArgumentList.Arguments[0].ToString(),
+                                GenericNameSyntax directGeneric when directGeneric.TypeArgumentList.Arguments.Count > 0
+                                    => directGeneric.TypeArgumentList.Arguments[0].ToString(),
+                                _ => null
+                            };
+
+                            if (!string.IsNullOrWhiteSpace(genericReturn))
+                            {
+                                resolvedType = genericReturn!;
+                            }
+                            else if (!string.IsNullOrWhiteSpace(guessedType))
+                            {
+                                resolvedType = guessedType!;
                             }
                         }
                     }
@@ -1071,6 +1084,69 @@ public sealed partial class ProjectAnalyzer
 
                 recordedServiceUsage = true;
             }
+            else if (methodIdentifier.StartsWith("Send", StringComparison.Ordinal))
+            {
+                ExpressionSyntax? argument = null;
+                string? argumentIdentifier = null;
+                if (invocation.ArgumentList is { Arguments.Count: > 0 } sendArguments)
+                {
+                    argument = sendArguments.Arguments[0].Expression;
+                    if (argument is IdentifierNameSyntax idSyntax)
+                    {
+                        argumentIdentifier = idSyntax.Identifier.Text;
+                    }
+                }
+
+                string? requestTypeCandidate = argument switch
+                {
+                    ObjectCreationExpressionSyntax creation => creation.Type.ToString(),
+                    IdentifierNameSyntax identifierArgument => TryResolveExpressionType(identifierArgument, parameterTypes, info.LocalVariables, info.Assembly, info.Project, fieldLookup),
+                    MemberAccessExpressionSyntax memberAccessExpr => TryResolveExpressionType(memberAccessExpr.Expression, parameterTypes, info.LocalVariables, info.Assembly, info.Project, fieldLookup),
+                    _ => null
+                };
+
+                if ((string.IsNullOrWhiteSpace(requestTypeCandidate) || string.Equals(requestTypeCandidate, methodIdentifier, StringComparison.OrdinalIgnoreCase)) && !string.IsNullOrWhiteSpace(argumentIdentifier))
+                {
+                    var mapped = info.MappingInvocations.LastOrDefault(m => string.Equals(m.AssignedVariable, argumentIdentifier, StringComparison.OrdinalIgnoreCase));
+                    if (mapped is not null && !string.IsNullOrWhiteSpace(mapped.DestinationType))
+                    {
+                        requestTypeCandidate = mapped.DestinationType;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(requestTypeCandidate))
+                {
+                    var qualifiedRequest = QualifyTypeName(requestTypeCandidate!, info.Assembly, info.Project);
+                    if (!string.IsNullOrWhiteSpace(qualifiedRequest))
+                    {
+                        var existing = info.RequestInvocations.FirstOrDefault(r => r.Line == serviceLine);
+                        var shouldRecordFact = true;
+                        if (existing is not null)
+                        {
+                            if (existing.RequestType.Equals(qualifiedRequest, StringComparison.OrdinalIgnoreCase))
+                            {
+                                shouldRecordFact = false;
+                            }
+                            else
+                            {
+                                info.RequestInvocations.Remove(existing);
+                                info.RequestInvocations.Add(new ControllerRequestInvocation(qualifiedRequest!, serviceLine));
+                            }
+                        }
+                        else
+                        {
+                            info.RequestInvocations.Add(new ControllerRequestInvocation(qualifiedRequest!, serviceLine));
+                        }
+
+                        if (shouldRecordFact)
+                        {
+                            RecordControllerRequestFact(info, qualifiedRequest!, methodIdentifier, serviceLine);
+                        }
+                    }
+                }
+
+                recordedServiceUsage = true;
+            }
         }
         else if ((qualifiedType.Contains("IRequestProcessor", StringComparison.Ordinal) || qualifiedType.Contains("RequestProcessor", StringComparison.Ordinal)) &&
                  (string.Equals(serviceMethod, "Process", StringComparison.OrdinalIgnoreCase) || string.Equals(serviceMethod, "ProcessAsync", StringComparison.OrdinalIgnoreCase)))
@@ -1167,11 +1243,8 @@ public sealed partial class ProjectAnalyzer
                         !string.IsNullOrWhiteSpace(existingValue) &&
                         !string.Equals(existingValue, "var", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!string.Equals(existingValue, qualifiedProduct, StringComparison.Ordinal) &&
-                            (IsDomainType(existingValue) || existingValue.Contains('.') || existingValue.Contains('<')))
-                        {
-                            return;
-                        }
+                        // Preserve existing precise type inference.
+                        return;
                     }
 
                     info.LocalVariables[variableName] = qualifiedProduct;
@@ -1557,7 +1630,9 @@ public sealed partial class ProjectAnalyzer
             var nodeProps = new Dictionary<string, object>
             {
                 ["route"] = action.Route,
-                ["http_method"] = action.HttpMethod
+                ["http_method"] = action.HttpMethod,
+                ["verb"] = action.HttpMethod,
+                ["controller_display"] = action.Fqdn
             };
 
             if (action.StatusCodes.Count > 0)
@@ -1575,6 +1650,12 @@ public sealed partial class ProjectAnalyzer
             if (action.AllowsAnonymous)
             {
                 nodeProps["allow_anonymous"] = true;
+            }
+
+            var authLabel = BuildAuthLabel(action.AllowsAnonymous, action.Authorizations);
+            if (!string.IsNullOrWhiteSpace(authLabel))
+            {
+                nodeProps["auth"] = authLabel!;
             }
 
             var domainSummaries = action.DomainInvocations
@@ -1911,6 +1992,12 @@ public sealed partial class ProjectAnalyzer
                     props["method"] = primary.Method!;
                 }
 
+                if (!string.IsNullOrWhiteSpace(primary.InvocationMethod) &&
+                    !string.Equals(primary.InvocationMethod, primary.Method, StringComparison.Ordinal))
+                {
+                    props["invoked_method"] = primary.InvocationMethod!;
+                }
+
                 if (!string.IsNullOrWhiteSpace(primary.TargetType))
                 {
                     props["target_type"] = primary.TargetType!;
@@ -1975,6 +2062,20 @@ public sealed partial class ProjectAnalyzer
                     }
 
                     var requestNodeId = StableId.For("cqrs.request", requestInfo.Fqdn, requestInfo.Assembly, requestInfo.SymbolId);
+                    var requestProps = new Dictionary<string, object>
+                    {
+                        ["service"] = usage.ServiceType,
+                        ["invocation"] = usage.InvocationMethod ?? usage.Method ?? string.Empty,
+                        ["request_type"] = requestType,
+                        ["response_type"] = responseType ?? string.Empty
+                    };
+
+                    var pipelineLabels = ResolvePipelineBehaviorsForRequest(requestType);
+                    if (pipelineLabels.Count > 0)
+                    {
+                        requestProps["pipeline_behaviors"] = string.Join(", ", pipelineLabels);
+                    }
+
                     _edges.Add(new GraphEdge
                     {
                         From = id,
@@ -1987,13 +2088,7 @@ public sealed partial class ProjectAnalyzer
                             Type = usage.DispatchKind!,
                             Location = new GraphLocation { File = action.FilePath, Line = usage.Line }
                         },
-                        Props = new Dictionary<string, object>
-                        {
-                            ["service"] = usage.ServiceType,
-                            ["invocation"] = usage.InvocationMethod ?? usage.Method ?? string.Empty,
-                            ["request_type"] = requestType,
-                            ["response_type"] = responseType ?? string.Empty
-                        },
+                        Props = requestProps,
                         Evidence = CreateEvidence(action.FilePath, usage.Line)
                     });
 
@@ -3083,7 +3178,9 @@ public sealed partial class ProjectAnalyzer
             var props = new Dictionary<string, object>
             {
                 ["route"] = endpoint.Route,
-                ["http_method"] = endpoint.HttpMethod
+                ["http_method"] = endpoint.HttpMethod,
+                ["verb"] = endpoint.HttpMethod,
+                ["controller_display"] = endpoint.Name
             };
 
             // Default inference for minimal endpoints (parity with controllers) so status codes appear in flows
@@ -3110,6 +3207,12 @@ public sealed partial class ProjectAnalyzer
             if (endpoint.AllowsAnonymous)
             {
                 props["allow_anonymous"] = true;
+            }
+
+            var authLabel = BuildAuthLabel(endpoint.AllowsAnonymous, endpoint.Authorizations);
+            if (!string.IsNullOrWhiteSpace(authLabel))
+            {
+                props["auth"] = authLabel!;
             }
 
             _nodes[id] = new GraphNode

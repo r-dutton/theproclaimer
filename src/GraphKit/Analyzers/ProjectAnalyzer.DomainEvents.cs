@@ -644,6 +644,24 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
+                var requestProps = new Dictionary<string, object>
+                {
+                    ["request_type"] = request.RequestType
+                };
+
+                if (FindRequestByType(request.RequestType, preferredAssembly: handler.Assembly, preferredProject: handler.Project) is { } requestInfo &&
+                    !string.IsNullOrWhiteSpace(requestInfo.ResponseType) &&
+                    !IsGenericPlaceholder(requestInfo.ResponseType))
+                {
+                    requestProps["response_type"] = requestInfo.ResponseType!;
+                }
+
+                var pipelineLabels = ResolvePipelineBehaviorsForRequest(request.RequestType);
+                if (pipelineLabels.Count > 0)
+                {
+                    requestProps["pipeline_behaviors"] = string.Join(", ", pipelineLabels);
+                }
+
                 _edges.Add(new GraphEdge
                 {
                     From = id,
@@ -656,10 +674,7 @@ public sealed partial class ProjectAnalyzer
                         Type = "domain.event_handler",
                         Location = new GraphLocation { File = handler.FilePath, Line = request.Line }
                     },
-                    Props = new Dictionary<string, object>
-                    {
-                        ["request_type"] = request.RequestType
-                    },
+                    Props = requestProps,
                     Evidence = CreateEvidence(handler.FilePath, request.Line)
                 });
             }

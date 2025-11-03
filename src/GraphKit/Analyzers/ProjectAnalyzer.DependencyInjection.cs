@@ -374,6 +374,7 @@ public sealed partial class ProjectAnalyzer
             var arguments = SplitGenericArguments(serviceType);
             if (arguments.Count == 0)
             {
+                RegisterGlobalPipelineBehavior(implementationType);
                 return;
             }
 
@@ -442,6 +443,22 @@ public sealed partial class ProjectAnalyzer
             {
                 baseProcessor.RegisteredRequestTypes.Add(requestType);
             }
+        }
+    }
+
+    private void RegisterGlobalPipelineBehavior(string behaviorType)
+    {
+        if (string.IsNullOrWhiteSpace(behaviorType))
+        {
+            return;
+        }
+
+        _globalPipelineBehaviors.TryAdd(behaviorType, 0);
+
+        var baseType = GetTypeNameWithoutGenerics(behaviorType);
+        if (!string.IsNullOrWhiteSpace(baseType))
+        {
+            _globalPipelineBehaviors.TryAdd(baseType, 0);
         }
     }
 

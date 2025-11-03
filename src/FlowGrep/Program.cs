@@ -11,10 +11,12 @@ using GraphKit.Outputs.Abstractions;
 using GraphKit.Outputs.Facts;
 using GraphKit.Outputs.FlowBuilder;
 using GraphKit.Outputs.Legacy;
+using GraphKit.Outputs.Narrative;
 
 var argsList = args.ToList();
 string workspace = Environment.CurrentDirectory;
 var renderOptions = new RenderOptions();
+string renderStyle = "narrative";
 string? textFilter = null;
 HashSet<string>? tagFilter = null;
 string format = "md";
@@ -53,6 +55,9 @@ for (int i = 0; i < argsList.Count; i++)
         case "--format":
             format = argsList[++i];
             break;
+        case "--render-style":
+            renderStyle = argsList[++i];
+            break;
         case "--render-source":
             var sourceValue = argsList[++i];
             renderOptions.Source = sourceValue.Equals("legacy", StringComparison.OrdinalIgnoreCase)
@@ -78,6 +83,10 @@ for (int i = 0; i < argsList.Count; i++)
     }
 }
 
+renderStyle = renderStyle.Equals("graph", StringComparison.OrdinalIgnoreCase)
+    ? "graph"
+    : "narrative";
+
 var generator = new GraphGenerator();
 var result = await generator.GenerateAsync(new GraphGenerationOptions(
     workspace,
@@ -85,6 +94,13 @@ var result = await generator.GenerateAsync(new GraphGenerationOptions(
     solutions.Count > 0 ? solutions : null));
 var document = result.Document;
 var factBag = result.Facts;
+var outputDirFull = Path.GetFullPath(Path.Combine(workspace, renderOptions.OutputPath));
+
+if (renderStyle == "narrative")
+{
+    var narrativeOutputPath = Path.Combine(outputDirFull, "flow.md");
+    LegacyNarrativeRenderer.Render(factBag, workspace, narrativeOutputPath);
+}
 
 if (flowPatterns.Count > 0)
 {
@@ -167,5 +183,13 @@ else if (!string.IsNullOrWhiteSpace(textFilter) || (tagFilter is { Count: > 0 })
 }
 else
 {
-    Console.WriteLine($"Graph generated at {Path.Combine(renderOptions.OutputPath, "graph.json")}");
+    if (renderStyle == "graph")
+    {
+        Console.WriteLine($"Graph generated at {Path.Combine(renderOptions.OutputPath, "graph.json")}");
+    }
+    else
+    {
+        var relativeNarrative = Path.Combine(renderOptions.OutputPath, "flow.md");
+        Console.WriteLine($"Narrative generated at {relativeNarrative}");
+    }
 }

@@ -715,6 +715,69 @@ public sealed partial class ProjectAnalyzer
         return matches.Count == 1 ? matches[0] : null;
     }
 
+    private IReadOnlyList<string> ResolvePipelineBehaviorsForRequest(string requestType)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(requestType) &&
+            _requestPipelineRegistrations.TryGetValue(requestType, out var registrations))
+        {
+            foreach (var behaviorType in registrations)
+            {
+                var behavior = FindPipelineBehavior(behaviorType);
+                if (behavior is not null)
+                {
+                    result.Add(behavior.Name);
+                }
+                else
+                {
+                    var simple = GetSimpleIdentifier(GetTypeNameWithoutGenerics(behaviorType));
+                    if (!string.IsNullOrWhiteSpace(simple))
+                    {
+                        result.Add(simple);
+                    }
+                }
+            }
+        }
+
+        foreach (var behavior in _pipelineBehaviors.Values)
+        {
+            if (behavior.RegisteredRequestTypes.Contains(requestType))
+            {
+                result.Add(behavior.Name);
+                continue;
+            }
+
+            if (behavior.RegisteredRequestTypes.Count == 0)
+            {
+                result.Add(behavior.Name);
+            }
+        }
+
+        foreach (var behaviorType in _globalPipelineBehaviors.Keys)
+        {
+            var behavior = FindPipelineBehavior(behaviorType);
+            if (behavior is not null)
+            {
+                result.Add(behavior.Name);
+            }
+            else
+            {
+                var simple = GetSimpleIdentifier(GetTypeNameWithoutGenerics(behaviorType));
+                if (!string.IsNullOrWhiteSpace(simple))
+                {
+                    result.Add(simple);
+                }
+            }
+        }
+
+        return result.Count == 0
+            ? Array.Empty<string>()
+            : result
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+    }
+
     private NotificationInfo? FindNotificationByType(string notificationType)
     {
         if (_notifications.TryGetValue(notificationType, out var notification))
@@ -1860,6 +1923,39 @@ private static bool NamespaceRootMatches(string candidateType, string referenceT
         Add(NormalizeTypeToken(qualified));
 
         return keys.Count == 0 ? Array.Empty<string>() : keys;
+    }
+
+    private static string? BuildAuthLabel(bool allowsAnonymous, IReadOnlyCollection<EndpointAuthorization> authorizations)
+    {
+        if (allowsAnonymous)
+        {
+            return "anonymous";
+        }
+
+        if (authorizations is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        foreach (var auth in authorizations)
+        {
+            if (!string.IsNullOrWhiteSpace(auth.Policy))
+            {
+                return auth.Policy;
+            }
+
+            if (!string.IsNullOrWhiteSpace(auth.Roles))
+            {
+                return auth.Roles;
+            }
+
+            if (!string.IsNullOrWhiteSpace(auth.AuthenticationSchemes))
+            {
+                return auth.AuthenticationSchemes;
+            }
+        }
+
+        return "user";
     }
 
     private static bool IsGuardInvocation(MemberAccessExpressionSyntax access)

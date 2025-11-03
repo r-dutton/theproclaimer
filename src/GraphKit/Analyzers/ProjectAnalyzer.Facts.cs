@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using GraphKit.Constants;
 using GraphKit.Facts;
 using GraphKit.Graph;
 
@@ -22,6 +24,13 @@ public sealed partial class ProjectAnalyzer
             ["verb"] = action.HttpMethod,
             ["symbol_id"] = action.SymbolId
         };
+        props["controller_display"] = GetControllerDisplay(action);
+        var auth = DetectAuth(action);
+        if (!string.IsNullOrWhiteSpace(auth))
+        {
+            props["auth"] = auth;
+        }
+        AddSource(props, action.FilePath, action.Span);
         _facts.AddNode(new NodeFact(id, "endpoint.controller", props));
         return id;
     }
@@ -40,6 +49,13 @@ public sealed partial class ProjectAnalyzer
             ["verb"] = endpoint.HttpMethod,
             ["symbol_id"] = endpoint.SymbolId
         };
+        props["controller_display"] = endpoint.Name;
+        var auth = DetectAuth(endpoint);
+        if (!string.IsNullOrWhiteSpace(auth))
+        {
+            props["auth"] = auth;
+        }
+        AddSource(props, endpoint.FilePath, endpoint.Span);
         _facts.AddNode(new NodeFact(id, "endpoint.minimal_api", props));
         return id;
     }
@@ -64,6 +80,7 @@ public sealed partial class ProjectAnalyzer
             props["response_type"] = info.ResponseType;
         }
 
+        AddSource(props, info?.FilePath, info?.Span);
         _facts.AddNode(new NodeFact(id, "cqrs.request", props));
         return id;
     }
@@ -86,6 +103,7 @@ public sealed partial class ProjectAnalyzer
             props["response_type"] = handler.ResponseType;
         }
 
+        AddSource(props, handler.FilePath, handler.Span);
         _facts.AddNode(new NodeFact(id, "cqrs.handler", props));
         return id;
     }
@@ -102,6 +120,7 @@ public sealed partial class ProjectAnalyzer
             ["contract_type"] = notification.ContractType,
             ["symbol_id"] = notification.SymbolId
         };
+        AddSource(props, notification.FilePath, notification.Span);
         _facts.AddNode(new NodeFact(id, "cqrs.notification", props));
         return id;
     }
@@ -154,6 +173,31 @@ public sealed partial class ProjectAnalyzer
         return dict;
     }
 
+    private string? ResolveAbsolutePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var combined = Path.IsPathRooted(path)
+            ? path
+            : Path.Combine(_workspaceRoot, path);
+        return Path.GetFullPath(combined);
+    }
+
+    private void AddSource(Dictionary<string, object?> props, string? relativePath, int line)
+    {
+        var absolute = ResolveAbsolutePath(relativePath);
+        props.AddSource(absolute, line);
+    }
+
+    private void AddSource(Dictionary<string, object?> props, string? relativePath, GraphSpan? span)
+    {
+        var absolute = ResolveAbsolutePath(relativePath);
+        props.AddSource(absolute, span);
+    }
+
     private string? ResolveResponseType(RequestInfo? requestInfo, HandlerInfo? handler, string requestType)
     {
         if (!string.IsNullOrWhiteSpace(requestInfo?.ResponseType) && !IsGenericPlaceholder(requestInfo.ResponseType))
@@ -184,7 +228,7 @@ public sealed partial class ProjectAnalyzer
         return null;
     }
 
-    private void RecordControllerRequestFact(ControllerActionInfo action, string requestType, int line)
+    private void RecordControllerRequestFact(ControllerActionInfo action, string requestType, string? invocationName, int line)
     {
         var controllerId = EnsureControllerFactNode(action);
         var requestInfo = FindRequestByType(requestType, preferredAssembly: action.Assembly, preferredProject: action.Project);
@@ -198,6 +242,11 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        if (!string.IsNullOrWhiteSpace(invocationName))
+        {
+            edgeProps["invocation"] = invocationName;
+        }
+        AddSource(edgeProps, action.FilePath, line);
         AddFactEdge(_facts, controllerId, requestId, "sends_request", edgeProps);
 
         if (handler is not null)
@@ -210,6 +259,11 @@ public sealed partial class ProjectAnalyzer
                 ("provenance", "Interprocedural"),
                 ("confidence", "High"));
 
+            if (!string.IsNullOrWhiteSpace(invocationName))
+            {
+                handledProps["invocation"] = invocationName;
+            }
+            AddSource(handledProps, action.FilePath, line);
             AddFactEdge(_facts, controllerId, handlerId, "handled_by", handledProps);
         }
     }
@@ -230,6 +284,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, action.FilePath, line);
         AddFactEdge(_facts, controllerId, notificationId, "publishes_notification", props);
     }
 
@@ -247,6 +302,7 @@ public sealed partial class ProjectAnalyzer
             ["file_path"] = destination.FilePath
         };
 
+        AddSource(destinationProps, destination.FilePath, destination.Span);
         _facts.AddNode(new NodeFact(destination.Id, "mapping.destination", destinationProps));
 
         var props = EdgeProps(
@@ -257,6 +313,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, action.FilePath, line);
         AddFactEdge(_facts, controllerId, destination.Id, "maps_to", props);
     }
 
@@ -272,6 +329,16 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", string.IsNullOrWhiteSpace(route) ? "Medium" : "High"));
 
+        if (!string.IsNullOrWhiteSpace(methodName))
+        {
+            props["client_method"] = methodName;
+        }
+        var targetService = ResolveClientTargetService(clientType);
+        if (!string.IsNullOrWhiteSpace(targetService))
+        {
+            props["target_service"] = targetService!;
+        }
+        AddSource(props, action.FilePath, line);
         AddFactEdge(_facts, controllerId, clientId, "uses_client", props);
     }
 
@@ -286,6 +353,7 @@ public sealed partial class ProjectAnalyzer
             ["project"] = repository.Project,
             ["symbol_id"] = repository.SymbolId
         };
+        AddSource(props, repository.FilePath, repository.Span);
         _facts.AddNode(new NodeFact(id, "app.repository", props));
         return id;
     }
@@ -302,6 +370,7 @@ public sealed partial class ProjectAnalyzer
             ["table"] = entity.TableName,
             ["symbol_id"] = entity.SymbolId
         };
+        AddSource(props, entity.FilePath, entity.Span);
         _facts.AddNode(new NodeFact(id, "ef.entity", props));
         return id;
     }
@@ -331,6 +400,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, repositoryId, "calls", props);
     }
 
@@ -350,6 +420,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, notificationId, "publishes_notification", props);
     }
 
@@ -367,6 +438,7 @@ public sealed partial class ProjectAnalyzer
             ["file_path"] = destination.FilePath
         };
 
+        AddSource(destinationProps, destination.FilePath, destination.Span);
         _facts.AddNode(new NodeFact(destination.Id, "mapping.destination", destinationProps));
 
         var props = EdgeProps(
@@ -376,6 +448,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, destination.Id, "maps_to", props);
     }
 
@@ -392,6 +465,16 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", string.IsNullOrWhiteSpace(route) ? "Medium" : "High"));
 
+        if (!string.IsNullOrWhiteSpace(methodName))
+        {
+            props["client_method"] = methodName;
+        }
+        var targetService = ResolveClientTargetService(clientType);
+        if (!string.IsNullOrWhiteSpace(targetService))
+        {
+            props["target_service"] = targetService!;
+        }
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, clientId, "uses_client", props);
     }
 
@@ -417,6 +500,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, entityId, "queries", props);
     }
 
@@ -451,6 +535,7 @@ public sealed partial class ProjectAnalyzer
                 ["project"] = publisher.Project,
                 ["symbol_id"] = publisher.SymbolId
             };
+            AddSource(props, publisher.FilePath, publisher.Span);
             _facts.AddNode(new NodeFact(id, "message.publisher", props));
             return id;
         }
@@ -481,6 +566,7 @@ public sealed partial class ProjectAnalyzer
             ["project"] = contract.Project,
             ["symbol_id"] = contract.SymbolId
         };
+        AddSource(props, contract.FilePath, contract.Span);
         _facts.AddNode(new NodeFact(id, "message.contract", props));
         return id;
     }
@@ -506,6 +592,7 @@ public sealed partial class ProjectAnalyzer
             ["notification_type"] = handler.NotificationType,
             ["symbol_id"] = handler.SymbolId
         };
+        AddSource(props, handler.FilePath, handler.Span);
         _facts.AddNode(new NodeFact(id, "cqrs.notification_handler", props));
         return id;
     }
@@ -525,6 +612,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, requestId, "sends_request", props);
 
         if (downstream is not null)
@@ -536,6 +624,7 @@ public sealed partial class ProjectAnalyzer
                 ("line", line),
                 ("provenance", "Interprocedural"),
                 ("confidence", "High"));
+            AddSource(handledProps, handler.FilePath, line);
             AddFactEdge(_facts, handlerId, downstreamId, "handled_by", handledProps);
         }
     }
@@ -556,6 +645,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, notificationId, "publishes_notification", props);
     }
 
@@ -573,6 +663,7 @@ public sealed partial class ProjectAnalyzer
             ["file_path"] = destination.FilePath
         };
 
+        AddSource(destinationProps, destination.FilePath, destination.Span);
         _facts.AddNode(new NodeFact(destination.Id, "mapping.destination", destinationProps));
 
         var props = EdgeProps(
@@ -582,6 +673,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, destination.Id, "maps_to", props);
     }
 
@@ -610,6 +702,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, repositoryId, "calls", props);
     }
 
@@ -625,6 +718,7 @@ public sealed partial class ProjectAnalyzer
             ["event_type"] = handler.EventType,
             ["symbol_id"] = handler.SymbolId
         };
+        AddSource(props, handler.FilePath, handler.Span);
         _facts.AddNode(new NodeFact(id, "domain.event_handler", props));
         return id;
     }
@@ -644,6 +738,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, requestId, "sends_request", props);
 
         if (downstream is not null)
@@ -655,6 +750,7 @@ public sealed partial class ProjectAnalyzer
                 ("line", line),
                 ("provenance", "Interprocedural"),
                 ("confidence", "High"));
+            AddSource(handledProps, handler.FilePath, line);
             AddFactEdge(_facts, handlerId, downstreamId, "handled_by", handledProps);
         }
     }
@@ -675,6 +771,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, notificationId, "publishes_notification", props);
     }
 
@@ -692,6 +789,7 @@ public sealed partial class ProjectAnalyzer
             ["file_path"] = destination.FilePath
         };
 
+        AddSource(destinationProps, destination.FilePath, destination.Span);
         _facts.AddNode(new NodeFact(destination.Id, "mapping.destination", destinationProps));
 
         var props = EdgeProps(
@@ -701,6 +799,7 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, destination.Id, "maps_to", props);
     }
 
@@ -729,6 +828,24 @@ public sealed partial class ProjectAnalyzer
             ("provenance", "Interprocedural"),
             ("confidence", "High"));
 
+        AddSource(props, handler.FilePath, line);
         AddFactEdge(_facts, handlerId, repositoryId, "calls", props);
     }
+
+    private static string GetControllerDisplay(ControllerActionInfo action)
+    {
+        if (string.IsNullOrWhiteSpace(action.Fqdn))
+        {
+            return action.Name;
+        }
+
+        var index = action.Fqdn.LastIndexOf('.');
+        return index > 0 ? action.Fqdn[..index] : action.Fqdn;
+    }
+
+    private static string? DetectAuth(ControllerActionInfo action)
+        => BuildAuthLabel(action.AllowsAnonymous, action.Authorizations);
+
+    private static string? DetectAuth(MinimalEndpointInfo endpoint)
+        => BuildAuthLabel(endpoint.AllowsAnonymous, endpoint.Authorizations);
 }

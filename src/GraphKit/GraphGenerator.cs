@@ -1,6 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using GraphKit.Analyzers;
+using GraphKit.Constants;
 using GraphKit.Facts;
 using GraphKit.Graph;
 using GraphKit.Outputs;
@@ -11,7 +14,7 @@ namespace GraphKit;
 
 public sealed class GraphGenerator
 {
-    private const string AnalyzerVersion = "0.2.1";
+    private const string AnalyzerVersion = "0.2.3";
 
     public async Task<GraphGenerationResult> GenerateAsync(GraphGenerationOptions options, CancellationToken cancellationToken = default)
     {
@@ -29,7 +32,7 @@ public sealed class GraphGenerator
             await outputWriter.WriteAsync(cachedDocument, AnalyzerVersion, cancellationToken);
 
             var cachedFacts = new FactWriter();
-            PopulateFactsFromGraph(cachedDocument, cachedFacts);
+            PopulateFactsFromGraph(cachedDocument, cachedFacts, options.WorkspacePath);
             var cachedBag = FactsPipeline.Finalize(cachedFacts);
             var cacheFactsDirectory = Path.GetFullPath(Path.Combine(options.WorkspacePath, options.OutputDirectory));
             FactsJsonWriter.Write(cachedBag, Path.Combine(cacheFactsDirectory, "facts.json"));
@@ -48,7 +51,7 @@ public sealed class GraphGenerator
         var document = analyzer.BuildDocument(AnalyzerVersion);
     Console.WriteLine($"[graph] Built document. Nodes={document.Nodes.Count} Edges={document.Edges.Count} Mem={GC.GetTotalMemory(false)/1024/1024:F1}MB");
 
-        PopulateFactsFromGraph(document, factWriter);
+        PopulateFactsFromGraph(document, factWriter, options.WorkspacePath);
 
         var factBag = FactsPipeline.Finalize(factWriter);
         var factsOutputDirectory = Path.GetFullPath(Path.Combine(options.WorkspacePath, options.OutputDirectory));
@@ -73,8 +76,10 @@ public sealed class GraphGenerator
         _ => "Unknown"
     };
 
-    private static void PopulateFactsFromGraph(GraphDocument document, FactWriter facts)
+    private static void PopulateFactsFromGraph(GraphDocument document, FactWriter facts, string workspaceRoot)
     {
+        var workspaceFullPath = Path.GetFullPath(workspaceRoot);
+
         foreach (var node in document.Nodes)
         {
             var props = new Dictionary<string, object?>
@@ -109,6 +114,32 @@ public sealed class GraphGenerator
                 }
             }
 
+            var normalizedFile = NormalizeToWorkspace(workspaceFullPath, node.FilePath);
+            props.AddSource(normalizedFile, node.Span);
+
+            if (!props.ContainsKey(PropKeys.Verb) && props.TryGetValue("http_method", out var httpMethod) && httpMethod is string methodValue && !string.IsNullOrWhiteSpace(methodValue))
+            {
+                props[PropKeys.Verb] = methodValue;
+            }
+
+            if (!props.ContainsKey("controller_display"))
+            {
+                var display = !string.IsNullOrWhiteSpace(node.Fqdn) ? node.Fqdn : node.Name;
+                if (!string.IsNullOrWhiteSpace(display))
+                {
+                    props["controller_display"] = display!;
+                }
+            }
+
+            if (!props.ContainsKey("auth"))
+            {
+                var authLabel = InferAuthLabel(props);
+                if (!string.IsNullOrWhiteSpace(authLabel))
+                {
+                    props["auth"] = authLabel!;
+                }
+            }
+
             facts.AddNode(new NodeFact(node.Id, node.Type, props));
         }
 
@@ -120,9 +151,18 @@ public sealed class GraphGenerator
                 ["confidence"] = MapConfidence(edge.Confidence)
             };
 
+            if (edge.Transform?.Type is { } transformType && !string.IsNullOrWhiteSpace(transformType))
+            {
+                props["transform_type"] = transformType;
+            }
+
+            if (edge.Transform?.Method is { } transformMethod && !string.IsNullOrWhiteSpace(transformMethod))
+            {
+                props["transform_method"] = transformMethod;
+            }
+
             if (edge.Transform?.Location is { } loc)
             {
-                props["file"] = loc.File;
                 props["line"] = loc.Line;
             }
 
@@ -134,7 +174,128 @@ public sealed class GraphGenerator
                 }
             }
 
+            if (ResolveEdgeSource(workspaceFullPath, edge) is { } source)
+            {
+                props.AddSource(source.File, source.StartLine, source.EndLine);
+                if (!props.ContainsKey("line"))
+                {
+                    props["line"] = source.StartLine;
+                }
+            }
+
             facts.AddEdge(new EdgeFact(edge.From, edge.To, edge.Kind, props));
         }
+    }
+
+    private static (string File, int StartLine, int EndLine)? ResolveEdgeSource(string workspaceRoot, GraphEdge edge)
+    {
+        if (edge.Evidence?.Files is { Count: > 0 } evidenceFiles)
+        {
+            var primary = evidenceFiles[0];
+            var file = NormalizeToWorkspace(workspaceRoot, primary.Path);
+            if (!string.IsNullOrWhiteSpace(file))
+            {
+                return (file!, primary.StartLine, primary.EndLine);
+            }
+        }
+
+        if (edge.Transform?.Location is { } loc)
+        {
+            var file = NormalizeToWorkspace(workspaceRoot, loc.File);
+            if (!string.IsNullOrWhiteSpace(file))
+            {
+                if (edge.Transform.MethodSpan is { } span)
+                {
+                    return (file!, span.StartLine, span.EndLine);
+                }
+
+                return (file!, loc.Line, loc.Line);
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeToWorkspace(string workspaceRoot, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var absolute = Path.IsPathRooted(path)
+            ? Path.GetFullPath(path)
+            : Path.GetFullPath(Path.Combine(workspaceRoot, path));
+
+        if (!absolute.StartsWith(workspaceRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return absolute.Replace('\\', '/');
+        }
+
+        var relative = Path.GetRelativePath(workspaceRoot, absolute);
+        return relative.Replace('\\', '/');
+    }
+
+    private static string? InferAuthLabel(Dictionary<string, object?> props)
+    {
+        if (props.TryGetValue("auth", out var existing) && existing is string authValue && !string.IsNullOrWhiteSpace(authValue))
+        {
+            return authValue;
+        }
+
+        if (props.TryGetValue("allow_anonymous", out var allowObj) && allowObj is bool allow && allow)
+        {
+            return "anonymous";
+        }
+
+        if (props.TryGetValue("authorization", out var authorizationObj) && authorizationObj is IEnumerable<object?> entries)
+        {
+            string? Extract(object? entry)
+            {
+                return entry switch
+                {
+                    IReadOnlyDictionary<string, object?> readOnlyDict => FirstNonEmpty(readOnlyDict, "policy", "roles", "authentication_schemes"),
+                    IDictionary<string, object> dict => FirstNonEmpty(dict.Select(kv => new KeyValuePair<string, object?>(kv.Key, kv.Value)), "policy", "roles", "authentication_schemes"),
+                    _ => null
+                };
+            }
+
+            foreach (var entry in entries)
+            {
+                var value = Extract(entry);
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+
+            if (entries.Any())
+            {
+                return "user";
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FirstNonEmpty(IEnumerable<KeyValuePair<string, object?>> entries, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            foreach (var pair in entries)
+            {
+                if (!string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (pair.Value is string text && !string.IsNullOrWhiteSpace(text))
+                {
+                    return text;
+                }
+            }
+        }
+
+        return null;
     }
 }

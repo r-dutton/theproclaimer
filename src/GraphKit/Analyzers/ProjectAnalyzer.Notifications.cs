@@ -537,6 +537,20 @@ public sealed partial class ProjectAnalyzer
                 }
 
                 var requestId = StableId.For("cqrs.request", requestInfo.Fqdn, requestInfo.Assembly, requestInfo.SymbolId);
+                var requestProps = new Dictionary<string, object>
+                {
+                    ["service"] = "IMediator",
+                    ["invocation"] = "Send",
+                    ["request_type"] = requestInfo.Fqdn,
+                    ["response_type"] = requestInfo.ResponseType ?? string.Empty
+                };
+
+                var pipelineLabels = ResolvePipelineBehaviorsForRequest(requestInfo.Fqdn);
+                if (pipelineLabels.Count > 0)
+                {
+                    requestProps["pipeline_behaviors"] = string.Join(", ", pipelineLabels);
+                }
+
                 _edges.Add(new GraphEdge
                 {
                     From = id,
@@ -549,6 +563,7 @@ public sealed partial class ProjectAnalyzer
                         Type = "mediatr.send",
                         Location = new GraphLocation { File = handler.FilePath, Line = request.Line }
                     },
+                    Props = requestProps,
                     Evidence = CreateEvidence(handler.FilePath, request.Line)
                 });
             }

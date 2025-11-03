@@ -1040,6 +1040,12 @@ public sealed partial class ProjectAnalyzer
                         ["response_type"] = responseType ?? string.Empty
                     };
 
+                    var pipelineLabels = ResolvePipelineBehaviorsForRequest(requestType);
+                    if (pipelineLabels.Count > 0)
+                    {
+                        sendsProps["pipeline_behaviors"] = string.Join(", ", pipelineLabels);
+                    }
+
                     _edges.Add(new GraphEdge
                     {
                         From = id,

@@ -228,6 +228,7 @@ public sealed partial class ProjectAnalyzer
             ["file_path"] = profileFile,
             ["line"] = line
         };
+        AddSource(factProps, profileFile, line);
         _facts.AddNode(new NodeFact(mapId, "mapping.automapper.map", factProps));
 
         _edges.Add(new GraphEdge

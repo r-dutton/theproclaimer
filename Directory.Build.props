@@ -14,5 +14,6 @@
 
     <BaseIntermediateOutputPath>$(_IntermediateBase)$(MSBuildProjectName)$(DirectorySeparatorChar)</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
   </PropertyGroup>
 </Project>

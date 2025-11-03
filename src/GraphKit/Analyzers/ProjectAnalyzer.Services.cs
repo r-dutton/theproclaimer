@@ -841,6 +841,12 @@ public sealed partial class ProjectAnalyzer
                                 ["response_type"] = responseValue ?? string.Empty
                             };
 
+                            var pipelineLabels = ResolvePipelineBehaviorsForRequest(requestInfo.Fqdn);
+                            if (pipelineLabels.Count > 0)
+                            {
+                                requestProps["pipeline_behaviors"] = string.Join(", ", pipelineLabels);
+                            }
+
                             _edges.Add(new GraphEdge
                             {
                                 From = id,
