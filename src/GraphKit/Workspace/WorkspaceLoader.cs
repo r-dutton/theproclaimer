@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.MSBuild;
 
 namespace GraphKit.Workspace;
 
@@ -14,15 +15,41 @@ public sealed class WorkspaceLoader
 {
     private readonly string _workspaceRoot;
     private readonly IReadOnlyList<string>? _explicitSolutions;
+    private readonly bool _useRoslyn;
+    private readonly MSBuildWorkspace? _roslynWorkspace;
     private static readonly ImmutableArray<MetadataReference> DefaultMetadataReferences = CreateDefaultMetadataReferences();
 
-    public WorkspaceLoader(string workspaceRoot, IReadOnlyList<string>? explicitSolutions = null)
+    public WorkspaceLoader(
+        string workspaceRoot,
+        IReadOnlyList<string>? explicitSolutions = null,
+        bool useRoslyn = false,
+        MSBuildWorkspace? roslynWorkspace = null)
     {
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
         _explicitSolutions = explicitSolutions;
+        _useRoslyn = useRoslyn;
+        _roslynWorkspace = roslynWorkspace;
+
+        if (_useRoslyn && _roslynWorkspace is null)
+        {
+            throw new ArgumentException("A Roslyn workspace instance must be provided when Roslyn loading is enabled.", nameof(roslynWorkspace));
+        }
     }
 
     public async Task<IReadOnlyList<ProjectInfo>> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        var solutionPaths = await ResolveSolutionPathsAsync(cancellationToken).ConfigureAwait(false);
+
+        if (_useRoslyn)
+        {
+            var roslynLoader = new RoslynWorkspaceLoader(_workspaceRoot, _roslynWorkspace!, solutionPaths);
+            return await roslynLoader.LoadAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return await LoadLegacyAsync(solutionPaths, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<List<string>> ResolveSolutionPathsAsync(CancellationToken cancellationToken)
     {
         var configPath = Path.Combine(_workspaceRoot, "flow.workspace.json");
         var solutionPaths = new List<string>();
@@ -51,7 +78,7 @@ public sealed class WorkspaceLoader
         else if (File.Exists(configPath))
         {
             using var stream = File.OpenRead(configPath);
-            var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (doc.RootElement.TryGetProperty("solutions", out var solutionsElement))
             {
                 foreach (var element in solutionsElement.EnumerateArray())
@@ -71,10 +98,15 @@ public sealed class WorkspaceLoader
                 .Where(path => !path.Contains("/bin/") && !path.Contains("/obj/") && !path.Contains("/.git/")));
         }
 
+        return solutionPaths.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private async Task<IReadOnlyList<ProjectInfo>> LoadLegacyAsync(IReadOnlyList<string> solutionPaths, CancellationToken cancellationToken)
+    {
         var projectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var solutionPath in solutionPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var solutionPath in solutionPaths)
         {
-            foreach (var line in await File.ReadAllLinesAsync(solutionPath, cancellationToken))
+            foreach (var line in await File.ReadAllLinesAsync(solutionPath, cancellationToken).ConfigureAwait(false))
             {
                 if (!line.StartsWith("Project", StringComparison.Ordinal))
                 {
