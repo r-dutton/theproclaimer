@@ -8,6 +8,7 @@ using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace GraphKit.Analyzers;
 
@@ -85,19 +86,34 @@ public sealed partial class ProjectAnalyzer
 
     public async Task AnalyzeProjectAsync(ProjectInfo project, RoslynProjectInfo? roslynProject, CancellationToken cancellationToken)
     {
-        _ = roslynProject;
         LoadConfigurationValues(project);
         _projectsByAssembly[project.AssemblyName] = project;
 
-        var parsedFiles = await ParseProjectFilesAsync(project, cancellationToken);
+        var documentEntries = await ParseProjectDocumentsAsync(project, roslynProject, cancellationToken).ConfigureAwait(false);
 
-        foreach (var (_, tree, root) in parsedFiles)
+        foreach (var (_, root, _) in documentEntries)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var tree = root.SyntaxTree;
+            if (tree is null)
+            {
+                continue;
+            }
+
             CollectStringConstants(project, tree, root, cancellationToken);
         }
 
-        foreach (var (file, tree, root) in parsedFiles)
+        foreach (var (document, root, model) in documentEntries)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var tree = root.SyntaxTree;
+            if (tree is null)
+            {
+                continue;
+            }
+
             foreach (var member in root.Members)
             {
                 ProcessMember(project, tree, member, null, cancellationToken);
@@ -106,10 +122,14 @@ public sealed partial class ProjectAnalyzer
             AnalyzeServiceRegistrations(project, tree);
             AnalyzeHttpClientRegistrations(project, tree);
 
-            if (Path.GetFileName(file).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
+            var filePath = document.FilePath ?? tree.FilePath ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(filePath) &&
+                Path.GetFileName(filePath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
             {
                 AnalyzeMinimalEndpoints(project, tree);
             }
+
+            _ = model;
         }
     }
 
@@ -723,6 +743,92 @@ public sealed partial class ProjectAnalyzer
     {
         var cache = DescendantCache.GetValue(node, static key => new NodeDescendantCache(key));
         return cache.GetNodes<TSyntax>();
+    }
+
+    private async Task<List<(Document Document, CompilationUnitSyntax Root, SemanticModel Model)>> ParseProjectDocumentsAsync(
+        ProjectInfo project,
+        RoslynProjectInfo? roslynProject,
+        CancellationToken cancellationToken)
+    {
+        if (roslynProject is not null)
+        {
+            return await ParseRoslynProjectDocumentsAsync(roslynProject, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await ParseLegacyProjectDocumentsAsync(project, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<List<(Document Document, CompilationUnitSyntax Root, SemanticModel Model)>> ParseRoslynProjectDocumentsAsync(
+        RoslynProjectInfo roslynProject,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<(Document, CompilationUnitSyntax, SemanticModel)>();
+
+        foreach (var document in roslynProject.RoslynProject.Documents)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!document.SupportsSyntaxTree ||
+                document.SourceCodeKind != SourceCodeKind.Regular)
+            {
+                continue;
+            }
+
+            var root = await document
+                .GetSyntaxRootAsync(cancellationToken)
+                .ConfigureAwait(false) as CompilationUnitSyntax;
+            if (root is null)
+            {
+                continue;
+            }
+
+            var model = await document
+                .GetSemanticModelAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (model is null)
+            {
+                continue;
+            }
+
+            results.Add((document, root, model));
+        }
+
+        return results;
+    }
+
+    private static async Task<List<(Document Document, CompilationUnitSyntax Root, SemanticModel Model)>> ParseLegacyProjectDocumentsAsync(
+        ProjectInfo project,
+        CancellationToken cancellationToken)
+    {
+        var parsedFiles = await ParseProjectFilesAsync(project, cancellationToken).ConfigureAwait(false);
+        if (parsedFiles.Count == 0)
+        {
+            return new List<(Document, CompilationUnitSyntax, SemanticModel)>();
+        }
+
+        var workspace = new AdhocWorkspace();
+        var legacyProject = workspace.AddProject(project.AssemblyName, LanguageNames.CSharp);
+        var results = new List<(Document, CompilationUnitSyntax, SemanticModel)>(parsedFiles.Count);
+
+        foreach (var (filePath, tree, root) in parsedFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var documentName = string.IsNullOrWhiteSpace(filePath)
+                ? $"legacy_{results.Count:D4}.cs"
+                : Path.GetFileName(filePath);
+
+            var document = workspace.AddDocument(
+                legacyProject.Id,
+                documentName,
+                tree.GetText(cancellationToken),
+                filePath);
+
+            var model = project.GetModel(tree);
+            results.Add((document, root, model));
+        }
+
+        return results;
     }
 
     private static async Task<List<(string FilePath, SyntaxTree Tree, CompilationUnitSyntax Root)>> ParseProjectFilesAsync(ProjectInfo project, CancellationToken cancellationToken)
