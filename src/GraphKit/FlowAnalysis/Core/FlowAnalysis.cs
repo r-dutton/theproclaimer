@@ -1,7 +1,6 @@
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
-using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
 using GraphKit.FlowAnalysis.Interprocedural;
 
 namespace GraphKit.FlowAnalysis.Core
@@ -12,7 +11,7 @@ namespace GraphKit.FlowAnalysis.Core
             Compilation compilation,
             SemanticModel model,
             IMethodSymbol method,
-            InterproceduralAnalysisConfiguration configuration,
+            FlowInterproceduralConfiguration configuration,
             FlowCallsitePredicate shouldExpand,
             FlowDataFlowOperationVisitor rootVisitor)
         {

@@ -14,9 +14,9 @@ namespace GraphKit.Analyzers;
 public sealed partial class ProjectAnalyzer
 {
     private readonly ProjectAnalyzerConfiguration _configuration;
-    private readonly InterproceduralAnalysisConfiguration _interproceduralConfiguration;
+    private readonly FlowInterproceduralConfiguration _interproceduralConfiguration;
 
-    internal InterproceduralAnalysisConfiguration InterproceduralConfiguration => _interproceduralConfiguration;
+    internal FlowInterproceduralConfiguration InterproceduralConfiguration => _interproceduralConfiguration;
 
     private static ProjectAnalyzerConfiguration EnsureConfiguration(ProjectAnalyzerConfiguration? configuration)
     {
@@ -89,11 +89,11 @@ public sealed partial class ProjectAnalyzer
             };
         }
 
-        public InterproceduralAnalysisConfiguration ToInterproceduralConfiguration()
-            => InterproceduralAnalysisConfiguration.Create(
+        public FlowInterproceduralConfiguration ToInterproceduralConfiguration()
+            => FlowInterproceduralConfiguration.Create(
                 InterproceduralAnalysisKind,
-                maxInterproceduralCallChainLength: MaxInterproceduralCallChainLength,
-                maxInterproceduralLambdaOrLocalFunctionCallChainLength: MaxInterproceduralLambdaOrLocalFunctionDepth);
+                MaxInterproceduralCallChainLength,
+                MaxInterproceduralLambdaOrLocalFunctionDepth);
     }
 
     private static bool IsConfigurationType(string? typeName)

@@ -3,17 +3,16 @@ using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Interprocedural;
-using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
 
 namespace GraphKit.Interproc
 {
     public sealed class ExpansionManager
     {
-        private readonly InterproceduralAnalysisConfiguration _configuration;
+        private readonly FlowInterproceduralConfiguration _configuration;
         private readonly ConcurrentDictionary<IMethodSymbol, bool> _visited =
             new(SymbolEqualityComparer.Default);
 
-        public ExpansionManager(InterproceduralAnalysisConfiguration configuration)
+        public ExpansionManager(FlowInterproceduralConfiguration configuration)
             => _configuration = configuration;
 
         public void Analyze(Compilation compilation, IMethodSymbol target,
