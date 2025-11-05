@@ -11,7 +11,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -117,13 +117,8 @@ public sealed partial class ProjectAnalyzer
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
                 var visitor = new ControllerOperationVisitor(this, model, info, pointsToFacade, valueContentFacade, _facts);
-                FlowAnalysisEngine.AnalyzeMethod(
-                    compilation,
-                    model,
-                    methodSymbol,
-                    InterproceduralConfiguration,
-                    callsitePredicate,
-                    visitor);
+                var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(compilation, methodSymbol, InterproceduralConfiguration);
+                analysis.Context.Accept(visitor);
             }
 
             // Attribute-declared response status codes (ProducesResponseType)
@@ -1943,6 +1938,11 @@ public sealed partial class ProjectAnalyzer
                 var primary = serviceGroup
                     .OrderBy(s => s.Line)
                     .First();
+
+                if (!IsServiceUsageInScope(primary, action.Assembly, action.Project))
+                {
+                    continue;
+                }
 
                 if (!TryEnsureServiceNode(primary.ServiceType, out var serviceId, out var registration, primary.TargetType, action.Assembly, action.Project))
                 {

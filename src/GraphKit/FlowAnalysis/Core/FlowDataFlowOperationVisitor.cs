@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using GraphKit.FlowAnalysis.Dependencies;
 
@@ -21,26 +22,60 @@ namespace GraphKit.FlowAnalysis.Core
             ValueContent = valueContent;
         }
 
+        public virtual void Visit(ControlFlowGraph graph)
+        {
+            foreach (var block in graph.Blocks)
+            {
+                Visit(block);
+            }
+        }
+
+        public virtual void Visit(BasicBlock block)
+        {
+            foreach (var operation in block.Operations)
+            {
+                Visit(operation);
+            }
+
+            if (block.BranchValue is { } branchOperation)
+            {
+                Visit(branchOperation);
+            }
+        }
+
         public virtual void Visit(IOperation op)
         {
             switch (op)
             {
-                case IInvocationOperation inv: VisitInvocation(inv); break;
-                case IAssignmentOperation asg: VisitAssignment(asg); break;
+                case IInvocationOperation invocation:
+                    VisitInvocation(invocation);
+                    break;
+                case IAssignmentOperation assignment:
+                    VisitAssignment(assignment);
+                    break;
                 default:
-                    foreach (var child in op.ChildOperations) Visit(child);
+                    foreach (var child in op.ChildOperations)
+                    {
+                        Visit(child);
+                    }
                     break;
             }
         }
 
         protected virtual void VisitAssignment(IAssignmentOperation op)
         {
-            foreach (var child in op.ChildOperations) Visit(child);
+            foreach (var child in op.ChildOperations)
+            {
+                Visit(child);
+            }
         }
 
         protected virtual void VisitInvocation(IInvocationOperation op)
         {
-            foreach (var arg in op.Arguments) Visit(arg.Value);
+            foreach (var argument in op.Arguments)
+            {
+                Visit(argument.Value);
+            }
         }
     }
 }

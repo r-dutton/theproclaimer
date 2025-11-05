@@ -7,7 +7,7 @@ using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -275,13 +275,11 @@ public sealed partial class ProjectAnalyzer
                     valueContent,
                     _facts);
 
-                FlowAnalysisEngine.AnalyzeMethod(
+                var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     project.Compilation,
-                    model,
                     methodSymbol,
-                    InterproceduralConfiguration,
-                    callsitePredicate,
-                    visitor);
+                    InterproceduralConfiguration);
+                analysis.Context.Accept(visitor);
             }
         }
 
@@ -424,6 +422,11 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
+                if (!IsServiceUsageInScope(service, handler.Assembly, handler.Project))
+                {
+                    continue;
+                }
+
                 if (!TryEnsureServiceNode(service.ServiceType, out var serviceId, out var registration, service.TargetType, handler.Assembly, handler.Project))
                 {
                     continue;

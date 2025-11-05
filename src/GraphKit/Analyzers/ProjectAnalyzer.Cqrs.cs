@@ -9,7 +9,7 @@ using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -294,7 +294,7 @@ public sealed partial class ProjectAnalyzer
                             }
                         }
 
-                        var normalizedServiceType = NormalizeServiceType((resolvedType ?? typeName) ?? string.Empty);
+                        var normalizedServiceType = NormalizeServiceType((resolvedType ?? typeName) ?? string.Empty, project.AssemblyName, project.RelativeDirectory);
                         string? invocationMethod = methodName;
                         string? dispatchRequestType = null;
                         string? dispatchResponseType = null;
@@ -539,13 +539,8 @@ public sealed partial class ProjectAnalyzer
             var tree = methodSyntax.SyntaxTree;
             var model = project.GetModel(tree);
             var visitor = new CqrsOperationVisitor(this, model, handler, method.Name, pointsTo, valueContent, _facts);
-            FlowAnalysisEngine.AnalyzeMethod(
-                project.Compilation,
-                model,
-                method,
-                InterproceduralConfiguration,
-                callsitePredicate,
-                visitor);
+            var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(project.Compilation, method, InterproceduralConfiguration);
+            analysis.Context.Accept(visitor);
         }
     }
 
@@ -904,6 +899,11 @@ public sealed partial class ProjectAnalyzer
                 var primary = serviceGroup
                     .OrderBy(u => u.Line)
                     .First();
+
+                if (!IsServiceUsageInScope(primary, handler.Assembly, handler.Project))
+                {
+                    continue;
+                }
 
                 if (!TryEnsureServiceNode(primary.ServiceType, out var serviceId, out var registration, primary.TargetType, handler.Assembly, handler.Project))
                 {
@@ -1326,7 +1326,7 @@ public sealed partial class ProjectAnalyzer
                         continue;
                     }
 
-                    var normalizedServiceType = NormalizeServiceType(targetType!);
+                    var normalizedServiceType = NormalizeServiceType(targetType!, project.AssemblyName, project.RelativeDirectory);
                     var line = GetLineNumber(tree, invocation);
                     handlerInfo.ServiceUsages.Add(new ServiceUsage(
                         normalizedServiceType,

@@ -9,7 +9,7 @@ using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -56,13 +56,11 @@ public sealed partial class ProjectAnalyzer
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
                 var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade, _facts);
-                FlowAnalysisEngine.AnalyzeMethod(
+                var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     compilation,
-                    model,
                     methodSymbol,
-                    InterproceduralConfiguration,
-                    httpCallsitePredicate,
-                    visitor);
+                    InterproceduralConfiguration);
+                analysis.Context.Accept(visitor);
             }
 
             var routeHints = CollectRouteHints(tree, method);

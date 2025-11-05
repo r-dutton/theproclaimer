@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Interprocedural;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Interproc
 {
@@ -23,9 +24,13 @@ namespace GraphKit.Interproc
             if (_visited.ContainsKey(target)) return;
             _visited[target] = true;
 
-            GraphKit.FlowAnalysis.Core.FlowAnalysis.AnalyzeMethod(compilation, model, target, _configuration,
-                inv => true /* predicate controlled in visitors */,
-                visitor);
+            var settings = new InterproceduralSettings(
+                _configuration.InterproceduralAnalysisKind,
+                (int)_configuration.MaxInterproceduralMethodCallChain,
+                (int)_configuration.MaxInterproceduralLambdaOrLocalFunctionCallChain);
+
+            var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(compilation, target, settings);
+            analysis.Context.Accept(visitor);
         }
     }
 }

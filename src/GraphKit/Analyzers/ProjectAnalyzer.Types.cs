@@ -284,7 +284,8 @@ public sealed partial class ProjectAnalyzer
         string? RequestType = null,
         string? ResponseType = null,
         string? DispatchKind = null,
-        string? TargetType = null);
+        string? TargetType = null,
+        IReadOnlyCollection<string>? ImplementationTypes = null);
 
     private sealed record FieldDescriptor(string Type, int Line, bool IsReadOnly);
 

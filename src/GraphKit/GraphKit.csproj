@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic.Workspaces" Version="4.14.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.14.0" />
     <PackageReference Include="System.Reflection.Metadata" Version="9.0.9" />
     <PackageReference Include="System.Text.Json" Version="9.0.1" />
@@ -25,6 +26,15 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Pack>false</Pack>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.CodeAnalysis.NetAnalyzers">
+      <HintPath>$(NuGetPackageRoot)microsoft.codeanalysis.netanalyzers/8.0.0/analyzers/dotnet/cs/Microsoft.CodeAnalysis.NetAnalyzers.dll</HintPath>
+    </Reference>
+    <Reference Include="Analyzer.Utilities">
+      <HintPath>$(NuGetPackageRoot)microsoft.codeanalysis.netanalyzers/8.0.0/analyzers/dotnet/cs/Analyzer.Utilities.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 

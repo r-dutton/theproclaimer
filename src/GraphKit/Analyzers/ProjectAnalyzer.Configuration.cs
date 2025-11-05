@@ -2,21 +2,23 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GraphKit.FlowAnalysis.Dependencies;
-using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
 using Microsoft.CodeAnalysis.Operations;
+using GraphKit.FlowAnalysis.Interprocedural;
+using InterproceduralAnalysisConfiguration = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.InterproceduralAnalysisConfiguration;
+using InterproceduralAnalysisKind = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.InterproceduralAnalysisKind;
 
 namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
     private readonly ProjectAnalyzerConfiguration _configuration;
-    private readonly InterproceduralAnalysisConfiguration _interproceduralConfiguration;
+    private readonly InterproceduralSettings _interproceduralConfiguration;
 
-    internal InterproceduralAnalysisConfiguration InterproceduralConfiguration => _interproceduralConfiguration;
+    internal InterproceduralSettings InterproceduralConfiguration => _interproceduralConfiguration;
 
     private static ProjectAnalyzerConfiguration EnsureConfiguration(ProjectAnalyzerConfiguration? configuration)
     {
@@ -89,11 +91,11 @@ public sealed partial class ProjectAnalyzer
             };
         }
 
-        public InterproceduralAnalysisConfiguration ToInterproceduralConfiguration()
-            => InterproceduralAnalysisConfiguration.Create(
+        public InterproceduralSettings ToInterproceduralSettings()
+            => new(
                 InterproceduralAnalysisKind,
-                maxInterproceduralCallChainLength: MaxInterproceduralCallChainLength,
-                maxInterproceduralLambdaOrLocalFunctionCallChainLength: MaxInterproceduralLambdaOrLocalFunctionDepth);
+                MaxInterproceduralCallChainLength,
+                MaxInterproceduralLambdaOrLocalFunctionDepth);
     }
 
     private static bool IsConfigurationType(string? typeName)

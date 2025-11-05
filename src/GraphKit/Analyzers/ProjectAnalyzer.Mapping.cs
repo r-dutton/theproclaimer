@@ -7,7 +7,7 @@ using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -82,13 +82,11 @@ public sealed partial class ProjectAnalyzer
             if (ctorSymbol is not null && TryAcquireMethodAnalysis(ctorSymbol))
             {
                 var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade, _facts);
-                FlowAnalysisEngine.AnalyzeMethod(
+                var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     compilation,
-                    model,
                     ctorSymbol,
-                    InterproceduralConfiguration,
-                    callsitePredicate,
-                    visitor);
+                    InterproceduralConfiguration);
+                analysis.Context.Accept(visitor);
             }
         }
 
@@ -107,13 +105,11 @@ public sealed partial class ProjectAnalyzer
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
                 var visitor = new MappingOperationVisitor(this, model, project, profileFqdn, profileId, profileFile, profileSpan, registeredMappings, pointsToFacade, valueContentFacade, _facts);
-                FlowAnalysisEngine.AnalyzeMethod(
+                var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     compilation,
-                    model,
                     methodSymbol,
-                    InterproceduralConfiguration,
-                    callsitePredicate,
-                    visitor);
+                    InterproceduralConfiguration);
+                analysis.Context.Accept(visitor);
             }
         }
     }

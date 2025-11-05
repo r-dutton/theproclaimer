@@ -1082,39 +1082,245 @@ public sealed partial class ProjectAnalyzer
         return builder.ToString();
     }
 
-    private string NormalizeServiceType(string serviceType)
+    private string NormalizeServiceType(string serviceType, string? preferredAssembly = null, string? preferredProject = null)
     {
         if (string.IsNullOrWhiteSpace(serviceType))
         {
             return serviceType;
         }
 
-        if (_services.TryGetValue(serviceType, out var serviceInfo))
+        _services.TryGetValue(serviceType, out var directCandidate);
+
+        if (TryResolveScopedService(serviceType, preferredAssembly, preferredProject, out var scopedFqdn))
         {
-            return serviceInfo.Fqdn;
+            return scopedFqdn;
         }
 
         var simple = GetSimpleIdentifier(serviceType);
-        var match = _services.Values.FirstOrDefault(s =>
-            s.Fqdn.Equals(serviceType, StringComparison.OrdinalIgnoreCase) ||
-            s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
-        if (match is not null)
+        if (!string.IsNullOrWhiteSpace(simple) &&
+            TryResolveScopedService(simple!, preferredAssembly, preferredProject, out var simpleScoped))
         {
-            return match.Fqdn;
+            return simpleScoped;
         }
 
-        var registration = FindServiceRegistration(serviceType) ?? FindServiceRegistration(simple);
+        var registration = FindServiceRegistration(serviceType, preferredTargetType: null, preferredAssembly, preferredProject)
+            ?? (string.IsNullOrWhiteSpace(simple) ? null : FindServiceRegistration(simple!, preferredTargetType: null, preferredAssembly, preferredProject));
+
         if (registration is not null)
         {
             var implementation = registration.ImplementationType;
             if (!string.IsNullOrWhiteSpace(implementation) &&
                 !string.Equals(implementation, serviceType, StringComparison.OrdinalIgnoreCase))
             {
-                return NormalizeServiceType(implementation);
+                var nextAssembly = string.IsNullOrWhiteSpace(registration.Assembly) ? preferredAssembly : registration.Assembly;
+                var nextProject = string.IsNullOrWhiteSpace(registration.Project) ? preferredProject : registration.Project;
+                return NormalizeServiceType(implementation!, nextAssembly, nextProject);
             }
         }
 
-        return serviceType;
+        return directCandidate?.Fqdn ?? serviceType;
+    }
+
+    private bool TryResolveScopedService(string lookupKey, string? preferredAssembly, string? preferredProject, out string fqdn)
+    {
+        fqdn = lookupKey;
+        if (string.IsNullOrWhiteSpace(lookupKey))
+        {
+            return false;
+        }
+
+        if (_services.TryGetValue(lookupKey, out var direct) &&
+            MatchesServiceScope(direct, preferredAssembly, preferredProject))
+        {
+            fqdn = direct.Fqdn;
+            return true;
+        }
+
+        var matches = _services.Values
+            .Where(s => string.Equals(s.Fqdn, lookupKey, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Name, lookupKey, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            return false;
+        }
+
+        var selected = SelectScopedService(matches, lookupKey, preferredAssembly, preferredProject);
+        if (selected is null)
+        {
+            return false;
+        }
+
+        fqdn = selected.Fqdn;
+        return true;
+    }
+
+    private static bool MatchesServiceScope(ServiceInfo service, string? preferredAssembly, string? preferredProject)
+    {
+        if (!string.IsNullOrWhiteSpace(preferredProject) &&
+            !string.Equals(service.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(preferredAssembly))
+        {
+            return true;
+        }
+
+        if (string.Equals(service.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var preferredRoot = GetAssemblyRoot(preferredAssembly);
+        return !string.IsNullOrWhiteSpace(preferredRoot) &&
+            string.Equals(GetAssemblyRoot(service.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsServiceUsageInScope(
+        ServiceUsage usage,
+        string? preferredAssembly,
+        string? preferredProject)
+    {
+        if (_services.TryGetValue(usage.ServiceType, out var directService) &&
+            MatchesServiceScope(directService, preferredAssembly, preferredProject))
+        {
+            return true;
+        }
+
+        if (usage.ImplementationTypes is not { Count: > 0 })
+        {
+            return MatchesServiceScopeFallback(usage.ServiceType, preferredAssembly, preferredProject);
+        }
+
+        foreach (var implementation in usage.ImplementationTypes)
+        {
+            if (string.IsNullOrWhiteSpace(implementation))
+            {
+                continue;
+            }
+
+            if (_services.TryGetValue(implementation, out var implInfo) &&
+                MatchesServiceScope(implInfo, preferredAssembly, preferredProject))
+            {
+                return true;
+            }
+
+            if (TryResolveScopedService(implementation, preferredAssembly, preferredProject, out var scoped) &&
+                _services.TryGetValue(scoped, out var scopedInfo) &&
+                MatchesServiceScope(scopedInfo, preferredAssembly, preferredProject))
+            {
+                return true;
+            }
+        }
+
+        return MatchesServiceScopeFallback(usage.ServiceType, preferredAssembly, preferredProject);
+    }
+
+    private bool MatchesServiceScopeFallback(
+        string serviceType,
+        string? preferredAssembly,
+        string? preferredProject)
+    {
+        if (_services.TryGetValue(serviceType, out var serviceInfo))
+        {
+            return MatchesServiceScope(serviceInfo, preferredAssembly, preferredProject);
+        }
+
+        return string.IsNullOrWhiteSpace(preferredProject) && string.IsNullOrWhiteSpace(preferredAssembly);
+    }
+
+    private ServiceInfo? SelectScopedService(
+        IEnumerable<ServiceInfo> candidates,
+        string lookupKey,
+        string? preferredAssembly,
+        string? preferredProject)
+    {
+        var list = candidates as IList<ServiceInfo> ?? candidates.ToList();
+        if (list.Count == 0)
+        {
+            return null;
+        }
+
+        var lookupSimple = GetTopLevelSimpleIdentifier(lookupKey);
+        var lookupNamespace = GetTypeNamespace(lookupKey);
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+
+        ServiceInfo? best = null;
+        var bestScore = int.MinValue;
+
+        foreach (var candidate in list)
+        {
+            var score = 0;
+
+            if (string.Equals(candidate.Fqdn, lookupKey, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 1_000;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lookupSimple) &&
+                string.Equals(candidate.Name, lookupSimple, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 250;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lookupNamespace) &&
+                candidate.Fqdn.StartsWith(lookupNamespace, StringComparison.OrdinalIgnoreCase))
+            {
+                score += lookupNamespace.Length;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject) &&
+                string.Equals(candidate.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 500;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                if (string.Equals(candidate.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 400;
+                }
+                else if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot) &&
+                         string.Equals(GetAssemblyRoot(candidate.Assembly), preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 250;
+                }
+            }
+
+            if (best is null || score > bestScore ||
+                (score == bestScore && CompareServiceInfos(candidate, best) < 0))
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best ?? list
+            .OrderBy(info => info.FilePath ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(info => info.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private static int CompareServiceInfos(ServiceInfo left, ServiceInfo right)
+    {
+        var fileCompare = StringComparer.OrdinalIgnoreCase.Compare(left.FilePath ?? string.Empty, right.FilePath ?? string.Empty);
+        if (fileCompare != 0)
+        {
+            return fileCompare;
+        }
+
+        var leftLine = left.Span.StartLine;
+        var rightLine = right.Span.StartLine;
+        if (leftLine != rightLine)
+        {
+            return leftLine.CompareTo(rightLine);
+        }
+
+        return StringComparer.OrdinalIgnoreCase.Compare(left.Fqdn, right.Fqdn);
     }
 
     private string? TryResolveProjectionSource(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables, IReadOnlyDictionary<string, FieldDescriptor> fieldLookup, string? preferredAssembly = null, string? preferredProject = null)

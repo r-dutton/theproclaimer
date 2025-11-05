@@ -129,6 +129,11 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
+                if (!IsServiceUsageInScope(usage, service.Assembly, service.Project))
+                {
+                    continue;
+                }
+
                 if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType, service.Assembly, service.Project))
                 {
                     continue;

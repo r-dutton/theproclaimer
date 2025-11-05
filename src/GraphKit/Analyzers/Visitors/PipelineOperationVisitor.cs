@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
@@ -100,14 +101,50 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var serviceKey = $"{qualified}@{methodName}@{line}";
+            IReadOnlyCollection<string>? implementations = null;
+            var pointedTypes = invocation.Instance is not null
+                ? PointsTo.TryGetLocationTypes(invocation.Instance)
+                : ImmutableArray<ITypeSymbol>.Empty;
+
+            if (!pointedTypes.IsDefaultOrEmpty)
+            {
+                var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var candidate in pointedTypes)
+                {
+                    if (Qualify(candidate) is { } resolved && unique.Add(resolved))
+                    {
+                        continue;
+                    }
+                }
+
+                if (unique.Count > 0)
+                {
+                    implementations = unique.ToList();
+                }
+            }
+
+            var serviceTypeName = qualified!;
+            if (implementations is { Count: > 0 })
+            {
+                foreach (var implementation in implementations)
+                {
+                    if (_analyzer.TryResolveScopedService(implementation, _assembly, _project, out var scoped))
+                    {
+                        serviceTypeName = scoped;
+                        break;
+                    }
+                }
+            }
+
+            var serviceKey = $"{serviceTypeName}@{methodName}@{line}";
             if (_seenServices.Add(serviceKey))
             {
                 _serviceUsages.Add(new ServiceUsage(
-                    qualified!,
+                    serviceTypeName,
                     line,
                     _ownerMethod,
-                    methodName));
+                    methodName,
+                    ImplementationTypes: implementations));
             }
         }
 
