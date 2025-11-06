@@ -1184,24 +1184,24 @@ public sealed partial class ProjectAnalyzer
         string? preferredAssembly,
         string? preferredProject)
     {
+        if (IsFrameworkServiceType(usage.ServiceType) ||
+            usage.ImplementationTypes is { Count: > 0 } impls && impls.Any(IsFrameworkServiceType))
+        {
+            return true;
+        }
+
         if (_services.TryGetValue(usage.ServiceType, out var directService) &&
             MatchesServiceScope(directService, preferredAssembly, preferredProject))
         {
             return true;
         }
 
-        if (usage.ImplementationTypes is not { Count: > 0 })
-        {
-            return MatchesServiceScopeFallback(usage.ServiceType, preferredAssembly, preferredProject);
-        }
+        var implementations = usage.ImplementationTypes is { Count: > 0 }
+            ? usage.ImplementationTypes.Where(static t => !string.IsNullOrWhiteSpace(t)).ToList()
+            : new List<string>();
 
-        foreach (var implementation in usage.ImplementationTypes)
+        foreach (var implementation in implementations)
         {
-            if (string.IsNullOrWhiteSpace(implementation))
-            {
-                continue;
-            }
-
             if (_services.TryGetValue(implementation, out var implInfo) &&
                 MatchesServiceScope(implInfo, preferredAssembly, preferredProject))
             {
@@ -1214,6 +1214,28 @@ public sealed partial class ProjectAnalyzer
             {
                 return true;
             }
+        }
+
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+        if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot))
+        {
+            if (SharesAssemblyRoot(usage.ServiceType, preferredAssemblyRoot))
+            {
+                return true;
+            }
+
+            foreach (var implementation in implementations)
+            {
+                if (SharesAssemblyRoot(implementation, preferredAssemblyRoot))
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (implementations.Count == 0)
+        {
+            return MatchesServiceScopeFallback(usage.ServiceType, preferredAssembly, preferredProject);
         }
 
         return MatchesServiceScopeFallback(usage.ServiceType, preferredAssembly, preferredProject);
@@ -1230,6 +1252,30 @@ public sealed partial class ProjectAnalyzer
         }
 
         return string.IsNullOrWhiteSpace(preferredProject) && string.IsNullOrWhiteSpace(preferredAssembly);
+    }
+
+    private static bool IsFrameworkServiceType(string? serviceType)
+    {
+        if (string.IsNullOrWhiteSpace(serviceType))
+        {
+            return false;
+        }
+
+        return serviceType.StartsWith("Microsoft.AspNetCore.", StringComparison.OrdinalIgnoreCase) ||
+               serviceType.StartsWith("Microsoft.Extensions.", StringComparison.OrdinalIgnoreCase) ||
+               serviceType.StartsWith("System.Net.Http.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool SharesAssemblyRoot(string? serviceType, string preferredRoot)
+    {
+        if (string.IsNullOrWhiteSpace(serviceType))
+        {
+            return false;
+        }
+
+        var candidateRoot = GetTypeAssemblyRoot(serviceType);
+        return !string.IsNullOrWhiteSpace(candidateRoot) &&
+            string.Equals(candidateRoot, preferredRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     private ServiceInfo? SelectScopedService(

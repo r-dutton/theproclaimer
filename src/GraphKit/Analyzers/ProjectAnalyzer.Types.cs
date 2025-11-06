@@ -125,6 +125,7 @@ public sealed partial class ProjectAnalyzer
         public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
         public List<HandlerValidationCall> ValidationCalls { get; } = new();
         public List<HandlerLogInvocation> LogInvocations { get; } = new();
+        public List<FrameworkInteraction> FrameworkInteractions { get; } = new();
     }
 
     private sealed record BaseServiceClientInvocation(
@@ -352,6 +353,8 @@ public sealed partial class ProjectAnalyzer
     private sealed record OptionsUsage(string OptionsType, int Line);
 
     private sealed record ConfigurationUsage(string ConfigurationType, string Accessor, string? Key, int Line, string FilePath);
+
+    private sealed record FrameworkInteraction(string ServiceType, string Member, int Line);
 
     private sealed record EndpointAuthorization(string? Policy, string? Roles, string? AuthenticationSchemes, string Source, int Line);
 

@@ -342,6 +342,8 @@ public sealed partial class ProjectAnalyzer
                                     dispatchRequestType = qualifiedRequest;
                                 }
 
+                                EnsureHandlerAnalysis(dispatchRequestType);
+
                                 dispatchKind = "requestprocessor.dispatch";
 
                                 if (string.IsNullOrWhiteSpace(dispatchResponseType))

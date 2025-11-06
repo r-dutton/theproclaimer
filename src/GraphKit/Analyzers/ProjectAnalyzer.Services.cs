@@ -321,6 +321,7 @@ public sealed partial class ProjectAnalyzer
 
                 var normalizedServiceType = NormalizeServiceType(resolvedType ?? typeName, project.AssemblyName, project.RelativeDirectory);
                 var normalizedSimple = GetTopLevelSimpleIdentifier(normalizedServiceType);
+
                 var shouldSkipServiceUsage = !descriptor.IsReadOnly &&
                     !IsLikelyInjectedServiceType(typeName) &&
                     !IsLikelyInjectedServiceType(resolvedType) &&
@@ -385,6 +386,8 @@ public sealed partial class ProjectAnalyzer
                                     dispatchResponseType = requestInfo.ResponseType;
                                 }
                             }
+
+                            EnsureHandlerAnalysis(dispatchRequestType);
 
                             dispatchKind = "requestprocessor.dispatch";
                         }
@@ -711,6 +714,54 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
+                if (IsFrameworkServiceType(usage.ServiceType))
+                {
+                    if (!TryEnsureServiceNode(usage.ServiceType, out var frameworkId, out _, usage.TargetType, service.Assembly, service.Project) ||
+                        frameworkId is null)
+                    {
+                        continue;
+                    }
+
+                    var frameworkProps = new Dictionary<string, object>
+                    {
+                        ["service_type"] = usage.ServiceType
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(usage.InvocationMethod))
+                    {
+                        frameworkProps["method"] = usage.InvocationMethod!;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(usage.Method))
+                    {
+                        frameworkProps["method"] = usage.Method!;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(usage.InvocationMethod) &&
+                        !string.IsNullOrWhiteSpace(usage.Method) &&
+                        !string.Equals(usage.InvocationMethod, usage.Method, StringComparison.OrdinalIgnoreCase))
+                    {
+                        frameworkProps["invoked_method"] = usage.Method!;
+                    }
+
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = frameworkId,
+                        Kind = "uses_service",
+                        Source = "static",
+                        Confidence = 0.6,
+                        Transform = new GraphTransform
+                        {
+                            Type = "framework.access",
+                            Location = new GraphLocation { File = service.FilePath, Line = usage.Line }
+                        },
+                        Props = frameworkProps,
+                        Evidence = CreateEvidence(service.FilePath, usage.Line)
+                    });
+
+                    continue;
+                }
+
                 if (!IsServiceUsageInScope(usage, service.Assembly, service.Project))
                 {
                     continue;
@@ -910,6 +961,43 @@ public sealed partial class ProjectAnalyzer
                         }
                     }
                 }
+            }
+
+            foreach (var grouping in service.FrameworkInteractions
+                .GroupBy(i => i.ServiceType + "|" + i.Member, StringComparer.OrdinalIgnoreCase))
+            {
+                var interaction = grouping.OrderBy(i => i.Line).First();
+                var keyParts = grouping.Key.Split('|');
+                var interactionServiceType = keyParts.Length > 0 ? keyParts[0] : interaction.ServiceType;
+                var interactionMember = keyParts.Length > 1 ? keyParts[1] : interaction.Member;
+
+                if (!TryEnsureServiceNode(interactionServiceType, out var frameworkId, out _, preferredAssembly: service.Assembly, preferredProject: service.Project) ||
+                    frameworkId is null)
+                {
+                    continue;
+                }
+
+                var frameworkProps = new Dictionary<string, object>
+                {
+                    ["service_type"] = interactionServiceType,
+                    ["method"] = interactionMember
+                };
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = frameworkId,
+                    Kind = "uses_service",
+                    Source = "static",
+                    Confidence = 0.55,
+                    Transform = new GraphTransform
+                    {
+                        Type = "framework.access",
+                        Location = new GraphLocation { File = service.FilePath, Line = interaction.Line }
+                    },
+                    Props = frameworkProps,
+                    Evidence = CreateEvidence(service.FilePath, interaction.Line)
+                });
             }
 
             foreach (var cache in service.CacheInvocations)
@@ -1268,11 +1356,23 @@ public sealed partial class ProjectAnalyzer
         var candidate = ExtractName(expression);
         if (string.IsNullOrWhiteSpace(candidate))
         {
+            if (expression is MemberAccessExpressionSyntax nestedAccess &&
+                TryResolveFieldDescriptor(nestedAccess.Expression, fieldLookup, out descriptor, out fieldName))
+            {
+                return true;
+            }
+
             return false;
         }
 
         if (!fieldLookup.TryGetValue(candidate, out var resolvedDescriptor))
         {
+            if (expression is MemberAccessExpressionSyntax nestedExpression &&
+                TryResolveFieldDescriptor(nestedExpression.Expression, fieldLookup, out descriptor, out fieldName))
+            {
+                return true;
+            }
+
             return false;
         }
 
