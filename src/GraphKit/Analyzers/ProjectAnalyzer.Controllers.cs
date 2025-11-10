@@ -1368,7 +1368,37 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
-        var typeInfo = model.GetTypeInfo(returnType);
+        TypeInfo typeInfo;
+        try
+        {
+            typeInfo = model.GetTypeInfo(returnType);
+        }
+        catch (ArgumentException)
+        {
+            try
+            {
+                var root = model.SyntaxTree.GetRoot();
+                if (returnType.SyntaxTree != model.SyntaxTree)
+                {
+                    var mapped = root.FindNode(returnType.Span, getInnermostNodeForTie: true) as TypeSyntax;
+                    if (mapped is null)
+                    {
+                        return false;
+                    }
+
+                    typeInfo = model.GetTypeInfo(mapped);
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         var type = typeInfo.Type as INamedTypeSymbol;
         if (type is null)
         {
