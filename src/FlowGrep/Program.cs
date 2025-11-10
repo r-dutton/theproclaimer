@@ -199,11 +199,11 @@ try
         var graph = FlowBuilderCore.BuildGraph(provider);
 	    var narratives = LegacyNarrativeRenderer.Collect(factBag, workspace);
 	    var narrativeLookup = narratives.ToDictionary(n => n.Endpoint.Id, StringComparer.Ordinal);
+        var matchedNodes = graph.Nodes.Where(predicate).ToList();
 
         if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
         {
-            var flows = graph.Nodes
-                .Where(predicate)
+            var flows = matchedNodes
                 .Select(node => new
                 {
                     node.Id,
@@ -225,57 +225,74 @@ try
                             Props = edge.Props
                         })
                     .ToArray(),
-                	Narrative = narrativeLookup.TryGetValue(node.Id, out var entry) ? entry.Text : null
+                 	Narrative = narrativeLookup.TryGetValue(node.Id, out var entry) ? entry.Text : null
                 })
                 .ToArray();
 
             flow = JsonSerializer.Serialize(new { flows }, new JsonSerializerOptions { WriteIndented = true });
         }
-    else
-    {
-        var matchedNodes = graph.Nodes.Where(predicate).ToList();
-        var matchedIds = new HashSet<string>(matchedNodes.Select(n => n.Id), StringComparer.Ordinal);
-        var sb = new StringBuilder();
-        var wroteAny = false;
-
-        foreach (var entry in narratives)
+        else
         {
-            if (matchedIds.Count > 0 && !matchedIds.Contains(entry.Endpoint.Id))
-            {
-                continue;
-            }
+            var matchedIds = new HashSet<string>(matchedNodes.Select(n => n.Id), StringComparer.Ordinal);
+            var sb = new StringBuilder();
+            var wroteAny = false;
 
-            sb.Append(entry.Text.TrimEnd());
-            sb.AppendLine();
-            sb.AppendLine();
-            wroteAny = true;
-            matchedIds.Remove(entry.Endpoint.Id);
-        }
-
-        if (matchedIds.Count > 0)
-        {
-            foreach (var node in matchedNodes)
+            if (format.Equals("mermaid", StringComparison.OrdinalIgnoreCase))
             {
-                if (!matchedIds.Contains(node.Id))
+                var diagrams = FlowBuilderMermaid.Render(graph, includeFlow: node => matchedIds.Contains(node.Id));
+                foreach (var diagram in diagrams)
                 {
-                    continue;
+                    sb.AppendLine($"## {diagram.Endpoint.DisplayName}");
+                    sb.AppendLine();
+                    sb.AppendLine("```mermaid");
+                    sb.AppendLine(diagram.Diagram);
+                    sb.AppendLine("```");
+                    sb.AppendLine();
+                    wroteAny = true;
+                    matchedIds.Remove(diagram.Endpoint.Id);
                 }
-
-                var fallback = FlowBuilderMarkdown.Render(graph, n => string.Equals(n.Id, node.Id, StringComparison.Ordinal));
-                if (!string.IsNullOrWhiteSpace(fallback))
+            }
+            else
+            {
+                foreach (var entry in narratives)
                 {
-                    sb.Append(fallback.TrimEnd());
+                    if (matchedIds.Count > 0 && !matchedIds.Contains(entry.Endpoint.Id))
+                    {
+                        continue;
+                    }
+
+                    sb.Append(entry.Text.TrimEnd());
                     sb.AppendLine();
                     sb.AppendLine();
                     wroteAny = true;
+                    matchedIds.Remove(entry.Endpoint.Id);
                 }
-
-                matchedIds.Remove(node.Id);
             }
-        }
 
-        flow = wroteAny ? sb.ToString().TrimEnd() : string.Empty;
-    }
+            if (matchedIds.Count > 0)
+            {
+                foreach (var node in matchedNodes)
+                {
+                    if (!matchedIds.Contains(node.Id))
+                    {
+                        continue;
+                    }
+
+                    var fallback = FlowBuilderMarkdown.Render(graph, n => string.Equals(n.Id, node.Id, StringComparison.Ordinal));
+                    if (!string.IsNullOrWhiteSpace(fallback))
+                    {
+                        sb.Append(fallback.TrimEnd());
+                        sb.AppendLine();
+                        sb.AppendLine();
+                        wroteAny = true;
+                    }
+
+                    matchedIds.Remove(node.Id);
+                }
+            }
+
+            flow = wroteAny ? sb.ToString().TrimEnd() : string.Empty;
+        }
 
         if (string.IsNullOrWhiteSpace(flow))
         {

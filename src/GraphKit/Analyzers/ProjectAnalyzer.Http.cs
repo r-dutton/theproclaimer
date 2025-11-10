@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
@@ -9,7 +8,7 @@ using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -56,129 +55,11 @@ public sealed partial class ProjectAnalyzer
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
                 var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade, _facts);
-                FlowAnalysisEngine.AnalyzeMethod(
+                var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     compilation,
-                    model,
                     methodSymbol,
-                    InterproceduralConfiguration,
-                    httpCallsitePredicate,
-                    visitor);
-            }
-
-            var routeHints = CollectRouteHints(tree, method);
-
-            var requestMessageHints = new Dictionary<string, (string? Method, RouteHint? Route)>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var creation in Descendants<ObjectCreationExpressionSyntax>(method))
-            {
-                if (!creation.Type.ToString().EndsWith("HttpRequestMessage", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                string? resolvedMethod = null;
-                RouteHint? resolvedRoute = null;
-                if (creation.ArgumentList is { Arguments.Count: > 0 })
-                {
-                    var methodArgument = creation.ArgumentList.Arguments[0].Expression;
-                    resolvedMethod = TryResolveHttpMethod(methodArgument) ?? ExtractStringValue(methodArgument)?.ToUpperInvariant();
-
-                    if (creation.ArgumentList.Arguments.Count > 1)
-                    {
-                        var routeExpression = creation.ArgumentList.Arguments[1].Expression;
-                        resolvedRoute = TryResolveRouteHint(tree, routeExpression, routeHints);
-                    }
-                }
-
-                if (creation.Parent is EqualsValueClauseSyntax equals && equals.Parent is VariableDeclaratorSyntax declarator)
-                {
-                    requestMessageHints[declarator.Identifier.Text] = (resolvedMethod, resolvedRoute);
-                }
-                else if (creation.Parent is AssignmentExpressionSyntax assignment && assignment.Left is IdentifierNameSyntax identifier)
-                {
-                    requestMessageHints[identifier.Identifier.Text] = (resolvedMethod, resolvedRoute);
-                }
-            }
-
-            var declaringMethod = method.Identifier.Text;
-
-            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
-            {
-                if (invocation.Expression is MemberAccessExpressionSyntax { Name: IdentifierNameSyntax sendName } sendAccess &&
-                    string.Equals(sendName.Identifier.Text, "SendAsync", StringComparison.OrdinalIgnoreCase))
-                {
-                    var arguments = invocation.ArgumentList.Arguments;
-                    if (arguments.Count > 0)
-                    {
-                        string? candidateMethod = null;
-                        RouteHint? candidateRoute = null;
-                        IReadOnlyCollection<string> queryParameters = Array.Empty<string>();
-                        var requestArgument = arguments[0].Expression;
-
-                        if (requestArgument is IdentifierNameSyntax requestIdentifier &&
-                            requestMessageHints.TryGetValue(requestIdentifier.Identifier.Text, out var hint))
-                        {
-                            candidateMethod = hint.Method;
-                            candidateRoute = hint.Route;
-                            if (candidateRoute is not null)
-                            {
-                                queryParameters = candidateRoute.QueryParameters.ToArray();
-                            }
-                        }
-                        else if (requestArgument is ObjectCreationExpressionSyntax inlineCreation &&
-                                 inlineCreation.Type.ToString().EndsWith("HttpRequestMessage", StringComparison.Ordinal))
-                        {
-                            if (inlineCreation.ArgumentList is { Arguments.Count: > 0 })
-                            {
-                                var inlineMethodExpression = inlineCreation.ArgumentList.Arguments[0].Expression;
-                                candidateMethod = TryResolveHttpMethod(inlineMethodExpression) ?? ExtractStringValue(inlineMethodExpression)?.ToUpperInvariant();
-
-                                if (inlineCreation.ArgumentList.Arguments.Count > 1)
-                                {
-                                    var inlineRouteExpression = inlineCreation.ArgumentList.Arguments[1].Expression;
-                                    candidateRoute = TryResolveRouteHint(tree, inlineRouteExpression, routeHints);
-                                    if (candidateRoute is not null)
-                                    {
-                                        queryParameters = candidateRoute.QueryParameters.ToArray();
-                                    }
-                                }
-                            }
-                        }
-
-                        if (candidateRoute is null)
-                        {
-                            queryParameters = Array.Empty<string>();
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(candidateMethod) || candidateRoute is not null)
-                        {
-                            var normalizedMethod = !string.IsNullOrWhiteSpace(candidateMethod)
-                                ? candidateMethod!
-                                : sendName.Identifier.Text.ToUpperInvariant();
-                            var formattedRoute = candidateRoute is null ? null : FormatRoute(candidateRoute);
-                            var line = GetLineNumber(tree, invocation);
-                            info.OutboundCalls.Add(new HttpClientCall(declaringMethod, normalizedMethod, formattedRoute, line, queryParameters));
-                            continue;
-                        }
-                    }
-                }
-
-                if (httpClientField is not null &&
-                    invocation.Expression is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax identifier } memberAccess &&
-                    identifier.Identifier.Text.TrimStart('_') == httpClientField)
-                {
-                    var methodIdentifier = memberAccess.Name.Identifier.Text;
-                    var httpMethod = InferHttpVerb(methodIdentifier);
-                    var route = ExtractRouteLiteral(tree, invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression);
-                    var line = GetLineNumber(tree, invocation);
-                    info.OutboundCalls.Add(new HttpClientCall(declaringMethod, httpMethod, route, line, Array.Empty<string>()));
-                    continue;
-                }
-
-                if (TryCaptureWrapperHttpCall(tree, invocation, routeHints, declaringMethod, out var wrapperCall))
-                {
-                    info.OutboundCalls.Add(wrapperCall);
-                }
+                    InterproceduralConfiguration);
+                analysis.Context.Accept(visitor);
             }
         }
 
@@ -611,21 +492,7 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
-        if (queryParameters.Count == 0)
-        {
-            var builderText = expression.ToString();
-            foreach (Match match in Regex.Matches(builderText, @"With(?:Required|Optional)QueryParameter\(\s*""([^""]+)"""))
-            {
-                var name = match.Groups[1].Value;
-                var normalized = NormalizeQueryKey(name);
-                if (string.IsNullOrWhiteSpace(normalized))
-                {
-                    continue;
-                }
-
-                queryParameters.Add(normalized);
-            }
-        }
+        // No regex fallback; we rely on invocation chain and value-content only.
 
         return new RouteHint(route, queryParameters);
     }

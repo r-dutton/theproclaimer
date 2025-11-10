@@ -3,15 +3,17 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Threading;
 using Analyzer.Utilities;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 using GraphKit.FlowAnalysis.Interprocedural;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
-using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.CopyAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.PointsToAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.ValueContentAnalysis;
 using Microsoft.CodeAnalysis.Operations;
+using Microsoft.CodeAnalysis.Text;
+using ValueContentAnalysisResult = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.DataFlowAnalysisResult<Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.ValueContentAnalysis.ValueContentBlockAnalysisResult, Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.ValueContentAnalysis.ValueContentAbstractValue>;
 
 namespace GraphKit.FlowAnalysis.Dependencies;
 
@@ -27,18 +29,24 @@ public sealed class FlowValueContentFacade
         defaultSeverity: DiagnosticSeverity.Hidden,
         isEnabledByDefault: true);
 
-    private readonly ConditionalWeakTable<Compilation, WellKnownTypeProvider> _wellKnownTypeProviders = new();
-    private readonly ConcurrentDictionary<FlowAnalysisCacheKey, Lazy<AnalysisBundle?>> _analysisCache = new();
+    private static readonly ValueContentAnalysisResult? PlaceholderResult = null;
+
+    private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
+        static _ => false,
+        static _ => false,
+        static _ => false);
+
+    private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
 
     public FlowValueContentFacade(
-        FlowInterproceduralConfiguration configuration,
+        InterproceduralSettings configuration,
         FlowCallsitePredicate pruningPredicate)
     {
-        Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        PruningPredicate = pruningPredicate ?? throw new ArgumentNullException(nameof(pruningPredicate));
+        Settings = configuration;
+        PruningPredicate = pruningPredicate;
     }
 
-    public FlowInterproceduralConfiguration Configuration { get; }
+    public InterproceduralSettings Settings { get; }
 
     public FlowCallsitePredicate PruningPredicate { get; }
 
@@ -65,8 +73,7 @@ public sealed class FlowValueContentFacade
             return null;
         }
 
-        if (!TryGetAnalysis(owningSymbol, model, op.Syntax, out var bundle) ||
-            bundle?.ValueContent is not { } analysis)
+        if (!TryGetAnalysis(owningSymbol, model, op.Syntax, out var analysis))
         {
             return null;
         }
@@ -74,29 +81,62 @@ public sealed class FlowValueContentFacade
         return TryExtractString(analysis, op, out var reconstructed) ? reconstructed : null;
     }
 
+    public bool? TryGetBooleanValue(IOperation op)
+    {
+        if (op is null) return null;
+        if (op.ConstantValue is { HasValue: true, Value: bool b }) return b;
+        if (!TryGetAnalysisFor(op, out var analysis)) return null;
+        return TryExtractBoolean(analysis!, op, out var value) ? value : null;
+    }
+
+    public long? TryGetIntegralValue(IOperation op)
+    {
+        if (op is null) return null;
+        if (op.ConstantValue is { HasValue: true, Value: int i }) return i;
+        if (op.ConstantValue is { HasValue: true, Value: long l }) return l;
+        if (!TryGetAnalysisFor(op, out var analysis)) return null;
+        return TryExtractIntegral(analysis!, op, out var value) ? value : null;
+    }
+
+    private bool TryGetAnalysisFor(IOperation op, out ValueContentAnalysisResult? analysis)
+    {
+        analysis = null;
+        if (op.SemanticModel is not { } model)
+        {
+            return false;
+        }
+
+        var owningSymbol = model.GetEnclosingSymbol(op.Syntax.SpanStart);
+        if (owningSymbol is null)
+        {
+            return false;
+        }
+
+        return TryGetAnalysis(owningSymbol, model, op.Syntax, out analysis);
+    }
+
     private bool TryGetAnalysis(
         ISymbol owningSymbol,
         SemanticModel contextModel,
         SyntaxNode contextSyntax,
-        out AnalysisBundle? bundle)
+        out ValueContentAnalysisResult? analysis)
     {
-        bundle = null;
-
+        analysis = null;
         var declaration = FindDeclarationSyntax(owningSymbol, contextSyntax);
         if (declaration is null)
         {
             return false;
         }
 
-        var key = new FlowAnalysisCacheKey(declaration.SyntaxTree, declaration.Span);
-        var lazy = _analysisCache.GetOrAdd(key, _ => new Lazy<AnalysisBundle?>(() =>
+        var key = new AnalysisCacheKey(declaration.SyntaxTree, declaration.Span);
+        var lazy = _analysisCache.GetOrAdd(key, _ => new Lazy<ValueContentAnalysisResult?>(() =>
             ComputeAnalysis(owningSymbol, declaration, contextModel), LazyThreadSafetyMode.ExecutionAndPublication));
 
-        bundle = lazy.Value;
-        return bundle is not null;
+        analysis = lazy.Value;
+        return analysis is not null;
     }
 
-    private AnalysisBundle? ComputeAnalysis(
+    private ValueContentAnalysisResult? ComputeAnalysis(
         ISymbol owningSymbol,
         SyntaxNode declarationSyntax,
         SemanticModel contextModel)
@@ -104,37 +144,38 @@ public sealed class FlowValueContentFacade
         try
         {
             var compilation = contextModel.Compilation;
-            var semanticModel = compilation.GetSemanticModel(declarationSyntax.SyntaxTree);
-            var controlFlow = ControlFlowGraph.Create(declarationSyntax, semanticModel, CancellationToken.None);
-            if (controlFlow is null)
+
+            if (owningSymbol is IMethodSymbol methodSymbol)
             {
-                return null;
+                var methodAnalysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
+                    compilation,
+                    methodSymbol,
+                    Settings,
+                    CancellationToken.None);
+
+                if (!methodAnalysis.ValueContentComputed)
+                {
+                    var methodContext = methodAnalysis.Context;
+                    var declaration = methodContext.Declaration ?? declarationSyntax;
+                    var methodSemanticModel = methodContext.SemanticModel ?? compilation.GetSemanticModel(declaration.SyntaxTree);
+                    var controlFlow = methodContext.ControlFlowGraph ?? ControlFlowGraph.Create(declaration, methodSemanticModel, CancellationToken.None);
+
+                    ValueContentAnalysisResult? computed = PlaceholderResult;
+                    if (controlFlow is not null)
+                    {
+                        computed = RunValueContentAnalysis(controlFlow, owningSymbol, compilation);
+                    }
+
+                    methodAnalysis.ValueContentAnalysis = computed;
+                    methodAnalysis.ValueContentComputed = true;
+                }
+
+                return methodAnalysis.ValueContentAnalysis;
             }
 
-            var wellKnownProvider = GetWellKnownTypeProvider(compilation);
-            var interprocedural = InterproceduralAnalysisConfiguration.Create(
-                EmptyAnalyzerOptions,
-                FlowAnalysisRule,
-                controlFlow,
-                compilation,
-                Configuration.AnalysisKind,
-                Configuration.MaxInterproceduralCallChainLength,
-                Configuration.MaxInterproceduralLambdaOrLocalFunctionCallChainLength);
-
-            var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
-                controlFlow,
-                owningSymbol,
-                wellKnownProvider,
-                EmptyAnalyzerOptions,
-                FlowAnalysisRule,
-                PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
-                out var copyAnalysisResult,
-                out var pointsToAnalysisResult,
-                interprocedural.InterproceduralAnalysisKind,
-                pessimisticAnalysis: false,
-                performCopyAnalysisIfNotUserConfigured: true);
-
-            return new AnalysisBundle(valueContentResult, pointsToAnalysisResult, copyAnalysisResult);
+            var semanticModel = compilation.GetSemanticModel(declarationSyntax.SyntaxTree);
+            var cfg = ControlFlowGraph.Create(declarationSyntax, semanticModel, CancellationToken.None);
+            return cfg is null ? null : RunValueContentAnalysis(cfg, owningSymbol, compilation);
         }
         catch (Exception ex) when (IsBenignAnalysisException(ex))
         {
@@ -142,31 +183,58 @@ public sealed class FlowValueContentFacade
         }
     }
 
-    private WellKnownTypeProvider GetWellKnownTypeProvider(Compilation compilation)
-        => _wellKnownTypeProviders.GetValue(compilation, static c => WellKnownTypeProvider.GetOrCreate(c));
+    private ValueContentAnalysisResult? RunValueContentAnalysis(
+        ControlFlowGraph controlFlowGraph,
+        ISymbol owningSymbol,
+        Compilation compilation)
+    {
+        var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
+
+        var settings = Settings;
+        var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
+            EmptyAnalyzerOptions,
+            ImmutableArray.Create(FlowAnalysisRule),
+            controlFlowGraph,
+            compilation,
+            settings.Kind,
+            (uint)Math.Max(0, settings.MaxCallChainLength),
+            (uint)Math.Max(0, settings.MaxLambdaOrLocalFunctionDepth));
+
+        var pointsToResult = PointsToAnalysis.TryGetOrComputeResult(
+            controlFlowGraph,
+            owningSymbol,
+            EmptyAnalyzerOptions,
+            wellKnownProvider,
+            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+            interproceduralConfiguration,
+            NoOpPredicate,
+            pessimisticAnalysis: false,
+            performCopyAnalysis: false,
+            exceptionPathsAnalysis: false);
+
+        var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
+            controlFlowGraph,
+            owningSymbol,
+            wellKnownProvider,
+            EmptyAnalyzerOptions,
+            FlowAnalysisRule,
+            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+            settings.Kind,
+            pessimisticAnalysis: false);
+
+        return valueContentResult;
+    }
 
     private static bool TryExtractString(
         ValueContentAnalysisResult analysis,
         IOperation operation,
         out string? value)
     {
+        value = null;
         var abstractValue = analysis[operation];
         if (abstractValue is null)
         {
-            value = null;
             return false;
-        }
-
-        if (ReferenceEquals(abstractValue, ValueContentAbstractValue.ContainsNullLiteralState))
-        {
-            value = null;
-            return true;
-        }
-
-        if (ReferenceEquals(abstractValue, ValueContentAbstractValue.ContainsEmptyStringLiteralState))
-        {
-            value = string.Empty;
-            return true;
         }
 
         if (abstractValue.TryGetSingleNonNullLiteral(out string? literal) && literal is not null)
@@ -184,10 +252,71 @@ public sealed class FlowValueContentFacade
                     value = text;
                     return true;
                 }
+
+                if (candidate is null)
+                {
+                    value = null;
+                    return true;
+                }
             }
         }
 
+        if (Equals(abstractValue, ValueContentAbstractValue.ContainsNullLiteralState))
+        {
+            value = null;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractBoolean(
+        ValueContentAnalysisResult analysis,
+        IOperation operation,
+        out bool? value)
+    {
         value = null;
+        var abstractValue = analysis[operation];
+        if (abstractValue is null)
+        {
+            return false;
+        }
+
+        foreach (var candidate in abstractValue.LiteralValues)
+        {
+            if (candidate is bool cb)
+            {
+                value = cb;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractIntegral(
+        ValueContentAnalysisResult analysis,
+        IOperation operation,
+        out long? value)
+    {
+        value = null;
+        var abstractValue = analysis[operation];
+        if (abstractValue is null)
+        {
+            return false;
+        }
+
+        foreach (var candidate in abstractValue.LiteralValues)
+        {
+            switch (candidate)
+            {
+                case int i:
+                    value = i; return true;
+                case long l:
+                    value = l; return true;
+            }
+        }
+
         return false;
     }
 
@@ -210,8 +339,25 @@ public sealed class FlowValueContentFacade
     private static bool IsBenignAnalysisException(Exception exception)
         => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
 
-    private sealed record AnalysisBundle(
-        ValueContentAnalysisResult? ValueContent,
-        PointsToAnalysisResult? PointsTo,
-        CopyAnalysisResult? Copy);
+    private readonly struct AnalysisCacheKey : IEquatable<AnalysisCacheKey>
+    {
+        public AnalysisCacheKey(SyntaxTree tree, TextSpan span)
+        {
+            Tree = tree;
+            Span = span;
+        }
+
+        public SyntaxTree Tree { get; }
+
+        public TextSpan Span { get; }
+
+        public bool Equals(AnalysisCacheKey other)
+            => ReferenceEquals(Tree, other.Tree) && Span.Equals(other.Span);
+
+        public override bool Equals(object? obj)
+            => obj is AnalysisCacheKey other && Equals(other);
+
+        public override int GetHashCode()
+            => HashCode.Combine(Tree, Span.Start, Span.Length);
+    }
 }

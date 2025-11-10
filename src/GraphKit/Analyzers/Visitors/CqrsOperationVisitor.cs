@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
 using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
@@ -21,6 +23,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenMapperCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenHttpCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _seenServiceUsages = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
 
         public CqrsOperationVisitor(
@@ -61,6 +64,8 @@ public sealed partial class ProjectAnalyzer
             {
                 HandleHttpCall(op);
             }
+
+            HandleRequestDispatch(op);
 
             base.VisitInvocation(op);
         }
@@ -159,6 +164,85 @@ public sealed partial class ProjectAnalyzer
                 null,
                 _ownerMethod));
             _analyzer.RecordHandlerHttpClientFact(_handler, clientType, verb, route, invocation.TargetMethod.Name, line, _ownerMethod);
+        }
+
+        private void HandleRequestDispatch(IInvocationOperation invocation)
+        {
+            var receiverSymbol = invocation.Instance?.Type ?? invocation.TargetMethod.ContainingType;
+            var receiverType = Qualify(receiverSymbol);
+            if (string.IsNullOrWhiteSpace(receiverType))
+            {
+                return;
+            }
+
+            IReadOnlyCollection<string>? implementations = null;
+            if (invocation.Instance is not null)
+            {
+                var pointed = PointsTo.TryGetLocationTypes(invocation.Instance);
+                if (!pointed.IsDefaultOrEmpty)
+                {
+                    var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var candidate in pointed)
+                    {
+                        if (Qualify(candidate) is { } resolved)
+                        {
+                            unique.Add(resolved);
+                        }
+                    }
+
+                    if (unique.Count > 0)
+                    {
+                        implementations = unique.ToList();
+                    }
+                }
+            }
+
+            if (!_analyzer.TryResolveRequestDispatch(
+                    PointsTo,
+                    invocation,
+                    receiverType,
+                    implementations,
+                    _handler.Assembly,
+                    _handler.Project,
+                    out var targetType,
+                    out var requestType,
+                    out var responseType,
+                    out var dispatchKind))
+            {
+                return;
+            }
+
+            var serviceTypeName = receiverType;
+            if (implementations is { Count: > 0 })
+            {
+                foreach (var implementation in implementations)
+                {
+                    if (_analyzer.TryResolveScopedService(implementation, _handler.Assembly, _handler.Project, out var scoped))
+                    {
+                        serviceTypeName = scoped;
+                        break;
+                    }
+                }
+            }
+
+            var methodName = invocation.TargetMethod?.Name ?? string.Empty;
+            var line = GetInvocationLine(invocation);
+            var key = $"{serviceTypeName}@{methodName}@{line}";
+            if (!_seenServiceUsages.Add(key))
+            {
+                return;
+            }
+
+            _handler.ServiceUsages.Add(new ServiceUsage(
+                serviceTypeName,
+                line,
+                _ownerMethod,
+                methodName,
+                requestType,
+                responseType,
+                dispatchKind,
+                targetType,
+                implementations));
         }
 
         private void RecordEfAccess(string? contextType, string entityName, string operation, int line)

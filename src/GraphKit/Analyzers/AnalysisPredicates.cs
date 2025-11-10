@@ -144,8 +144,20 @@ internal static class AnalysisPredicates
             return false;
         }
 
-        return MatchesName(method.Name, "Map", "ProjectTo", "MapAsync") &&
-               (IsMapperType(GetReceiverType(invocation)) || IsMapperType(method.ContainingType));
+        // Common AutoMapper APIs
+        if (MatchesName(method.Name, "Map", "ProjectTo", "MapAsync") &&
+            (IsMapperType(GetReceiverType(invocation)) || IsMapperType(method.ContainingType)))
+        {
+            return true;
+        }
+
+        // Projector-like helpers seen in some codebases
+        if (string.Equals(method.Name, "ProjectByIdAsync", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public static bool IsValidatorCall(IInvocationOperation invocation)
@@ -235,8 +247,7 @@ internal static class AnalysisPredicates
             }
         }
 
-        var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-        return MediatorInterfaces.Any(meta => display.Contains(meta, StringComparison.Ordinal));
+        return false;
     }
 
     private static bool IsMediatorHandler(INamedTypeSymbol? type)
@@ -282,8 +293,7 @@ internal static class AnalysisPredicates
             }
         }
 
-        var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-        return EntityFrameworkTypes.Any(meta => display.Contains(meta, StringComparison.Ordinal));
+        return false;
     }
 
     private static bool IsRepositoryType(ITypeSymbol? type)
@@ -321,6 +331,31 @@ internal static class AnalysisPredicates
             return false;
         }
 
+        if (type is INamedTypeSymbol named)
+        {
+            // Check inheritance chain by metadata name equality
+            var current = named;
+            while (current is not null)
+            {
+                var meta = current.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (string.Equals(meta, "System.Net.Http.HttpClient", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+                current = current.BaseType;
+            }
+
+            foreach (var iface in named.AllInterfaces)
+            {
+                var meta = iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (string.Equals(meta, "System.Net.Http.IHttpClientFactory", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // fallback to display name contains for unusual cases
         var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
         if (HttpClientTypes.Any(meta => display.Contains(meta, StringComparison.Ordinal)))
         {
@@ -330,11 +365,6 @@ internal static class AnalysisPredicates
         if (display.EndsWith("HttpClient", StringComparison.Ordinal))
         {
             return true;
-        }
-
-        if (type is INamedTypeSymbol named && named.BaseType is not null)
-        {
-            return IsHttpClientType(named.BaseType);
         }
 
         return false;
@@ -347,18 +377,11 @@ internal static class AnalysisPredicates
             return false;
         }
 
-        var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-        if (MapperTypes.Any(meta => display.Contains(meta, StringComparison.Ordinal)))
-        {
-            return true;
-        }
-
         if (type is INamedTypeSymbol named)
         {
             foreach (var iface in named.AllInterfaces)
             {
-                var ifaceName = iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-                if (MapperTypes.Any(meta => ifaceName.Contains(meta, StringComparison.Ordinal)))
+                if (MapperTypes.Any(meta => MatchesMetadataName(iface, meta)))
                 {
                     return true;
                 }
@@ -375,18 +398,11 @@ internal static class AnalysisPredicates
             return false;
         }
 
-        var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-        if (ValidatorTypes.Any(meta => display.Contains(meta, StringComparison.Ordinal)))
-        {
-            return true;
-        }
-
         if (type is INamedTypeSymbol named)
         {
             foreach (var iface in named.AllInterfaces)
             {
-                var ifaceName = iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-                if (ValidatorTypes.Any(meta => ifaceName.Contains(meta, StringComparison.Ordinal)))
+                if (ValidatorTypes.Any(meta => MatchesMetadataName(iface, meta)))
                 {
                     return true;
                 }

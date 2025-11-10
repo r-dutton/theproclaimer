@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
+using GraphKit.Constants;
+using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Graph;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
 
@@ -715,6 +719,373 @@ public sealed partial class ProjectAnalyzer
         return matches.Count == 1 ? matches[0] : null;
     }
 
+    internal bool TryResolveRequestDispatch(
+        FlowPointsToFacade pointsTo,
+        IInvocationOperation invocation,
+        string receiverTypeName,
+        IReadOnlyCollection<string>? implementations,
+        string assembly,
+        string project,
+        out string? targetType,
+        out string? requestType,
+        out string? responseType,
+        out string? dispatchKind)
+    {
+        targetType = null;
+        requestType = null;
+        responseType = null;
+        dispatchKind = null;
+
+        if (!IsRequestProcessorMethod(invocation.TargetMethod?.Name))
+        {
+            return false;
+        }
+
+        if (!IsRequestProcessorCandidate(receiverTypeName, implementations))
+        {
+            return false;
+        }
+
+        dispatchKind = EdgeKinds.RequestProcessorDispatch;
+
+        var requestArgument = invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
+        requestType = TryResolveConcreteType(pointsTo, requestArgument, assembly, project);
+
+        var processorInfo = TryResolveProcessorInfo(receiverTypeName, implementations);
+        string? metadataResponse = null;
+
+        if (processorInfo is not null)
+        {
+            metadataResponse = NormalizeTypeName(processorInfo.ResponseType, assembly, project);
+            var processorRequest = NormalizeTypeName(processorInfo.RequestType, assembly, project);
+            if (string.IsNullOrWhiteSpace(requestType))
+            {
+                requestType = processorRequest;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            requestType = TryExtractRequestTypeFromCandidates(receiverTypeName, implementations, assembly, project, out var genericResponse);
+            metadataResponse ??= genericResponse;
+        }
+
+        if (string.IsNullOrWhiteSpace(requestType))
+        {
+            return false;
+        }
+
+        targetType = requestType;
+        EnsureHandlerAnalysis(requestType);
+
+        responseType = metadataResponse;
+
+        var requestInfo = FindRequestByType(requestType, assembly, project, receiverTypeName);
+        if (requestInfo is not null)
+        {
+            var requestResponse = NormalizeTypeName(requestInfo.ResponseType, assembly, project);
+            if (!string.IsNullOrWhiteSpace(requestResponse))
+            {
+                responseType = requestResponse;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(responseType) && processorInfo is not null)
+        {
+            responseType = NormalizeTypeName(processorInfo.ResponseType, assembly, project);
+        }
+
+        if (string.IsNullOrWhiteSpace(responseType))
+        {
+            responseType = ResolveResponseFromMethod(invocation.TargetMethod, assembly, project);
+        }
+
+        return true;
+    }
+
+    private static bool IsRequestProcessorMethod(string? methodName)
+    {
+        if (string.IsNullOrWhiteSpace(methodName))
+        {
+            return false;
+        }
+
+        return methodName.Equals("Process", StringComparison.OrdinalIgnoreCase) ||
+               methodName.Equals("ProcessAsync", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsRequestProcessorCandidate(string serviceTypeName, IReadOnlyCollection<string>? implementations)
+    {
+        if (ContainsRequestProcessor(serviceTypeName))
+        {
+            return true;
+        }
+
+        if (implementations is not null)
+        {
+            foreach (var implementation in implementations)
+            {
+                if (ContainsRequestProcessor(implementation))
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (FindRequestProcessor(serviceTypeName) is not null)
+        {
+            return true;
+        }
+
+        if (implementations is not null)
+        {
+            foreach (var implementation in implementations)
+            {
+                if (FindRequestProcessor(implementation) is not null)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsRequestProcessor(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        return candidate.IndexOf("RequestProcessor", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private RequestProcessorInfo? TryResolveProcessorInfo(string serviceTypeName, IReadOnlyCollection<string>? implementations)
+    {
+        if (FindRequestProcessor(serviceTypeName) is { } processor)
+        {
+            return processor;
+        }
+
+        if (implementations is not null)
+        {
+            foreach (var implementation in implementations)
+            {
+                if (FindRequestProcessor(implementation) is { } match)
+                {
+                    return match;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private string? TryExtractRequestTypeFromCandidates(
+        string receiverTypeName,
+        IReadOnlyCollection<string>? implementations,
+        string assembly,
+        string project,
+        out string? responseType)
+    {
+        responseType = null;
+
+        foreach (var candidate in EnumerateRequestProcessorCandidates(receiverTypeName, implementations))
+        {
+            var genericArguments = SplitGenericArguments(candidate);
+            if (genericArguments.Count == 0)
+            {
+                continue;
+            }
+
+            var requestCandidate = NormalizeTypeName(genericArguments[0], assembly, project);
+            if (string.IsNullOrWhiteSpace(requestCandidate))
+            {
+                continue;
+            }
+
+            if (genericArguments.Count > 1)
+            {
+                responseType ??= NormalizeTypeName(genericArguments[1], assembly, project);
+            }
+
+            return requestCandidate;
+        }
+
+        return null;
+    }
+
+    private IEnumerable<string> EnumerateRequestProcessorCandidates(string receiverTypeName, IReadOnlyCollection<string>? implementations)
+    {
+        if (!string.IsNullOrWhiteSpace(receiverTypeName))
+        {
+            yield return receiverTypeName;
+        }
+
+        if (implementations is null)
+        {
+            yield break;
+        }
+
+        foreach (var implementation in implementations)
+        {
+            if (!string.IsNullOrWhiteSpace(implementation))
+            {
+                yield return implementation;
+            }
+        }
+    }
+
+    private string? TryResolveConcreteType(
+        FlowPointsToFacade pointsTo,
+        IOperation? operation,
+        string assembly,
+        string project)
+    {
+        if (operation is null)
+        {
+            return null;
+        }
+
+        if (operation is IConversionOperation conversion)
+        {
+            return TryResolveConcreteType(pointsTo, conversion.Operand, assembly, project);
+        }
+
+        var pointed = pointsTo.TryGetLocationTypes(operation);
+        if (!pointed.IsDefaultOrEmpty)
+        {
+            string? fallback = null;
+            foreach (var candidate in pointed)
+            {
+                var resolved = QualifySymbol(candidate, assembly, project);
+                if (!IsMeaningfulType(resolved))
+                {
+                    continue;
+                }
+
+                if (candidate.TypeKind is TypeKind.Class or TypeKind.Struct)
+                {
+                    return resolved;
+                }
+
+                fallback ??= resolved;
+            }
+
+            if (!string.IsNullOrWhiteSpace(fallback))
+            {
+                return fallback;
+            }
+        }
+
+        var typeFallback = QualifySymbol(operation.Type, assembly, project);
+        return IsMeaningfulType(typeFallback) ? typeFallback : null;
+    }
+
+    private string? ResolveResponseFromMethod(IMethodSymbol? methodSymbol, string assembly, string project)
+    {
+        if (methodSymbol is null)
+        {
+            return null;
+        }
+
+        if (methodSymbol.IsGenericMethod)
+        {
+            foreach (var typeArgument in methodSymbol.TypeArguments)
+            {
+                var resolved = QualifySymbol(typeArgument, assembly, project);
+                if (IsMeaningfulType(resolved))
+                {
+                    return resolved;
+                }
+            }
+        }
+
+        var returnType = methodSymbol.ReturnType;
+        if (returnType is INamedTypeSymbol named && named.TypeArguments.Length == 1 && IsTaskLike(named))
+        {
+            var resolved = QualifySymbol(named.TypeArguments[0], assembly, project);
+            if (IsMeaningfulType(resolved))
+            {
+                return resolved;
+            }
+        }
+        else
+        {
+            var resolved = QualifySymbol(returnType, assembly, project);
+            if (IsMeaningfulType(resolved))
+            {
+                return resolved;
+            }
+        }
+
+        return null;
+    }
+
+    private string? QualifySymbol(ITypeSymbol? symbol, string assembly, string project)
+    {
+        if (symbol is null)
+        {
+            return null;
+        }
+
+        var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        var qualified = QualifyTypeName(display, assembly, project);
+        return string.IsNullOrWhiteSpace(qualified) ? display : qualified;
+    }
+
+    private string? NormalizeTypeName(string? typeName, string assembly, string project)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        var qualified = QualifyTypeName(typeName, assembly, project);
+        var candidate = string.IsNullOrWhiteSpace(qualified) ? typeName : qualified;
+        return IsMeaningfulType(candidate) ? candidate : null;
+    }
+
+    private static bool IsMeaningfulType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        if (IsVoidLike(typeName))
+        {
+            return false;
+        }
+
+        return !IsGenericPlaceholder(typeName);
+    }
+
+    private static bool IsVoidLike(string typeName)
+    {
+        return typeName.Equals("void", StringComparison.OrdinalIgnoreCase) ||
+               typeName.Equals("System.Void", StringComparison.OrdinalIgnoreCase) ||
+               typeName.Equals("Unit", StringComparison.OrdinalIgnoreCase) ||
+               typeName.Equals("MediatR.Unit", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTaskLike(INamedTypeSymbol symbol)
+    {
+        if (symbol is null)
+        {
+            return false;
+        }
+
+        if (symbol.Name is not ("Task" or "ValueTask"))
+        {
+            return false;
+        }
+
+        var ns = symbol.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        return string.Equals(ns, "System.Threading.Tasks", StringComparison.Ordinal);
+    }
+
     private IReadOnlyList<string> ResolvePipelineBehaviorsForRequest(string requestType)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1082,39 +1453,304 @@ public sealed partial class ProjectAnalyzer
         return builder.ToString();
     }
 
-    private string NormalizeServiceType(string serviceType)
+    private string NormalizeServiceType(string serviceType, string? preferredAssembly = null, string? preferredProject = null)
     {
         if (string.IsNullOrWhiteSpace(serviceType))
         {
             return serviceType;
         }
 
-        if (_services.TryGetValue(serviceType, out var serviceInfo))
+        _services.TryGetValue(serviceType, out var directCandidate);
+
+        if (TryResolveScopedService(serviceType, preferredAssembly, preferredProject, out var scopedFqdn))
         {
-            return serviceInfo.Fqdn;
+            return scopedFqdn;
         }
 
         var simple = GetSimpleIdentifier(serviceType);
-        var match = _services.Values.FirstOrDefault(s =>
-            s.Fqdn.Equals(serviceType, StringComparison.OrdinalIgnoreCase) ||
-            s.Name.Equals(simple, StringComparison.OrdinalIgnoreCase));
-        if (match is not null)
+        if (!string.IsNullOrWhiteSpace(simple) &&
+            TryResolveScopedService(simple!, preferredAssembly, preferredProject, out var simpleScoped))
         {
-            return match.Fqdn;
+            return simpleScoped;
         }
 
-        var registration = FindServiceRegistration(serviceType) ?? FindServiceRegistration(simple);
+        var registration = FindServiceRegistration(serviceType, preferredTargetType: null, preferredAssembly, preferredProject)
+            ?? (string.IsNullOrWhiteSpace(simple) ? null : FindServiceRegistration(simple!, preferredTargetType: null, preferredAssembly, preferredProject));
+
         if (registration is not null)
         {
             var implementation = registration.ImplementationType;
             if (!string.IsNullOrWhiteSpace(implementation) &&
                 !string.Equals(implementation, serviceType, StringComparison.OrdinalIgnoreCase))
             {
-                return NormalizeServiceType(implementation);
+                var nextAssembly = string.IsNullOrWhiteSpace(registration.Assembly) ? preferredAssembly : registration.Assembly;
+                var nextProject = string.IsNullOrWhiteSpace(registration.Project) ? preferredProject : registration.Project;
+                return NormalizeServiceType(implementation!, nextAssembly, nextProject);
             }
         }
 
-        return serviceType;
+        return directCandidate?.Fqdn ?? serviceType;
+    }
+
+    private bool TryResolveScopedService(string lookupKey, string? preferredAssembly, string? preferredProject, out string fqdn)
+    {
+        fqdn = lookupKey;
+        if (string.IsNullOrWhiteSpace(lookupKey))
+        {
+            return false;
+        }
+
+        if (_services.TryGetValue(lookupKey, out var direct) &&
+            MatchesServiceScope(direct, preferredAssembly, preferredProject))
+        {
+            fqdn = direct.Fqdn;
+            return true;
+        }
+
+        var matches = _services.Values
+            .Where(s => string.Equals(s.Fqdn, lookupKey, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Name, lookupKey, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            return false;
+        }
+
+        var selected = SelectScopedService(matches, lookupKey, preferredAssembly, preferredProject);
+        if (selected is null)
+        {
+            return false;
+        }
+
+        fqdn = selected.Fqdn;
+        return true;
+    }
+
+    private static bool MatchesServiceScope(ServiceInfo service, string? preferredAssembly, string? preferredProject)
+    {
+        if (!string.IsNullOrWhiteSpace(preferredProject) &&
+            !string.Equals(service.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(preferredAssembly))
+        {
+            return true;
+        }
+
+        if (string.Equals(service.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var preferredRoot = GetAssemblyRoot(preferredAssembly);
+        return !string.IsNullOrWhiteSpace(preferredRoot) &&
+            string.Equals(GetAssemblyRoot(service.Assembly), preferredRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsServiceUsageInScope(
+        ServiceUsage usage,
+        string? preferredAssembly,
+        string? preferredProject)
+    {
+        if (IsFrameworkServiceType(usage.ServiceType) ||
+            usage.ImplementationTypes is { Count: > 0 } impls && impls.Any(IsFrameworkServiceType))
+        {
+            return true;
+        }
+
+        if (_services.TryGetValue(usage.ServiceType, out var directService) &&
+            MatchesServiceScope(directService, preferredAssembly, preferredProject))
+        {
+            return true;
+        }
+
+        var implementations = usage.ImplementationTypes is { Count: > 0 }
+            ? usage.ImplementationTypes.Where(static t => !string.IsNullOrWhiteSpace(t)).ToList()
+            : new List<string>();
+
+        foreach (var implementation in implementations)
+        {
+            if (_services.TryGetValue(implementation, out var implInfo) &&
+                MatchesServiceScope(implInfo, preferredAssembly, preferredProject))
+            {
+                return true;
+            }
+
+            if (TryResolveScopedService(implementation, preferredAssembly, preferredProject, out var scoped) &&
+                _services.TryGetValue(scoped, out var scopedInfo) &&
+                MatchesServiceScope(scopedInfo, preferredAssembly, preferredProject))
+            {
+                return true;
+            }
+        }
+
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+        if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot))
+        {
+            if (SharesAssemblyRoot(usage.ServiceType, preferredAssemblyRoot))
+            {
+                return true;
+            }
+
+            foreach (var implementation in implementations)
+            {
+                if (SharesAssemblyRoot(implementation, preferredAssemblyRoot))
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (implementations.Count == 0)
+        {
+            return MatchesServiceScopeFallback(usage.ServiceType, preferredAssembly, preferredProject);
+        }
+
+        return MatchesServiceScopeFallback(usage.ServiceType, preferredAssembly, preferredProject);
+    }
+
+    private bool MatchesServiceScopeFallback(
+        string serviceType,
+        string? preferredAssembly,
+        string? preferredProject)
+    {
+        if (_services.TryGetValue(serviceType, out var serviceInfo))
+        {
+            return MatchesServiceScope(serviceInfo, preferredAssembly, preferredProject);
+        }
+
+        return string.IsNullOrWhiteSpace(preferredProject) && string.IsNullOrWhiteSpace(preferredAssembly);
+    }
+
+    private static readonly HashSet<string> FrameworkServiceSimpleNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "IHttpContextAccessor",
+        "HttpContext",
+        "HttpRequest",
+        "ILogger",
+        "IServiceProvider",
+        "IServiceScopeFactory",
+        "IMemoryCache",
+        "IDistributedCache"
+    };
+
+    private static bool IsFrameworkServiceType(string? serviceType)
+    {
+        if (string.IsNullOrWhiteSpace(serviceType))
+        {
+            return false;
+        }
+
+        return serviceType.StartsWith("Microsoft.AspNetCore.", StringComparison.OrdinalIgnoreCase) ||
+               serviceType.StartsWith("Microsoft.Extensions.", StringComparison.OrdinalIgnoreCase) ||
+               serviceType.StartsWith("System.Net.Http.", StringComparison.OrdinalIgnoreCase) ||
+               FrameworkServiceSimpleNames.Contains(GetTopLevelSimpleIdentifier(serviceType));
+    }
+
+    private static bool SharesAssemblyRoot(string? serviceType, string preferredRoot)
+    {
+        if (string.IsNullOrWhiteSpace(serviceType))
+        {
+            return false;
+        }
+
+        var candidateRoot = GetTypeAssemblyRoot(serviceType);
+        return !string.IsNullOrWhiteSpace(candidateRoot) &&
+            string.Equals(candidateRoot, preferredRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private ServiceInfo? SelectScopedService(
+        IEnumerable<ServiceInfo> candidates,
+        string lookupKey,
+        string? preferredAssembly,
+        string? preferredProject)
+    {
+        var list = candidates as IList<ServiceInfo> ?? candidates.ToList();
+        if (list.Count == 0)
+        {
+            return null;
+        }
+
+        var lookupSimple = GetTopLevelSimpleIdentifier(lookupKey);
+        var lookupNamespace = GetTypeNamespace(lookupKey);
+        var preferredAssemblyRoot = GetAssemblyRoot(preferredAssembly);
+
+        ServiceInfo? best = null;
+        var bestScore = int.MinValue;
+
+        foreach (var candidate in list)
+        {
+            var score = 0;
+
+            if (string.Equals(candidate.Fqdn, lookupKey, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 1_000;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lookupSimple) &&
+                string.Equals(candidate.Name, lookupSimple, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 250;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lookupNamespace) &&
+                candidate.Fqdn.StartsWith(lookupNamespace, StringComparison.OrdinalIgnoreCase))
+            {
+                score += lookupNamespace.Length;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredProject) &&
+                string.Equals(candidate.Project, preferredProject, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 500;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredAssembly))
+            {
+                if (string.Equals(candidate.Assembly, preferredAssembly, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 400;
+                }
+                else if (!string.IsNullOrWhiteSpace(preferredAssemblyRoot) &&
+                         string.Equals(GetAssemblyRoot(candidate.Assembly), preferredAssemblyRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 250;
+                }
+            }
+
+            if (best is null || score > bestScore ||
+                (score == bestScore && CompareServiceInfos(candidate, best) < 0))
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best ?? list
+            .OrderBy(info => info.FilePath ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(info => info.Fqdn, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private static int CompareServiceInfos(ServiceInfo left, ServiceInfo right)
+    {
+        var fileCompare = StringComparer.OrdinalIgnoreCase.Compare(left.FilePath ?? string.Empty, right.FilePath ?? string.Empty);
+        if (fileCompare != 0)
+        {
+            return fileCompare;
+        }
+
+        var leftLine = left.Span.StartLine;
+        var rightLine = right.Span.StartLine;
+        if (leftLine != rightLine)
+        {
+            return leftLine.CompareTo(rightLine);
+        }
+
+        return StringComparer.OrdinalIgnoreCase.Compare(left.Fqdn, right.Fqdn);
     }
 
     private string? TryResolveProjectionSource(ExpressionSyntax expression, IReadOnlyDictionary<string, string?> parameterTypes, Dictionary<string, string> localVariables, IReadOnlyDictionary<string, FieldDescriptor> fieldLookup, string? preferredAssembly = null, string? preferredProject = null)
@@ -1230,6 +1866,50 @@ public sealed partial class ProjectAnalyzer
                     return QualifyTypeName(descriptor.Type, preferredAssembly, preferredProject);
                 }
             }
+        }
+
+        return null;
+    }
+
+    private string? TryResolveExpressionType(
+        IOperation? operation,
+        IReadOnlyDictionary<string, string?> parameterTypes,
+        Dictionary<string, string> localVariables,
+        string? preferredAssembly = null,
+        string? preferredProject = null,
+        IReadOnlyDictionary<string, FieldDescriptor>? fieldLookup = null)
+    {
+        if (operation is null)
+        {
+            return null;
+        }
+
+        if (operation.Type is { } typeSymbol)
+        {
+            var qualified = QualifySymbol(typeSymbol, preferredAssembly ?? string.Empty, preferredProject ?? string.Empty);
+            if (!string.IsNullOrWhiteSpace(qualified))
+            {
+                return qualified;
+            }
+        }
+
+        if (operation is ILocalReferenceOperation localReference &&
+            localVariables.TryGetValue(localReference.Local.Name, out var localType) &&
+            !string.IsNullOrWhiteSpace(localType))
+        {
+            return QualifyTypeName(localType, preferredAssembly, preferredProject);
+        }
+
+        if (operation is IParameterReferenceOperation parameterReference &&
+            parameterTypes.TryGetValue(parameterReference.Parameter.Name, out var parameterType) &&
+            !string.IsNullOrWhiteSpace(parameterType))
+        {
+            return QualifyTypeName(parameterType!, preferredAssembly, preferredProject);
+        }
+
+        if (operation.Syntax is ExpressionSyntax expressionSyntax)
+        {
+            return TryResolveExpressionType(expressionSyntax, parameterTypes, localVariables, preferredAssembly, preferredProject, fieldLookup);
         }
 
         return null;

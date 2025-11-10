@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using GraphKit.FlowAnalysis.Dependencies;
 
@@ -21,26 +22,73 @@ namespace GraphKit.FlowAnalysis.Core
             ValueContent = valueContent;
         }
 
+        public virtual void Visit(ControlFlowGraph graph)
+        {
+            foreach (var block in graph.Blocks)
+            {
+                Visit(block);
+            }
+        }
+
+        public virtual void Visit(BasicBlock block)
+        {
+            foreach (var operation in block.Operations)
+            {
+                Visit(operation);
+            }
+
+            if (block.BranchValue is { } branchOperation)
+            {
+                Visit(branchOperation);
+            }
+        }
+
         public virtual void Visit(IOperation op)
         {
             switch (op)
             {
-                case IInvocationOperation inv: VisitInvocation(inv); break;
-                case IAssignmentOperation asg: VisitAssignment(asg); break;
-                default:
-                    foreach (var child in op.ChildOperations) Visit(child);
+                case IInvocationOperation invocation:
+                    VisitInvocation(invocation);
                     break;
+                case ISimpleAssignmentOperation simpleAssignment:
+                    OnAssignment(simpleAssignment);
+                    break;
+                case IAssignmentOperation assignment:
+                    VisitAssignment(assignment);
+                    break;
+                case IReturnOperation returnOperation:
+                    OnReturn(returnOperation);
+                    break;
+                case IConditionalOperation conditional:
+                    OnConditional(conditional);
+                    break;
+            }
+
+            foreach (var child in op.ChildOperations)
+            {
+                Visit(child);
             }
         }
 
         protected virtual void VisitAssignment(IAssignmentOperation op)
         {
-            foreach (var child in op.ChildOperations) Visit(child);
+            foreach (var child in op.ChildOperations)
+            {
+                Visit(child);
+            }
         }
 
         protected virtual void VisitInvocation(IInvocationOperation op)
         {
-            foreach (var arg in op.Arguments) Visit(arg.Value);
+            foreach (var argument in op.Arguments)
+            {
+                Visit(argument.Value);
+            }
         }
+
+        // Optional hooks for derived visitors
+        protected virtual void OnReturn(IReturnOperation op) { }
+        protected virtual void OnAssignment(ISimpleAssignmentOperation op) { }
+        protected virtual void OnConditional(IConditionalOperation op) { }
     }
 }

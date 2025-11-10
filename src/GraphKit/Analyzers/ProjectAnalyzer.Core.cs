@@ -75,7 +75,7 @@ public sealed partial class ProjectAnalyzer
         _workspaceIndex = FlowWorkspaceIndex.Load(_workspaceRoot);
         _facts = facts ?? new FactWriter();
         _configuration = EnsureConfiguration(configuration);
-        _interproceduralConfiguration = _configuration.ToInterproceduralConfiguration();
+        _interproceduralConfiguration = _configuration.ToInterproceduralSettings();
         LoadFlowMap();
     }
 
@@ -823,8 +823,7 @@ public sealed partial class ProjectAnalyzer
             var document = workspace.AddDocument(
                 legacyProject.Id,
                 documentName,
-                tree.GetText(cancellationToken),
-                filePath: filePath);
+                tree.GetText(cancellationToken));
 
             var model = project.GetModel(tree);
             results.Add((document, root, model));

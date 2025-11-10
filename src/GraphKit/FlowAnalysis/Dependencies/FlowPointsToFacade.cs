@@ -3,189 +3,243 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Threading;
 using Analyzer.Utilities;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 using GraphKit.FlowAnalysis.Interprocedural;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
-using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.CopyAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.PointsToAnalysis;
 using Microsoft.CodeAnalysis.Operations;
+using Microsoft.CodeAnalysis.Text;
 
-namespace GraphKit.FlowAnalysis.Dependencies;
-
-public sealed class FlowPointsToFacade
+namespace GraphKit.FlowAnalysis.Dependencies
 {
-    private static readonly AnalyzerOptions EmptyAnalyzerOptions = new(ImmutableArray<AdditionalText>.Empty);
-
-    private static readonly DiagnosticDescriptor FlowAnalysisRule = new(
-        id: "GKFLOW0002",
-        title: "GraphKit points-to analysis",
-        messageFormat: "GraphKit points-to analysis placeholder",
-        category: "GraphKit",
-        defaultSeverity: DiagnosticSeverity.Hidden,
-        isEnabledByDefault: true);
-
-    private readonly ConditionalWeakTable<Compilation, WellKnownTypeProvider> _wellKnownTypeProviders = new();
-    private readonly ConcurrentDictionary<FlowAnalysisCacheKey, Lazy<PointsToBundle?>> _analysisCache = new();
-
-    public FlowPointsToFacade(
-        FlowInterproceduralConfiguration configuration,
-        FlowCallsitePredicate pruningPredicate)
+    public sealed class FlowPointsToFacade
     {
-        Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        PruningPredicate = pruningPredicate ?? throw new ArgumentNullException(nameof(pruningPredicate));
-    }
+        private static readonly AnalyzerOptions EmptyAnalyzerOptions = new(ImmutableArray<AdditionalText>.Empty);
 
-    public FlowInterproceduralConfiguration Configuration { get; }
+        private static readonly DiagnosticDescriptor FlowAnalysisRule = new(
+            id: "GKFLOW0002",
+            title: "GraphKit points-to analysis",
+            messageFormat: "GraphKit points-to analysis placeholder",
+            category: "GraphKit",
+            defaultSeverity: DiagnosticSeverity.Hidden,
+            isEnabledByDefault: true);
 
-    public FlowCallsitePredicate PruningPredicate { get; }
+        private static readonly PointsToAnalysisResult? PlaceholderResult = null;
 
-    public PointsToAbstractValue? TryGetPointsToValue(IOperation operation)
-        => TryGetPointsToResult(operation)?[operation];
+        private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
+            static _ => false,
+            static _ => false,
+            static _ => false);
 
-    public PointsToAnalysisResult? TryGetPointsToResult(IOperation operation)
-    {
-        if (operation is null)
+        private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<PointsToAnalysisResult?>> _analysisCache = new();
+
+        public FlowPointsToFacade(
+            InterproceduralSettings configuration,
+            FlowCallsitePredicate pruningPredicate)
         {
-            return null;
+            Configuration = configuration;
+            PruningPredicate = pruningPredicate;
         }
 
-        if (operation.SemanticModel is not { } model)
+        public InterproceduralSettings Configuration { get; }
+
+        public FlowCallsitePredicate PruningPredicate { get; }
+
+        public bool TryGetAbstractValue(IOperation operation, out PointsToAbstractValue value)
         {
-            return null;
+            value = null!;
+
+            if (operation is null)
+            {
+                return false;
+            }
+
+            if (operation.SemanticModel is not { } model)
+            {
+                return false;
+            }
+
+            var owningSymbol = model.GetEnclosingSymbol(operation.Syntax.SpanStart);
+            if (owningSymbol is null)
+            {
+                return false;
+            }
+
+            if (!TryGetAnalysis(owningSymbol, model, operation.Syntax, out var analysis) || analysis is null)
+            {
+                return false;
+            }
+
+            value = analysis[operation];
+            return value.Kind != PointsToAbstractValueKind.Invalid;
         }
 
-        var owningSymbol = model.GetEnclosingSymbol(operation.Syntax.SpanStart);
-        if (owningSymbol is null)
+        public ImmutableArray<ITypeSymbol> GetLocationTypes(PointsToAbstractValue value)
         {
-            return null;
+            if (value is null || value.Kind != PointsToAbstractValueKind.KnownLocations)
+            {
+                return ImmutableArray<ITypeSymbol>.Empty;
+            }
+
+            var builder = ImmutableArray.CreateBuilder<ITypeSymbol>();
+            foreach (var location in value.Locations)
+            {
+                if (location.LocationType is { } type)
+                {
+                    builder.Add(type);
+                }
+            }
+
+            return builder.ToImmutable();
         }
 
-        if (!TryGetAnalysis(owningSymbol, model, operation.Syntax, out var bundle))
+        public ImmutableArray<ITypeSymbol> TryGetLocationTypes(IOperation operation)
         {
-            return null;
+            return TryGetAbstractValue(operation, out var value)
+                ? GetLocationTypes(value)
+                : ImmutableArray<ITypeSymbol>.Empty;
         }
 
-        return bundle?.PointsTo;
-    }
-
-    public CopyAnalysisResult? TryGetCopyResult(IOperation operation)
-    {
-        if (operation is null)
+        private bool TryGetAnalysis(
+            ISymbol owningSymbol,
+            SemanticModel contextModel,
+            SyntaxNode contextSyntax,
+            out PointsToAnalysisResult? analysis)
         {
-            return null;
+            analysis = null;
+            var declaration = FindDeclarationSyntax(owningSymbol, contextSyntax);
+            if (declaration is null)
+            {
+                return false;
+            }
+
+            var key = new AnalysisCacheKey(declaration.SyntaxTree, declaration.Span);
+            var lazy = _analysisCache.GetOrAdd(key, _ => new Lazy<PointsToAnalysisResult?>(() =>
+                ComputeAnalysis(owningSymbol, declaration, contextModel), LazyThreadSafetyMode.ExecutionAndPublication));
+
+            analysis = lazy.Value;
+            return analysis is not null;
         }
 
-        if (operation.SemanticModel is not { } model)
+        private PointsToAnalysisResult? ComputeAnalysis(
+            ISymbol owningSymbol,
+            SyntaxNode declarationSyntax,
+            SemanticModel contextModel)
         {
-            return null;
-        }
+            try
+            {
+                var compilation = contextModel.Compilation;
 
-        var owningSymbol = model.GetEnclosingSymbol(operation.Syntax.SpanStart);
-        if (owningSymbol is null)
-        {
-            return null;
-        }
+                if (owningSymbol is IMethodSymbol methodSymbol)
+                {
+                    var methodAnalysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
+                        compilation,
+                        methodSymbol,
+                        Configuration,
+                        CancellationToken.None);
 
-        if (!TryGetAnalysis(owningSymbol, model, operation.Syntax, out var bundle))
-        {
-            return null;
-        }
+                    if (!methodAnalysis.PointsToComputed)
+                    {
+                        var methodContext = methodAnalysis.Context;
+                        var declaration = methodContext.Declaration ?? declarationSyntax;
+                        var methodSemanticModel = methodContext.SemanticModel ?? compilation.GetSemanticModel(declaration.SyntaxTree);
+                        var controlFlow = methodContext.ControlFlowGraph ?? ControlFlowGraph.Create(declaration, methodSemanticModel, CancellationToken.None);
 
-        return bundle?.Copy;
-    }
+                        PointsToAnalysisResult? computed = PlaceholderResult;
+                        if (controlFlow is not null)
+                        {
+                            computed = RunPointsToAnalysis(controlFlow, owningSymbol, compilation);
+                        }
 
-    private bool TryGetAnalysis(
-        ISymbol owningSymbol,
-        SemanticModel contextModel,
-        SyntaxNode contextSyntax,
-        out PointsToBundle? bundle)
-    {
-        bundle = null;
+                        methodAnalysis.PointsToAnalysis = computed;
+                        methodAnalysis.PointsToComputed = true;
+                    }
 
-        var declaration = FindDeclarationSyntax(owningSymbol, contextSyntax);
-        if (declaration is null)
-        {
-            return false;
-        }
+                    return methodAnalysis.PointsToAnalysis;
+                }
 
-        var key = new FlowAnalysisCacheKey(declaration.SyntaxTree, declaration.Span);
-        var lazy = _analysisCache.GetOrAdd(key, _ => new Lazy<PointsToBundle?>(() =>
-            ComputeAnalysis(owningSymbol, declaration, contextModel), LazyThreadSafetyMode.ExecutionAndPublication));
-
-        bundle = lazy.Value;
-        return bundle is not null;
-    }
-
-    private PointsToBundle? ComputeAnalysis(
-        ISymbol owningSymbol,
-        SyntaxNode declarationSyntax,
-        SemanticModel contextModel)
-    {
-        try
-        {
-            var compilation = contextModel.Compilation;
-            var semanticModel = compilation.GetSemanticModel(declarationSyntax.SyntaxTree);
-            var controlFlow = ControlFlowGraph.Create(declarationSyntax, semanticModel, CancellationToken.None);
-            if (controlFlow is null)
+                var semanticModel = compilation.GetSemanticModel(declarationSyntax.SyntaxTree);
+                var cfg = ControlFlowGraph.Create(declarationSyntax, semanticModel, CancellationToken.None);
+                return cfg is null ? null : RunPointsToAnalysis(cfg, owningSymbol, compilation);
+            }
+            catch (Exception ex) when (IsBenignAnalysisException(ex))
             {
                 return null;
             }
+        }
 
-            var wellKnownProvider = GetWellKnownTypeProvider(compilation);
-            var interprocedural = InterproceduralAnalysisConfiguration.Create(
+        private PointsToAnalysisResult? RunPointsToAnalysis(
+            ControlFlowGraph controlFlowGraph,
+            ISymbol owningSymbol,
+            Compilation compilation)
+        {
+            var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
+            var settings = Configuration;
+
+            var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
                 EmptyAnalyzerOptions,
-                FlowAnalysisRule,
-                controlFlow,
+                ImmutableArray.Create(FlowAnalysisRule),
+                controlFlowGraph,
                 compilation,
-                Configuration.AnalysisKind,
-                Configuration.MaxInterproceduralCallChainLength,
-                Configuration.MaxInterproceduralLambdaOrLocalFunctionCallChainLength);
+                settings.Kind,
+                (uint)Math.Max(0, settings.MaxCallChainLength),
+                (uint)Math.Max(0, settings.MaxLambdaOrLocalFunctionDepth));
 
-            var pointsToResult = PointsToAnalysis.TryGetOrComputeResult(
-                controlFlow,
+            return PointsToAnalysis.TryGetOrComputeResult(
+                controlFlowGraph,
                 owningSymbol,
                 EmptyAnalyzerOptions,
                 wellKnownProvider,
                 PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
-                out var copyAnalysisResult,
-                interprocedural,
-                interproceduralAnalysisPredicate: null,
-                pessimisticAnalysis: false,
-                performCopyAnalysis: true);
-
-            return new PointsToBundle(pointsToResult, copyAnalysisResult);
+                interproceduralConfiguration,
+                NoOpPredicate,
+                false,
+                false,
+                false);
         }
-        catch (Exception ex) when (IsBenignAnalysisException(ex))
-        {
-            return null;
-        }
-    }
 
-    private WellKnownTypeProvider GetWellKnownTypeProvider(Compilation compilation)
-        => _wellKnownTypeProviders.GetValue(compilation, static c => WellKnownTypeProvider.GetOrCreate(c));
-
-    private static SyntaxNode? FindDeclarationSyntax(ISymbol symbol, SyntaxNode contextSyntax)
-    {
-        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        private static SyntaxNode? FindDeclarationSyntax(ISymbol symbol, SyntaxNode contextSyntax)
         {
-            var syntax = reference.GetSyntax();
-            if (syntax.SyntaxTree == contextSyntax.SyntaxTree)
+            foreach (var reference in symbol.DeclaringSyntaxReferences)
             {
-                return syntax;
+                var syntax = reference.GetSyntax();
+                if (syntax.SyntaxTree == contextSyntax.SyntaxTree)
+                {
+                    return syntax;
+                }
             }
+
+            return symbol.DeclaringSyntaxReferences.Length > 0
+                ? symbol.DeclaringSyntaxReferences[0].GetSyntax()
+                : null;
         }
 
-        return symbol.DeclaringSyntaxReferences.Length > 0
-            ? symbol.DeclaringSyntaxReferences[0].GetSyntax()
-            : null;
+        private static bool IsBenignAnalysisException(Exception exception)
+            => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
+
+        private readonly struct AnalysisCacheKey : IEquatable<AnalysisCacheKey>
+        {
+            public AnalysisCacheKey(SyntaxTree tree, TextSpan span)
+            {
+                Tree = tree;
+                Span = span;
+            }
+
+            public SyntaxTree Tree { get; }
+
+            public TextSpan Span { get; }
+
+            public bool Equals(AnalysisCacheKey other)
+                => ReferenceEquals(Tree, other.Tree) && Span.Equals(other.Span);
+
+            public override bool Equals(object? obj)
+                => obj is AnalysisCacheKey other && Equals(other);
+
+            public override int GetHashCode()
+                => HashCode.Combine(Tree, Span.Start, Span.Length);
+        }
     }
-
-    private static bool IsBenignAnalysisException(Exception exception)
-        => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
-
-    private sealed record PointsToBundle(
-        PointsToAnalysisResult? PointsTo,
-        CopyAnalysisResult? Copy);
 }

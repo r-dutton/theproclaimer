@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using GraphKit.Constants;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
@@ -9,7 +10,7 @@ using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -120,6 +121,17 @@ public sealed partial class ProjectAnalyzer
 
         var serviceInfo = new ServiceInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
         var model = project.GetModel(tree);
+        INamedTypeSymbol? classSymbol = null;
+        try
+        {
+            classSymbol = model.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
+        }
+        catch (ArgumentException)
+        {
+            classSymbol = null;
+        }
+
+        classSymbol ??= project.Compilation.GetTypeByMetadataName(fqdn);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
         var valueContent = CreateValueContentFacade(callsitePredicate);
@@ -174,8 +186,6 @@ public sealed partial class ProjectAnalyzer
                     localStringValues[left.Identifier.Text] = assignedValue;
                 }
             }
-
-            var routeHints = CollectRouteHints(tree, method);
 
             foreach (var memberAccess in Descendants<MemberAccessExpressionSyntax>(method))
             {
@@ -235,54 +245,7 @@ public sealed partial class ProjectAnalyzer
                     recordedUsage = true;
                 }
 
-                if (invocation is not null &&
-                    methodName is not null &&
-                    BaseServiceInvocationNames.Contains(methodName))
-                {
-                    var baseServiceType = ResolveImplementationType(typeName, serviceInfo.Assembly, serviceInfo.Project) ?? typeName;
-                    if (CaptureBaseServiceInvocation(
-                        serviceInfo,
-                        baseServiceType,
-                        invocation,
-                        routeHints,
-                        tree,
-                        serviceMethodName,
-                        methodName))
-                    {
-                        recordedUsage = true;
-                    }
-                }
-
-                if (IsClientType(baseTypeName) || IsClientType(resolvedBaseType))
-                {
-                    var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
-                        ? resolvedBaseType
-                        : baseTypeName;
-
-                    var clientMethod = methodName ?? memberAccess.Name switch
-                    {
-                        GenericNameSyntax genericName => genericName.Identifier.Text,
-                        IdentifierNameSyntax identifierName => identifierName.Identifier.Text,
-                        _ => memberAccess.Name.ToString()
-                    };
-
-                    var normalizedVerb = NormalizeHttpVerb(clientMethod);
-                    var httpMethod = normalizedVerb ?? clientMethod?.ToUpperInvariant() ?? string.Empty;
-
-                    RecordHttpClientInvocation(
-                        serviceInfo,
-                        clientType,
-                        clientMethod,
-                        httpMethod,
-                        invocation,
-                        tree,
-                        routeHints,
-                        localStringValues,
-                        serviceMethodName,
-                        line);
-
-                    recordedUsage = true;
-                }
+                // HTTP wrappers and direct HttpClient calls handled via ServiceOperationVisitor (CFG).
 
                 if (TryResolveOptionsType(resolvedType) is { } resolvedOptionsType)
                 {
@@ -319,8 +282,9 @@ public sealed partial class ProjectAnalyzer
                     recordedUsage = true;
                 }
 
-                var normalizedServiceType = NormalizeServiceType(resolvedType ?? typeName);
+                var normalizedServiceType = NormalizeServiceType(resolvedType ?? typeName, project.AssemblyName, project.RelativeDirectory);
                 var normalizedSimple = GetTopLevelSimpleIdentifier(normalizedServiceType);
+
                 var shouldSkipServiceUsage = !descriptor.IsReadOnly &&
                     !IsLikelyInjectedServiceType(typeName) &&
                     !IsLikelyInjectedServiceType(resolvedType) &&
@@ -386,6 +350,8 @@ public sealed partial class ProjectAnalyzer
                                 }
                             }
 
+                            EnsureHandlerAnalysis(dispatchRequestType);
+
                             dispatchKind = "requestprocessor.dispatch";
                         }
                     }
@@ -419,48 +385,7 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
-            {
-                if (invocation.Expression is MemberAccessExpressionSyntax extensionAccess &&
-                    extensionAccess.Name is GenericNameSyntax { Identifier.Text: "ProjectTo" } projectTo)
-                {
-                    var destination = projectTo.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
-                    var sourceType = TryResolveProjectionSource(extensionAccess.Expression, parameterTypes, localVariables, fieldLookup, project.AssemblyName, project.RelativeDirectory);
-                    if (!string.IsNullOrWhiteSpace(destination))
-                    {
-                        serviceInfo.MapperCalls.Add(new HandlerMapperCall(sourceType, destination, GetLineNumber(tree, invocation)));
-                    }
-
-                    continue;
-                }
-
-                if (!TryGetInvocationName(invocation.Expression, out var invokedMethod) ||
-                    !BaseServiceInvocationNames.Contains(invokedMethod))
-                {
-                    continue;
-                }
-
-                if (invocation.Expression is MemberAccessExpressionSyntax member &&
-                    TryResolveFieldDescriptor(member.Expression, fieldLookup, out _, out _))
-                {
-                    continue;
-                }
-
-                foreach (var baseServiceType in baseTypeCandidates)
-                {
-                    if (CaptureBaseServiceInvocation(
-                        serviceInfo,
-                        baseServiceType,
-                        invocation,
-                        routeHints,
-                        tree,
-                        serviceMethodName,
-                        invokedMethod))
-                    {
-                        break;
-                    }
-                }
-            }
+            // Projection mapping is handled elsewhere; HTTP wrappers now handled in ServiceOperationVisitor.
 
             IMethodSymbol? methodSymbol = null;
             try
@@ -472,15 +397,26 @@ public sealed partial class ProjectAnalyzer
                 methodSymbol = null;
             }
 
+            if (methodSymbol is null && classSymbol is not null)
+            {
+                var candidates = classSymbol
+                    .GetMembers(method.Identifier.Text)
+                    .OfType<IMethodSymbol>()
+                    .Where(m => m.Parameters.Length == method.ParameterList.Parameters.Count)
+                    .ToList();
+
+                if (candidates.Count == 1)
+                {
+                    methodSymbol = candidates[0];
+                }
+            }
+
             if (methodSymbol is null)
             {
                 continue;
             }
 
-            if (!TryAcquireMethodAnalysis(methodSymbol))
-            {
-                continue;
-            }
+            TryAcquireMethodAnalysis(methodSymbol);
 
             var visitor = new ServiceOperationVisitor(
                 this,
@@ -492,13 +428,11 @@ public sealed partial class ProjectAnalyzer
                 valueContent,
                 serviceInfo);
 
-            FlowAnalysisEngine.AnalyzeMethod(
+            var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                 project.Compilation,
-                model,
                 methodSymbol,
-                InterproceduralConfiguration,
-                callsitePredicate,
-                visitor);
+                InterproceduralConfiguration);
+            analysis.Context.Accept(visitor);
         }
 
         _services[fqdn] = serviceInfo;
@@ -511,6 +445,7 @@ public sealed partial class ProjectAnalyzer
             PromoteServiceHttpClientInvocations(service);
 
             var id = StableId.For("app.service", service.Fqdn, service.Assembly, service.SymbolId);
+            var implementationEdgeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, object>? serviceProps = null;
             if (service.LogInvocations.Count > 0)
             {
@@ -713,9 +648,107 @@ public sealed partial class ProjectAnalyzer
                 .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderBy(u => u.Line).First()))
             {
+                if (IsFrameworkServiceType(usage.ServiceType))
+                {
+                    if (!TryEnsureServiceNode(usage.ServiceType, out var frameworkId, out _, usage.TargetType, service.Assembly, service.Project) ||
+                        frameworkId is null)
+                    {
+                        continue;
+                    }
+
+                    var frameworkProps = new Dictionary<string, object>
+                    {
+                        ["service_type"] = usage.ServiceType
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(usage.InvocationMethod))
+                    {
+                        frameworkProps["method"] = usage.InvocationMethod!;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(usage.Method))
+                    {
+                        frameworkProps["method"] = usage.Method!;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(usage.InvocationMethod) &&
+                        !string.IsNullOrWhiteSpace(usage.Method) &&
+                        !string.Equals(usage.InvocationMethod, usage.Method, StringComparison.OrdinalIgnoreCase))
+                    {
+                        frameworkProps["invoked_method"] = usage.Method!;
+                    }
+
+                    _edges.Add(new GraphEdge
+                    {
+                        From = id,
+                        To = frameworkId,
+                        Kind = "uses_service",
+                        Source = "static",
+                        Confidence = 0.6,
+                        Transform = new GraphTransform
+                        {
+                            Type = "framework.access",
+                            Location = new GraphLocation { File = service.FilePath, Line = usage.Line }
+                        },
+                        Props = frameworkProps,
+                        Evidence = CreateEvidence(service.FilePath, usage.Line)
+                    });
+
+                    continue;
+                }
+
+                if (!IsServiceUsageInScope(usage, service.Assembly, service.Project))
+                {
+                    continue;
+                }
+
                 if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType, service.Assembly, service.Project))
                 {
                     continue;
+                }
+
+                if (serviceId is not null &&
+                    usage.ImplementationTypes is { Count: > 0 })
+                {
+                    foreach (var implementation in usage.ImplementationTypes)
+                    {
+                        if (string.IsNullOrWhiteSpace(implementation) ||
+                            string.Equals(implementation, usage.ServiceType, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        if (!_services.TryGetValue(implementation, out var implInfo))
+                        {
+                            continue;
+                        }
+
+                        var implNodeId = StableId.For("app.service", implInfo.Fqdn, implInfo.Assembly, implInfo.SymbolId);
+                        var edgeKey = $"{serviceId}->{implNodeId}";
+                        if (!implementationEdgeKeys.Add(edgeKey))
+                        {
+                            continue;
+                        }
+
+                        _edges.Add(new GraphEdge
+                        {
+                            From = serviceId,
+                            To = implNodeId,
+                            Kind = EdgeKinds.Implements,
+                            Source = "static",
+                            Confidence = 0.7,
+                            Transform = new GraphTransform
+                            {
+                                Type = "service.implementation",
+                                Location = new GraphLocation { File = service.FilePath, Line = usage.Line }
+                            },
+                            Props = new Dictionary<string, object>
+                            {
+                                ["service_type"] = usage.ServiceType,
+                                ["implementation_type"] = implementation
+                            },
+                            Evidence = CreateEvidence(service.FilePath, usage.Line)
+                        });
+                    }
                 }
 
                 if (IsLoggerType(usage.ServiceType) && service.LogInvocations.Count > 0)
@@ -909,6 +942,43 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
+            foreach (var grouping in service.FrameworkInteractions
+                .GroupBy(i => i.ServiceType + "|" + i.Member, StringComparer.OrdinalIgnoreCase))
+            {
+                var interaction = grouping.OrderBy(i => i.Line).First();
+                var keyParts = grouping.Key.Split('|');
+                var interactionServiceType = keyParts.Length > 0 ? keyParts[0] : interaction.ServiceType;
+                var interactionMember = keyParts.Length > 1 ? keyParts[1] : interaction.Member;
+
+                if (!TryEnsureServiceNode(interactionServiceType, out var frameworkId, out _, preferredAssembly: service.Assembly, preferredProject: service.Project) ||
+                    frameworkId is null)
+                {
+                    continue;
+                }
+
+                var frameworkProps = new Dictionary<string, object>
+                {
+                    ["service_type"] = interactionServiceType,
+                    ["method"] = interactionMember
+                };
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = frameworkId,
+                    Kind = "uses_service",
+                    Source = "static",
+                    Confidence = 0.55,
+                    Transform = new GraphTransform
+                    {
+                        Type = "framework.access",
+                        Location = new GraphLocation { File = service.FilePath, Line = interaction.Line }
+                    },
+                    Props = frameworkProps,
+                    Evidence = CreateEvidence(service.FilePath, interaction.Line)
+                });
+            }
+
             foreach (var cache in service.CacheInvocations)
             {
                 var cacheId = EnsureCacheNode(cache.CacheType);
@@ -1025,133 +1095,9 @@ public sealed partial class ProjectAnalyzer
         service.BaseServiceClientInvocations.Clear();
     }
 
-    private void RecordHttpClientInvocation(
-        ServiceInfo serviceInfo,
-        string clientType,
-        string? clientMethod,
-        string httpMethod,
-        InvocationExpressionSyntax? invocation,
-        SyntaxTree tree,
-        IReadOnlyDictionary<string, RouteHint> routeHints,
-        IReadOnlyDictionary<string, string> localStringValues,
-        string declaringMethod,
-        int line)
-    {
-        string? relativePath = null;
-        IReadOnlyCollection<string>? queryParameters = null;
+    // Legacy direct HttpClient invocation capture removed; handled via ServiceOperationVisitor.
 
-        if (invocation is not null)
-        {
-            (relativePath, queryParameters) = ResolveRouteDetails(tree, invocation, routeHints, localStringValues);
-        }
-
-        var resolvedClientType = clientType;
-        if (!string.IsNullOrWhiteSpace(serviceInfo.Assembly) &&
-            serviceInfo.Assembly.StartsWith("Dataverse", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(clientType, "Cirrus.Connections.DataGet.Client.DataGetClient", StringComparison.OrdinalIgnoreCase))
-        {
-            clientType = "Dataverse.Services.Features.DataGet.Client.DataGetClient";
-        }
-
-        if (TryResolveHttpClient(clientType, out var resolvedClient, serviceInfo.Assembly))
-        {
-            var serviceRoot = GetAssemblyRoot(serviceInfo.Assembly);
-            var resolvedRoot = GetAssemblyRoot(resolvedClient.Assembly);
-            if (string.IsNullOrWhiteSpace(serviceRoot) ||
-                string.Equals(serviceRoot, resolvedRoot, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(resolvedClient.Assembly, serviceInfo.Assembly, StringComparison.OrdinalIgnoreCase))
-            {
-                resolvedClientType = resolvedClient.Fqdn;
-            }
-        }
-
-        var targetService = ResolveClientTargetService(resolvedClientType);
-        var hasRouteMetadata = !string.IsNullOrWhiteSpace(relativePath) || queryParameters is { Count: > 0 };
-
-        if (resolvedClient is null && string.IsNullOrWhiteSpace(targetService) && !hasRouteMetadata)
-        {
-            return;
-        }
-
-        serviceInfo.HttpClientInvocations.Add(new HandlerClientInvocation(
-            resolvedClientType,
-            httpMethod,
-            relativePath,
-            line,
-            clientMethod,
-            targetService,
-            queryParameters,
-            declaringMethod));
-
-        RecordServiceClientType(serviceInfo, resolvedClientType);
-    }
-
-    private (string? Route, IReadOnlyCollection<string>? QueryParameters) ResolveRouteDetails(
-        SyntaxTree tree,
-        InvocationExpressionSyntax invocation,
-        IReadOnlyDictionary<string, RouteHint> routeHints,
-        IReadOnlyDictionary<string, string> localStringValues)
-    {
-        var arguments = invocation.ArgumentList.Arguments;
-        var limit = Math.Min(arguments.Count, 2);
-        for (var i = 0; i < limit; i++)
-        {
-            var expression = arguments[i].Expression;
-
-            if (TryResolveRouteHint(tree, expression, routeHints) is { } hint)
-            {
-                var formattedRoute = FormatRoute(hint);
-                return (formattedRoute, hint.QueryParameters.Count > 0 ? hint.QueryParameters.ToArray() : null);
-            }
-
-            var literal = ExtractRouteLiteral(tree, expression);
-            if (!string.IsNullOrWhiteSpace(literal))
-            {
-                return NormalizeRouteWithQuery(literal);
-            }
-
-            var resolved = ResolveRouteFromExpression(expression, localStringValues);
-            if (!string.IsNullOrWhiteSpace(resolved))
-            {
-                return NormalizeRouteWithQuery(resolved);
-            }
-        }
-
-        return (null, null);
-    }
-
-    private bool CaptureBaseServiceInvocation(
-        ServiceInfo serviceInfo,
-        string baseServiceType,
-        InvocationExpressionSyntax invocation,
-        IReadOnlyDictionary<string, RouteHint> routeHints,
-        SyntaxTree tree,
-        string declaringMethod,
-        string invokedMethod)
-    {
-        if (string.IsNullOrWhiteSpace(baseServiceType))
-        {
-            return false;
-        }
-
-        if (!TryCaptureWrapperHttpCall(tree, invocation, routeHints, declaringMethod, out var httpCall))
-        {
-            return false;
-        }
-
-        var normalizedBaseType = GetTypeNameWithoutGenerics(baseServiceType);
-        serviceInfo.BaseServiceClientInvocations.Add(new BaseServiceClientInvocation(
-            normalizedBaseType,
-            serviceInfo.Assembly,
-            invokedMethod,
-            httpCall.HttpMethod,
-            httpCall.Route,
-            httpCall.QueryParameters.Count > 0 ? httpCall.QueryParameters.ToArray() : null,
-            httpCall.Line,
-            declaringMethod));
-
-        return true;
-    }
+    // Legacy HTTP route helpers removed; handled via ServiceOperationVisitor.
 
     private void RecordServiceClientType(ServiceInfo serviceInfo, string clientType)
     {
@@ -1265,11 +1211,23 @@ public sealed partial class ProjectAnalyzer
         var candidate = ExtractName(expression);
         if (string.IsNullOrWhiteSpace(candidate))
         {
+            if (expression is MemberAccessExpressionSyntax nestedAccess &&
+                TryResolveFieldDescriptor(nestedAccess.Expression, fieldLookup, out descriptor, out fieldName))
+            {
+                return true;
+            }
+
             return false;
         }
 
         if (!fieldLookup.TryGetValue(candidate, out var resolvedDescriptor))
         {
+            if (expression is MemberAccessExpressionSyntax nestedExpression &&
+                TryResolveFieldDescriptor(nestedExpression.Expression, fieldLookup, out descriptor, out fieldName))
+            {
+                return true;
+            }
+
             return false;
         }
 
@@ -1396,7 +1354,7 @@ public sealed partial class ProjectAnalyzer
         foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var key = part.Split('=')[0];
-            var normalizedKey = NormalizeQueryKey(key);
+            var normalizedKey = NormalizeQueryKeyLocal(key);
             if (string.IsNullOrWhiteSpace(normalizedKey))
             {
                 normalizedKey = "{*}";
@@ -1410,6 +1368,17 @@ public sealed partial class ProjectAnalyzer
             : path;
 
         return (canonicalRoute, parameters.Count > 0 ? parameters.ToArray() : null);
+    }
+
+    private static string NormalizeQueryKeyLocal(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return "{*}";
+        }
+
+        var trimmed = key.Trim();
+        return trimmed.Replace(" ", string.Empty);
     }
 
 }

@@ -61,7 +61,15 @@ public sealed class GraphGenerator
         await Parallel.ForEachAsync(projects, cancellationToken, async (project, ct) =>
         {
             var projectKey = GetLookupKey(project);
-            roslynLookup?.TryGetValue(projectKey, out var roslynProject);
+            RoslynProjectInfo? roslynProject = null;
+            if (roslynLookup is not null)
+            {
+                roslynLookup.TryGetValue(projectKey, out roslynProject);
+                if (roslynProject is null)
+                {
+                    throw new Exception("Project could not be found");
+                }
+            }
             await analyzer.AnalyzeProjectAsync(project, roslynProject, ct);
             Console.WriteLine($"[graph] Analyzed project {project.AssemblyName} ({project.SourceFiles.Count} files). Nodes={analyzer.NodeCount} Edges={analyzer.EdgeCount} Mem={GC.GetTotalMemory(false) / 1024 / 1024:F1}MB");
         });

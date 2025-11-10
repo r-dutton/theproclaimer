@@ -118,34 +118,201 @@ namespace GraphKit.Outputs.Narrative
 
         private static void PrintUsesServiceTree(StringWriter w, Index idx, string fromId, int indent, string repoRoot)
         {
-            foreach (var e in idx.Out(fromId, EdgeKinds.UsesService))
+            var visited = new HashSet<(string From, string To)>();
+            var serviceStack = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var grouped = idx.Out(fromId, EdgeKinds.UsesService)
+                .GroupBy(edge => ServiceGroupKey(idx, edge), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in grouped)
             {
-                var targetNode = idx.Node(e.ToId);
-                var serviceLabel = FirstNonEmpty(
-                    Str(e, "service_type"),
-                    Str(targetNode, "service_type"),
-                    Str(targetNode, "name"),
-                    Str(targetNode, "fqdn"),
-                    targetNode?.Type) ?? "service";
-                if (IsRequestProcessorService(serviceLabel))
-                {
-                    continue;
-                }
-                var link = SourceLink(e, repoRoot);
+                RenderServiceUsage(w, idx, group.ToList(), indent, repoRoot, visited, serviceStack);
+            }
+        }
+
+        private static string ServiceGroupKey(Index idx, EdgeFact edge)
+        {
+            var node = idx.Node(edge.ToId);
+            return FirstNonEmpty(
+                Str(edge, "service_type"),
+                Str(node, "fqdn"),
+                Str(node, "name"),
+                edge.ToId) ?? edge.ToId;
+        }
+
+        private static void RenderServiceUsage(
+            StringWriter w,
+            Index idx,
+            IReadOnlyList<EdgeFact> edges,
+            int indent,
+            string repoRoot,
+            HashSet<(string From, string To)> visitedEdges,
+            HashSet<string> serviceStack)
+        {
+            if (edges.Count == 0)
+            {
+                return;
+            }
+
+            var primary = edges[0];
+            var sourceId = primary.FromId;
+            var targetNode = idx.Node(primary.ToId);
+            var targetFqdn = FirstNonEmpty(Str(targetNode, "fqdn"));
+            var sourceNode = idx.Node(sourceId);
+            var sourceFqdn = FirstNonEmpty(Str(sourceNode, "fqdn"));
+            var groupingKey = ServiceGroupKey(idx, primary);
+
+            if (!string.IsNullOrWhiteSpace(sourceId) &&
+                !visitedEdges.Add((sourceId, groupingKey)))
+            {
+                return;
+            }
+
+            var serviceLabel = FirstNonEmpty(
+                Str(primary, "service_type"),
+                Str(targetNode, "service_type"),
+                Str(targetNode, "name"),
+                Str(targetNode, "fqdn"),
+                targetNode?.Type) ?? "service";
+
+            if (IsRequestProcessorService(serviceLabel))
+            {
+                return;
+            }
+
+            if (targetNode is not null &&
+                !string.IsNullOrWhiteSpace(sourceId) &&
+                string.Equals(targetNode.Id, sourceId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(targetFqdn) &&
+                !string.IsNullOrWhiteSpace(sourceFqdn) &&
+                string.Equals(targetFqdn, sourceFqdn, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var link = SourceLink(primary, repoRoot);
+            Indent(w, indent);
+            w.WriteLine($"- [uses_service {serviceLabel}]({link})");
+
+            var methodValues = edges
+                .Select(e => FirstNonEmpty(Str(e, "method")))
+                .Where(m => !string.IsNullOrWhiteSpace(m))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var method in methodValues)
+            {
+                Indent(w, indent + 1);
+                w.WriteLine($"- [method {method}]({link})");
+            }
+
+            var contractValues = edges
+                .Select(e => (Contract: Str(e, "invoked_method"), Method: FirstNonEmpty(Str(e, "method"))))
+                .Where(pair =>
+                    !string.IsNullOrWhiteSpace(pair.Contract) &&
+                    !string.Equals(pair.Contract, pair.Method, StringComparison.OrdinalIgnoreCase))
+                .Select(pair => pair.Contract!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var contract in contractValues)
+            {
+                Indent(w, indent + 1);
+                w.WriteLine($"- [contract {contract}]({link})");
+            }
+
+            var branchStack = new HashSet<string>(serviceStack, StringComparer.OrdinalIgnoreCase);
+            var branchVisited = new HashSet<(string From, string To)>(visitedEdges);
+            var expandedNode = targetNode;
+            if (expandedNode is not null &&
+                string.Equals(expandedNode.Type, "app.service_contract", StringComparison.OrdinalIgnoreCase))
+            {
+                expandedNode = idx.ServiceImplementationForContract(expandedNode) ?? expandedNode;
+            }
+
+            RenderServiceDetails(w, idx, expandedNode, indent + 1, repoRoot, branchVisited, branchStack);
+        }
+
+        private static void RenderServiceDetails(
+            StringWriter w,
+            Index idx,
+            NodeFact? serviceNode,
+            int indent,
+            string repoRoot,
+            HashSet<(string From, string To)> visitedEdges,
+            HashSet<string> serviceStack)
+        {
+            if (serviceNode is null)
+            {
+                return;
+            }
+
+            if (!serviceStack.Add(serviceNode.Id))
+            {
                 Indent(w, indent);
-                w.WriteLine($"- [uses_service {serviceLabel}]({link})");
-                if (e.Props.TryGetValue("method", out var method) && method is string m && !string.IsNullOrWhiteSpace(m))
+                w.WriteLine("- ... (service recursion detected)");
+                PrintServiceSurface(w, idx, serviceNode.Id, indent + 1, repoRoot);
+                return;
+            }
+
+            try
+            {
+                var initialLength = w.GetStringBuilder().Length;
+                PrintEfTouches(w, idx, serviceNode.Id, indent, repoRoot, serviceStack);
+
+                foreach (var storageEdge in idx.Out(serviceNode.Id, EdgeKinds.UsesStorage))
                 {
-                    Indent(w, indent + 1);
-                    w.WriteLine($"- [method {m}]({link})");
+                    var storageNode = idx.Node(storageEdge.ToId);
+                    var storageLabel = FirstNonEmpty(
+                        Str(storageEdge, "service_type"),
+                        Str(storageNode, "service_type"),
+                        Str(storageNode, "name"),
+                        Str(storageNode, "fqdn"),
+                        storageNode?.Type) ?? "storage";
+                    var storageLink = SourceLink(storageEdge, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [uses_service {storageLabel}]({storageLink})");
                 }
-                var contract = Str(e, "invoked_method");
-                if (!string.IsNullOrWhiteSpace(contract) &&
-                    !string.Equals(contract, Str(e, "method"), StringComparison.OrdinalIgnoreCase))
+
+                foreach (var callEdge in idx.Out(serviceNode.Id, EdgeKinds.Calls))
                 {
-                    Indent(w, indent + 1);
-                    w.WriteLine($"- [contract {contract}]({link})");
+                    var callNode = idx.Node(callEdge.ToId);
+                    var callLabel = FirstNonEmpty(
+                        Str(callEdge, "name"),
+                        Str(callNode, "name"),
+                        Str(callNode, "fqdn"),
+                        callNode?.Type) ?? "call";
+                    var callLink = SourceLink(callEdge, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [calls {callLabel}]({callLink})");
                 }
+
+                var nestedGroups = idx.Out(serviceNode.Id, EdgeKinds.UsesService)
+                    .GroupBy(edge => ServiceGroupKey(idx, edge), StringComparer.OrdinalIgnoreCase);
+                foreach (var group in nestedGroups)
+                {
+                    var primary = group.First();
+                    var key = (serviceNode.Id, ServiceGroupKey(idx, primary));
+                    if (!visitedEdges.Add(key))
+                    {
+                        continue;
+                    }
+
+                    RenderServiceUsage(w, idx, group.ToList(), indent, repoRoot, visitedEdges, serviceStack);
+                }
+
+                if (w.GetStringBuilder().Length == initialLength)
+                {
+                    PrintServiceSurface(w, idx, serviceNode.Id, indent, repoRoot);
+                }
+            }
+            finally
+            {
+                serviceStack.Remove(serviceNode.Id);
             }
         }
 
@@ -413,8 +580,172 @@ namespace GraphKit.Outputs.Narrative
             PrintHttpFromHandler(w, idx, fromId, indent, repoRoot);
         }
 
-        private static void PrintEfTouches(StringWriter w, Index idx, string fromId, int indent, string repoRoot)
+        private static void PrintEfTouches(StringWriter w, Index idx, string fromId, int indent, string repoRoot, HashSet<string>? serviceStack = null)
         {
+            serviceStack ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var currentNode = idx.Node(fromId);
+            var trackCurrent = currentNode is not null && IsServiceLike(currentNode.Type);
+            var addedCurrent = trackCurrent && serviceStack.Add(fromId);
+
+            try
+            {
+                foreach (var call in idx.Out(fromId, EdgeKinds.Calls))
+                {
+                    var target = idx.Node(call.ToId);
+                    var targetLabel = FirstNonEmpty(Str(target, "name"), Str(target, "fqdn"), target?.Type) ?? "target";
+                    var method = FirstNonEmpty(Str(call, "method"));
+                    var operation = FirstNonEmpty(Str(call, "operation"));
+                    var label = targetLabel;
+                    if (!string.IsNullOrWhiteSpace(method))
+                    {
+                        label = $"{targetLabel}.{method}";
+                    }
+                    if (!string.IsNullOrWhiteSpace(operation))
+                    {
+                        label = $"{operation} {label}";
+                    }
+                    var link = SourceLink(call, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [calls {label}]({link})");
+                }
+
+                var serviceVisited = new HashSet<(string From, string To)>();
+                foreach (var service in idx.Out(fromId, EdgeKinds.UsesService))
+                {
+                    var key = (fromId, service.ToId);
+                    if (!serviceVisited.Add(key))
+                    {
+                        continue;
+                    }
+
+                    var serviceNode = idx.Node(service.ToId);
+                    var serviceLabel = FirstNonEmpty(
+                        Str(service, "service_type"),
+                        Str(serviceNode, "service_type"),
+                        Str(serviceNode, "name"),
+                        Str(serviceNode, "fqdn"),
+                        serviceNode?.Type) ?? "service";
+                    if (IsRequestProcessorService(serviceLabel))
+                    {
+                        continue;
+                    }
+
+                    var link = SourceLink(service, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [uses_service {serviceLabel}]({link})");
+
+                    if (service.Props.TryGetValue("method", out var methodValue) &&
+                        methodValue is string methodName &&
+                        !string.IsNullOrWhiteSpace(methodName))
+                    {
+                        Indent(w, indent + 1);
+                        w.WriteLine($"- [method {methodName}]({link})");
+                    }
+
+                    var contract = Str(service, "invoked_method");
+                    if (!string.IsNullOrWhiteSpace(contract) &&
+                        !string.Equals(contract, Str(service, "method"), StringComparison.OrdinalIgnoreCase))
+                    {
+                        Indent(w, indent + 1);
+                        w.WriteLine($"- [contract {contract}]({link})");
+                    }
+
+                    ExpandServiceUsage(w, idx, serviceNode, indent + 1, repoRoot, serviceStack, serviceVisited);
+                }
+
+                foreach (var read in idx.Out(fromId, EdgeKinds.Queries))
+                {
+                    var entity = idx.Node(read.ToId);
+                    var entityLabel = FirstNonEmpty(Str(entity, "name"), Str(entity, "fqdn"), entity?.Type) ?? "entity";
+                    var operation = FirstNonEmpty(Str(read, "operation"));
+                    var link = SourceLink(read, repoRoot);
+                    Indent(w, indent);
+                    var label = string.IsNullOrWhiteSpace(operation)
+                        ? entityLabel
+                        : $"{operation} {entityLabel}";
+                    w.WriteLine($"- [{label}]({link})");
+
+                    foreach (var tableEdge in idx.Out(read.ToId, EdgeKinds.ReadsFrom))
+                    {
+                        var tableNode = idx.Node(tableEdge.ToId);
+                        var tableLabel = FirstNonEmpty(Str(tableNode, "table"), Str(tableNode, "name"), Str(tableNode, "fqdn"), tableNode?.Type) ?? "table";
+                        var tableLink = SourceLink(tableEdge, repoRoot);
+                        Indent(w, indent + 1);
+                        w.WriteLine($"- [reads_from {tableLabel}]({tableLink})");
+                    }
+                }
+
+                foreach (var use in idx.Out(fromId, EdgeKinds.UsesStorage))
+                {
+                    var storageNode = idx.Node(use.ToId);
+                    var serviceType = FirstNonEmpty(Str(use, "service_type"), Str(storageNode, "service_type"), Str(storageNode, "name"), Str(storageNode, "fqdn"), storageNode?.Type) ?? "storage";
+                    var link = SourceLink(use, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- uses_service {serviceType}");
+                }
+
+                foreach (var map in idx.Out(fromId, EdgeKinds.MapsTo))
+                {
+                    var dest = FirstNonEmpty(Str(map, "destination_type"), Str(idx.Node(map.ToId), "name"));
+                    var link = SourceLink(map, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [maps_to {Short(dest)}]({link})");
+                }
+
+                foreach (var publish in idx.Out(fromId, EdgeKinds.Publishes))
+                {
+                    var messageType = FirstNonEmpty(Str(publish, "message_type"), Str(idx.Node(publish.ToId), "name"), Str(idx.Node(publish.ToId), "fqdn")) ?? "message";
+                    var link = SourceLink(publish, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [publishes {Short(messageType)}]({link})");
+                }
+
+                foreach (var domainEvent in idx.Out(fromId, EdgeKinds.PublishesDomainEvent))
+                {
+                    var domainType = FirstNonEmpty(
+                        Str(domainEvent, "event_type"),
+                        Str(idx.Node(domainEvent.ToId), "name"),
+                        Str(idx.Node(domainEvent.ToId), "fqdn")) ?? "domain_event";
+                    var link = SourceLink(domainEvent, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [publishes_domain_event {Short(domainType)}]({link})");
+
+                    RenderDomainEventHandlers(w, idx, domainEvent.ToId, indent + 1, repoRoot, serviceStack, serviceVisited);
+                }
+
+                foreach (var notif in idx.Out(fromId, EdgeKinds.PublishesNotification))
+                {
+                    var notificationType = FirstNonEmpty(Str(notif, "notification_type"), Str(idx.Node(notif.ToId), "name"), Str(idx.Node(notif.ToId), "fqdn")) ?? "notification";
+                    var link = SourceLink(notif, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [publishes_notification {Short(notificationType)}]({link})");
+                }
+
+                foreach (var cache in idx.Out(fromId, EdgeKinds.UsesCache))
+                {
+                    var cacheLabel = FirstNonEmpty(Str(cache, "method"), Str(cache, "operation"), "cache");
+                    var link = SourceLink(cache, repoRoot);
+                    Indent(w, indent);
+                    w.WriteLine($"- [uses_cache {cacheLabel}]({link})");
+                }
+            }
+            finally
+            {
+                if (addedCurrent)
+                {
+                    serviceStack.Remove(fromId);
+                }
+            }
+        }
+
+        private static void PrintServiceSurface(
+            StringWriter w,
+            Index idx,
+            string fromId,
+            int indent,
+            string repoRoot)
+        {
+            var emitted = false;
             foreach (var call in idx.Out(fromId, EdgeKinds.Calls))
             {
                 var target = idx.Node(call.ToId);
@@ -433,27 +764,7 @@ namespace GraphKit.Outputs.Narrative
                 var link = SourceLink(call, repoRoot);
                 Indent(w, indent);
                 w.WriteLine($"- [calls {label}]({link})");
-            }
-
-            foreach (var service in idx.Out(fromId, EdgeKinds.UsesService))
-            {
-                var serviceNode = idx.Node(service.ToId);
-                var serviceLabel = FirstNonEmpty(
-                    Str(service, "service_type"),
-                    Str(serviceNode, "service_type"),
-                    Str(serviceNode, "name"),
-                    Str(serviceNode, "fqdn"),
-                    serviceNode?.Type) ?? "service";
-                if (IsRequestProcessorService(serviceLabel))
-                {
-                    continue;
-                }
-                var details = FirstNonEmpty(Str(service, "method"));
-                var link = SourceLink(service, repoRoot);
-                Indent(w, indent);
-                w.WriteLine(string.IsNullOrWhiteSpace(details)
-                    ? $"- uses_service {serviceLabel}"
-                    : $"- uses_service {serviceLabel} (method={details})");
+                emitted = true;
             }
 
             foreach (var read in idx.Out(fromId, EdgeKinds.Queries))
@@ -467,6 +778,7 @@ namespace GraphKit.Outputs.Narrative
                     ? entityLabel
                     : $"{operation} {entityLabel}";
                 w.WriteLine($"- [{label}]({link})");
+                emitted = true;
 
                 foreach (var tableEdge in idx.Out(read.ToId, EdgeKinds.ReadsFrom))
                 {
@@ -484,7 +796,8 @@ namespace GraphKit.Outputs.Narrative
                 var serviceType = FirstNonEmpty(Str(use, "service_type"), Str(storageNode, "service_type"), Str(storageNode, "name"), Str(storageNode, "fqdn"), storageNode?.Type) ?? "storage";
                 var link = SourceLink(use, repoRoot);
                 Indent(w, indent);
-                w.WriteLine($"- uses_service {serviceType}");
+                w.WriteLine($"- [uses_service {serviceType}]({link})");
+                emitted = true;
             }
 
             foreach (var map in idx.Out(fromId, EdgeKinds.MapsTo))
@@ -493,6 +806,7 @@ namespace GraphKit.Outputs.Narrative
                 var link = SourceLink(map, repoRoot);
                 Indent(w, indent);
                 w.WriteLine($"- [maps_to {Short(dest)}]({link})");
+                emitted = true;
             }
 
             foreach (var publish in idx.Out(fromId, EdgeKinds.Publishes))
@@ -501,6 +815,7 @@ namespace GraphKit.Outputs.Narrative
                 var link = SourceLink(publish, repoRoot);
                 Indent(w, indent);
                 w.WriteLine($"- [publishes {Short(messageType)}]({link})");
+                emitted = true;
             }
 
             foreach (var domainEvent in idx.Out(fromId, EdgeKinds.PublishesDomainEvent))
@@ -512,6 +827,7 @@ namespace GraphKit.Outputs.Narrative
                 var link = SourceLink(domainEvent, repoRoot);
                 Indent(w, indent);
                 w.WriteLine($"- [publishes_domain_event {Short(domainType)}]({link})");
+                emitted = true;
             }
 
             foreach (var notif in idx.Out(fromId, EdgeKinds.PublishesNotification))
@@ -520,6 +836,7 @@ namespace GraphKit.Outputs.Narrative
                 var link = SourceLink(notif, repoRoot);
                 Indent(w, indent);
                 w.WriteLine($"- [publishes_notification {Short(notificationType)}]({link})");
+                emitted = true;
             }
 
             foreach (var cache in idx.Out(fromId, EdgeKinds.UsesCache))
@@ -528,7 +845,153 @@ namespace GraphKit.Outputs.Narrative
                 var link = SourceLink(cache, repoRoot);
                 Indent(w, indent);
                 w.WriteLine($"- [uses_cache {cacheLabel}]({link})");
+                emitted = true;
             }
+
+            if (!emitted)
+            {
+                Indent(w, indent);
+                w.WriteLine("- (no additional service edges recorded)");
+            }
+        }
+
+        private static void ExpandServiceUsage(
+            StringWriter w,
+            Index idx,
+            NodeFact? serviceNode,
+            int indent,
+            string repoRoot,
+            HashSet<string> serviceStack,
+            HashSet<(string From, string To)> visitedEdges)
+        {
+            if (serviceNode is null)
+            {
+                return;
+            }
+
+            var targetNode = serviceNode;
+            if (string.Equals(serviceNode.Type, "app.service_contract", StringComparison.OrdinalIgnoreCase))
+            {
+                var implementation = idx.ServiceImplementationForContract(serviceNode);
+                if (implementation is not null)
+                {
+                    targetNode = implementation;
+                }
+            }
+
+            var implementations = idx.Out(targetNode.Id, "implemented_by").ToList();
+            foreach (var implementationEdge in implementations)
+            {
+                var implementationNode = idx.Node(implementationEdge.ToId);
+                var implementationLabel = FirstNonEmpty(
+                    Str(implementationEdge, "implementation_type"),
+                    Str(implementationNode, "fqdn"),
+                    Str(implementationNode, "name"),
+                    implementationNode?.Type) ?? "implementation";
+                var implementationLink = SourceLink(implementationEdge, repoRoot);
+                Indent(w, indent);
+                w.WriteLine($"- [implementation {implementationLabel}]({implementationLink})");
+
+                if (implementationNode is not null)
+                {
+                    var implStack = new HashSet<string>(serviceStack, StringComparer.OrdinalIgnoreCase);
+                    var implVisited = new HashSet<(string From, string To)>(visitedEdges);
+                    RenderServiceDetails(w, idx, implementationNode, indent + 1, repoRoot, implVisited, implStack);
+                    if (!HasServiceEdges(idx, implementationNode.Id))
+                    {
+                        Indent(w, indent + 1);
+                        w.WriteLine("- (no additional service edges recorded)");
+                    }
+                }
+            }
+
+            if (implementations.Count == 0)
+            {
+                var branchStack = new HashSet<string>(serviceStack, StringComparer.OrdinalIgnoreCase);
+                var branchVisited = new HashSet<(string From, string To)>(visitedEdges);
+
+                if (targetNode is not null && serviceNode is not null &&
+                    string.Equals(targetNode.Id, serviceNode.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                RenderServiceDetails(w, idx, targetNode, indent, repoRoot, branchVisited, branchStack);
+                if (targetNode is not null && !HasServiceEdges(idx, targetNode.Id))
+                {
+                    Indent(w, indent);
+                    w.WriteLine("- (no additional service edges recorded)");
+                }
+            }
+        }
+
+        private static void RenderDomainEventHandlers(
+            StringWriter w,
+            Index idx,
+            string domainEventId,
+            int indent,
+            string repoRoot,
+            HashSet<string> serviceStack,
+            HashSet<(string From, string To)> visitedEdges)
+        {
+            foreach (var handlerEdge in idx.Out(domainEventId, EdgeKinds.HandledBy))
+            {
+                var key = (domainEventId, handlerEdge.ToId);
+                if (!visitedEdges.Add(key))
+                {
+                    continue;
+                }
+
+                var handlerNode = idx.Node(handlerEdge.ToId);
+                if (handlerNode is null)
+                {
+                    continue;
+                }
+
+                var handlerLabel = FirstNonEmpty(
+                    Str(handlerEdge, "handler"),
+                    Str(handlerNode, "name"),
+                    Str(handlerNode, "fqdn"),
+                    handlerNode.Type) ?? "handler";
+
+                var link = SourceLink(handlerEdge, repoRoot);
+                Indent(w, indent);
+                w.WriteLine($"- [handled_by {handlerLabel}]({link})");
+
+                var handlerStack = new HashSet<string>(serviceStack, StringComparer.OrdinalIgnoreCase);
+                var handlerVisited = new HashSet<(string From, string To)>(visitedEdges);
+                RenderServiceDetails(w, idx, handlerNode, indent + 1, repoRoot, handlerVisited, handlerStack);
+                PrintHttpFromHandler(w, idx, handlerNode.Id, indent + 1, repoRoot);
+                PrintSendsRequestTree(
+                    w,
+                    idx,
+                    handlerNode.Id,
+                    indent + 1,
+                    repoRoot,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            }
+        }
+
+        private static bool IsServiceLike(string? nodeType)
+        {
+            return string.Equals(nodeType, "app.service", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(nodeType, "app.service_contract", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(nodeType, "cqrs.handler", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(nodeType, "cqrs.notification_handler", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(nodeType, "domain.event_handler", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool HasServiceEdges(Index idx, string nodeId)
+        {
+            return idx.Out(nodeId, EdgeKinds.Calls).Any() ||
+                   idx.Out(nodeId, EdgeKinds.UsesService).Any() ||
+                   idx.Out(nodeId, EdgeKinds.Queries).Any() ||
+                   idx.Out(nodeId, EdgeKinds.UsesStorage).Any() ||
+                   idx.Out(nodeId, EdgeKinds.MapsTo).Any() ||
+                   idx.Out(nodeId, EdgeKinds.Publishes).Any() ||
+                   idx.Out(nodeId, EdgeKinds.PublishesDomainEvent).Any() ||
+                   idx.Out(nodeId, EdgeKinds.PublishesNotification).Any() ||
+                   idx.Out(nodeId, EdgeKinds.UsesCache).Any();
         }
 
         private static int ParseLineNumber(string? value)
@@ -645,6 +1108,19 @@ namespace GraphKit.Outputs.Narrative
 
             public IEnumerable<NodeFact> EndpointNodes()
                 => _nodes.Values.Where(n => n.Type == NodeTypes.EndpointController || n.Type == NodeTypes.EndpointMinimalApi);
+
+            public NodeFact? ServiceImplementationForContract(NodeFact contractNode)
+            {
+                var contractFqdn = Str(contractNode, "fqdn");
+                if (string.IsNullOrWhiteSpace(contractFqdn))
+                {
+                    return null;
+                }
+
+                return _nodes.Values.FirstOrDefault(n =>
+                    string.Equals(n.Type, "app.service", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(Str(n, "fqdn"), contractFqdn, StringComparison.OrdinalIgnoreCase));
+            }
 
             public (EdgeFact Edge, NodeFact HandlerNode, string HandlerDisplay)? FindHandlerForRequest(string requestNodeId)
             {

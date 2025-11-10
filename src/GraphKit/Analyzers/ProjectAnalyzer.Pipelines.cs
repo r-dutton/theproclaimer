@@ -7,7 +7,7 @@ using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -69,13 +69,11 @@ public sealed partial class ProjectAnalyzer
                 info.OptionsUsages,
                 info.CacheInvocations);
 
-            FlowAnalysisEngine.AnalyzeMethod(
+            var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                 project.Compilation,
-                model,
                 methodSymbol,
-                InterproceduralConfiguration,
-                callsitePredicate,
-                visitor);
+                InterproceduralConfiguration);
+            analysis.Context.Accept(visitor);
         }
 
         _pipelineBehaviors[fqdn] = info;
@@ -161,13 +159,11 @@ public sealed partial class ProjectAnalyzer
                 info.OptionsUsages,
                 info.CacheInvocations);
 
-            FlowAnalysisEngine.AnalyzeMethod(
+            var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                 project.Compilation,
-                model,
                 methodSymbol,
-                InterproceduralConfiguration,
-                callsitePredicate,
-                visitor);
+                InterproceduralConfiguration);
+            analysis.Context.Accept(visitor);
         }
 
         _requestProcessors[fqdn] = info;
@@ -403,6 +399,11 @@ public sealed partial class ProjectAnalyzer
             .GroupBy(u => u.ServiceType, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(u => u.Line).First()))
         {
+            if (!IsServiceUsageInScope(usage, assembly, project))
+            {
+                continue;
+            }
+
             if (!TryEnsureServiceNode(usage.ServiceType, out var serviceId, out var registration, usage.TargetType, assembly, project))
             {
                 continue;

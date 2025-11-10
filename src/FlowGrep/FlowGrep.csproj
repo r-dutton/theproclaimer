@@ -9,8 +9,19 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GraphKit\GraphKit.csproj" />
-    <PackageReference Include="Microsoft.Build.Locator" Version="1.7.5" />
+    <PackageReference Include="Microsoft.Build.Locator" Version="1.10.2" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic.Workspaces" Version="4.14.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.CodeAnalysis.NetAnalyzers">
+      <HintPath>$(NuGetPackageRoot)microsoft.codeanalysis.netanalyzers/8.0.0/analyzers/dotnet/cs/Microsoft.CodeAnalysis.NetAnalyzers.dll</HintPath>
+    </Reference>
+    <Reference Include="Analyzer.Utilities">
+      <HintPath>$(NuGetPackageRoot)microsoft.codeanalysis.netanalyzers/8.0.0/analyzers/dotnet/cs/Analyzer.Utilities.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 </Project>

@@ -2,21 +2,23 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GraphKit.FlowAnalysis.Dependencies;
-using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
 using Microsoft.CodeAnalysis.Operations;
+using GraphKit.FlowAnalysis.Interprocedural;
+using InterproceduralAnalysisConfiguration = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.InterproceduralAnalysisConfiguration;
+using InterproceduralAnalysisKind = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.InterproceduralAnalysisKind;
 
 namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
     private readonly ProjectAnalyzerConfiguration _configuration;
-    private readonly FlowInterproceduralConfiguration _interproceduralConfiguration;
+    private readonly InterproceduralSettings _interproceduralConfiguration;
 
-    internal FlowInterproceduralConfiguration InterproceduralConfiguration => _interproceduralConfiguration;
+    internal InterproceduralSettings InterproceduralConfiguration => _interproceduralConfiguration;
 
     private static ProjectAnalyzerConfiguration EnsureConfiguration(ProjectAnalyzerConfiguration? configuration)
     {
@@ -89,8 +91,8 @@ public sealed partial class ProjectAnalyzer
             };
         }
 
-        public FlowInterproceduralConfiguration ToInterproceduralConfiguration()
-            => FlowInterproceduralConfiguration.Create(
+        public InterproceduralSettings ToInterproceduralSettings()
+            => new(
                 InterproceduralAnalysisKind,
                 MaxInterproceduralCallChainLength,
                 MaxInterproceduralLambdaOrLocalFunctionDepth);

@@ -9,7 +9,7 @@ using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using FlowAnalysisEngine = GraphKit.FlowAnalysis.Core.FlowAnalysis;
+using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
 
 namespace GraphKit.Analyzers;
 
@@ -166,13 +166,11 @@ public sealed partial class ProjectAnalyzer
                         publisherCalls.Add(new HandlerPublisherCall(publisherType, publishMethod, line, messageType, owner));
                     });
 
-                FlowAnalysisEngine.AnalyzeMethod(
+                var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     project.Compilation,
-                    model,
                     methodSymbol,
-                    InterproceduralConfiguration,
-                    callsitePredicate,
-                    visitor);
+                    InterproceduralConfiguration);
+                analysis.Context.Accept(visitor);
             }
         }
 

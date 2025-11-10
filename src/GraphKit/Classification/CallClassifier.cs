@@ -22,15 +22,65 @@ namespace GraphKit.Classification
             return CallKind.Other;
         }
 
-        // Stub methods below; wire to your AnalysisPredicates from Phase 1.
-        private static bool IsMediatorSend(IMethodSymbol m) => m.Name == "Send";
-        private static bool IsMediatorPublish(IMethodSymbol m) => m.Name == "Publish";
-        private static bool IsHandlerHandle(IMethodSymbol m) => m.Name == "Handle";
-        private static bool IsRepoCall(IMethodSymbol m) => m.ContainingType.Name.Contains("Repository");
-        private static bool IsDbContextCall(IMethodSymbol m) => m.ContainingType.Name.EndsWith("DbContext");
-        private static bool IsHttpClientCall(IMethodSymbol m) => m.ContainingType.Name.Contains("HttpClient");
-        private static bool IsMapperMap(IMethodSymbol m) => m.Name == "Map";
-        private static bool IsValidatorCall(IMethodSymbol m) => m.Name.StartsWith("Validate");
-        private static bool IsPipelineBehavior(IMethodSymbol m) => m.ContainingType.Name.Contains("PipelineBehavior");
+        // Use predicates that are symbol-aware
+        private static bool IsMediatorSend(IMethodSymbol m)
+            => m.Name == "Send" || m.Name == "SendAsync";
+        private static bool IsMediatorPublish(IMethodSymbol m)
+            => m.Name == "Publish" || m.Name == "PublishAsync";
+        private static bool IsHandlerHandle(IMethodSymbol m)
+            => m.Name == "Handle" || m.Name == "HandleAsync";
+        private static bool IsRepoCall(IMethodSymbol m)
+            => m.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+                   .Contains("Repository", System.StringComparison.OrdinalIgnoreCase);
+        private static bool IsDbContextCall(IMethodSymbol m)
+            => InheritsFrom(m.ContainingType, "Microsoft.EntityFrameworkCore.DbContext");
+        private static bool IsHttpClientCall(IMethodSymbol m)
+            => ImplementsOrIs(m.ContainingType, "System.Net.Http.IHttpClientFactory") ||
+               InheritsFrom(m.ContainingType, "System.Net.Http.HttpClient");
+        private static bool IsMapperMap(IMethodSymbol m)
+            => m.Name == "Map" || m.Name == "ProjectTo" || m.Name == "MapAsync";
+        private static bool IsValidatorCall(IMethodSymbol m)
+            => m.Name.StartsWith("Validate", System.StringComparison.Ordinal);
+        private static bool IsPipelineBehavior(IMethodSymbol m)
+            => ImplementsOrIs(m.ContainingType, "MediatR.IPipelineBehavior");
+
+        private static bool InheritsFrom(ITypeSymbol? type, string metadata)
+        {
+            if (type is INamedTypeSymbol named)
+            {
+                var cur = named;
+                while (cur is not null)
+                {
+                    if (cur.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+                        .Equals(metadata, System.StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                    cur = cur.BaseType;
+                }
+            }
+            return false;
+        }
+
+        private static bool ImplementsOrIs(ITypeSymbol? type, string metadata)
+        {
+            if (type is INamedTypeSymbol named)
+            {
+                if (named.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+                    .Equals(metadata, System.StringComparison.Ordinal))
+                {
+                    return true;
+                }
+                foreach (var iface in named.AllInterfaces)
+                {
+                    if (iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+                        .Equals(metadata, System.StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
     }
 }
