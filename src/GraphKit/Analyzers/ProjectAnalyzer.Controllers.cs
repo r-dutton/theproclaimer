@@ -39,8 +39,8 @@ public sealed partial class ProjectAnalyzer
         var pointsToFacade = CreatePointsToFacade(callsitePredicate);
         var valueContentFacade = CreateValueContentFacade(callsitePredicate);
 
-        foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
-        {
+            foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
+            {
             var isPublic = method.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword));
             var isAsync = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AsyncKeyword));
             var returnsTask = ReturnsTaskLike(method.ReturnType, model);
@@ -203,6 +203,29 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
+            // Track subsequent string assignments inside the method so later route inference can see them
+            foreach (var assignment in Descendants<AssignmentExpressionSyntax>(method))
+            {
+                if (assignment.Left is IdentifierNameSyntax left)
+                {
+                    // Prefer literal/interpolated resolution
+                    if (ResolveStringValue(assignment.Right) is { } assignedValue)
+                    {
+                        info.LocalStringValues[left.Identifier.Text] = assignedValue;
+                        continue;
+                    }
+
+                    // Heuristic: when assigning AddQueryString(url, ...), keep the base url value
+                    if (assignment.Right is InvocationExpressionSyntax inv)
+                    {
+                        var baseRoute = ResolveRouteFromExpression(inv, info.LocalStringValues);
+                        if (!string.IsNullOrWhiteSpace(baseRoute))
+                        {
+                            info.LocalStringValues[left.Identifier.Text] = baseRoute!;
+                        }
+                    }
+                }
+            }
 
             foreach (var invocation in Descendants<InvocationExpressionSyntax>(method))
             {
@@ -935,6 +958,11 @@ public sealed partial class ProjectAnalyzer
                 routeLiteral = httpArguments.Arguments[0].Expression;
             }
             var relativePath = ExtractRouteLiteral(tree, routeLiteral) ?? ResolveRouteFromExpression(routeLiteral, info.LocalStringValues);
+            if (!string.IsNullOrWhiteSpace(relativePath))
+            {
+                var q = relativePath!.IndexOf('?', StringComparison.Ordinal);
+                if (q >= 0) relativePath = relativePath![..q];
+            }
             var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
                 ? resolvedBaseType
                 : baseTypeName;
@@ -942,7 +970,40 @@ public sealed partial class ProjectAnalyzer
             var targetService = ResolveClientTargetService(clientType);
             info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, httpVerb, relativePath, line, clientMethod, targetService));
         }
-        else if (qualifiedType.Contains("IMapper", StringComparison.Ordinal) && access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
+        else
+        {
+            // Treat service wrappers (e.g., DataverseService) that expose HTTP-shaped methods as client calls
+            var methodName = serviceMethod ?? access.Name switch
+            {
+                GenericNameSyntax g => g.Identifier.Text,
+                IdentifierNameSyntax i => i.Identifier.Text,
+                _ => access.Name.ToString()
+            };
+            var inferredVerb = TryInferHttpMethodFromWrapperName(methodName) ?? NormalizeHttpVerb(methodName);
+            ExpressionSyntax? routeExpr = null;
+            if (invocation.ArgumentList is { Arguments.Count: > 0 } wrapperArgs)
+            {
+                routeExpr = wrapperArgs.Arguments[0].Expression;
+            }
+            var inferredRoute = ExtractRouteLiteral(tree, routeExpr) ?? ResolveRouteFromExpression(routeExpr, info.LocalStringValues);
+            if (!string.IsNullOrWhiteSpace(inferredRoute))
+            {
+                var q2 = inferredRoute!.IndexOf('?', StringComparison.Ordinal);
+                if (q2 >= 0) inferredRoute = inferredRoute![..q2];
+            }
+            if (inferredVerb is not null && !string.IsNullOrWhiteSpace(inferredRoute))
+            {
+                var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
+                    ? resolvedBaseType
+                    : baseTypeName;
+                var line = GetLineNumber(tree, invocation);
+                var targetService = ResolveClientTargetService(clientType);
+                info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, inferredVerb, inferredRoute, line, methodName, targetService));
+                RecordControllerHttpClientFact(info, clientType, inferredVerb, inferredRoute, methodName, line);
+                recordedServiceUsage = true;
+            }
+        }
+        if (!recordedServiceUsage && qualifiedType.Contains("IMapper", StringComparison.Ordinal) && access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
         {
             var destination = mapperGeneric.TypeArgumentList.Arguments.LastOrDefault()?.ToString();
             string? sourceExpression = null;
@@ -962,7 +1023,7 @@ public sealed partial class ProjectAnalyzer
             info.MappingInvocations.Add(new ControllerMappingInvocation(sourceType, destination, assignedVariable, line));
             recordedServiceUsage = true;
         }
-        else if (qualifiedType.Contains("IMapper", StringComparison.Ordinal) && access.Name is IdentifierNameSyntax { Identifier.Text: "Map" })
+        else if (!recordedServiceUsage && qualifiedType.Contains("IMapper", StringComparison.Ordinal) && access.Name is IdentifierNameSyntax { Identifier.Text: "Map" })
         {
             string? destination = null;
             string? sourceExpression = null;
@@ -1245,6 +1306,10 @@ public sealed partial class ProjectAnalyzer
                 if (!string.IsNullOrWhiteSpace(requestType))
                 {
                     dispatchKind = "requestprocessor.dispatch";
+                    // Also record a controller-level request fact so downstream renderers have invocation context
+                    // Use the current method identifier (e.g., Process/ProcessAsync) for richer narrative
+                    var methodIdentifier = access.Name is GenericNameSyntax gg ? gg.Identifier.Text : access.Name.Identifier.Text;
+                    RecordControllerRequestFact(info, requestType!, methodIdentifier, serviceLine);
                 }
             }
 
@@ -1989,6 +2054,56 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
+            // Heuristic: infer entity writes from domain mutations performed on instances originating from repositories
+            if (domainSummaries.Count > 0 && action.DomainLocalTypes.Count > 0)
+            {
+                foreach (var domainCall in domainSummaries)
+                {
+                    if (string.IsNullOrWhiteSpace(domainCall.Instance) || string.IsNullOrWhiteSpace(domainCall.Method))
+                    {
+                        continue;
+                    }
+
+                    if (!action.DomainLocalTypes.TryGetValue(domainCall.Instance!, out var boundEntityType) || string.IsNullOrWhiteSpace(boundEntityType))
+                    {
+                        var normalizedInstance = NormalizeExpressionKey(domainCall.Instance!);
+                        if (!string.IsNullOrWhiteSpace(normalizedInstance))
+                        {
+                            action.DomainLocalTypes.TryGetValue(normalizedInstance!, out boundEntityType);
+                        }
+                    }
+
+                    if (string.IsNullOrWhiteSpace(boundEntityType))
+                    {
+                        continue;
+                    }
+
+                    if (!IsLikelyMutationMethod(domainCall.Method))
+                    {
+                        continue;
+                    }
+
+                    if (TryResolveNodeReference(boundEntityType!, out var entityRef, action.Assembly, action.Project))
+                    {
+                        _edges.Add(new GraphEdge
+                        {
+                            From = id,
+                            To = entityRef.Id,
+                            Kind = "writes_to",
+                            Source = "static",
+                            Confidence = 1.0,
+                            Transform = new GraphTransform
+                            {
+                                Type = "repository.write",
+                                Location = new GraphLocation { File = action.FilePath, Line = domainCall.Line }
+                            },
+                            Props = new Dictionary<string, object> { ["operation"] = "write" },
+                            Evidence = CreateEvidence(action.FilePath, domainCall.Line)
+                        });
+                    }
+                }
+            }
+
             foreach (var serviceGroup in action.ServiceUsages
                 .GroupBy(s => s.ServiceType, StringComparer.OrdinalIgnoreCase))
             {
@@ -2490,6 +2605,23 @@ public sealed partial class ProjectAnalyzer
                 });
             }
         }
+    }
+
+    private static bool IsLikelyMutationMethod(string methodName)
+    {
+        if (string.IsNullOrWhiteSpace(methodName)) return false;
+        // Common mutation verbs seen across aggregates
+        if (methodName.StartsWith("Set", StringComparison.OrdinalIgnoreCase)) return true;
+        if (methodName.StartsWith("Add", StringComparison.OrdinalIgnoreCase)) return true;
+        if (methodName.StartsWith("Update", StringComparison.OrdinalIgnoreCase)) return true;
+        if (methodName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase)) return true;
+        if (methodName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase)) return true;
+        if (methodName.StartsWith("Create", StringComparison.OrdinalIgnoreCase)) return true;
+        if (methodName.StartsWith("Bulk", StringComparison.OrdinalIgnoreCase)) return true;
+        // Explicit known cases
+        if (string.Equals(methodName, "Activate", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(methodName, "Restore", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     private string? TryGetRootIdentifier(ExpressionSyntax expression)

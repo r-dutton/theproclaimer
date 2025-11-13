@@ -134,6 +134,31 @@ internal static class AnalysisPredicates
             }
         }
 
+        // Recognize wrapper methods that look like HTTP calls by verb naming
+        if (LooksLikeHttpWrapper(method.Name))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeHttpWrapper(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        foreach (var verb in HttpWrapperVerbs)
+        {
+            if (name.Equals(verb, StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(verb + "Async", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -484,4 +509,15 @@ internal static class AnalysisPredicates
 
         return invocation.TargetMethod.ContainingType;
     }
+
+    private static readonly string[] HttpWrapperVerbs =
+    {
+        "Get",
+        "Post",
+        "Put",
+        "Delete",
+        "Patch",
+        "Head",
+        "Options"
+    };
 }

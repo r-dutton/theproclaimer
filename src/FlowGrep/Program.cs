@@ -124,6 +124,13 @@ for (int i = 0; i < argsList.Count; i++)
     }
 }
 
+var requestedMermaid = format.Equals("mermaid", StringComparison.OrdinalIgnoreCase);
+if (requestedMermaid)
+{
+    Console.Error.WriteLine("[warn] Mermaid output has been retired; defaulting to markdown.");
+    format = "md";
+}
+
 renderStyle = renderStyle.Equals("graph", StringComparison.OrdinalIgnoreCase)
     ? "graph"
     : "narrative";
@@ -237,36 +244,18 @@ try
             var sb = new StringBuilder();
             var wroteAny = false;
 
-            if (format.Equals("mermaid", StringComparison.OrdinalIgnoreCase))
+            foreach (var entry in narratives)
             {
-                var diagrams = FlowBuilderMermaid.Render(graph, includeFlow: node => matchedIds.Contains(node.Id));
-                foreach (var diagram in diagrams)
+                if (matchedIds.Count > 0 && !matchedIds.Contains(entry.Endpoint.Id))
                 {
-                    sb.AppendLine($"## {diagram.Endpoint.DisplayName}");
-                    sb.AppendLine();
-                    sb.AppendLine("```mermaid");
-                    sb.AppendLine(diagram.Diagram);
-                    sb.AppendLine("```");
-                    sb.AppendLine();
-                    wroteAny = true;
-                    matchedIds.Remove(diagram.Endpoint.Id);
+                    continue;
                 }
-            }
-            else
-            {
-                foreach (var entry in narratives)
-                {
-                    if (matchedIds.Count > 0 && !matchedIds.Contains(entry.Endpoint.Id))
-                    {
-                        continue;
-                    }
 
-                    sb.Append(entry.Text.TrimEnd());
-                    sb.AppendLine();
-                    sb.AppendLine();
-                    wroteAny = true;
-                    matchedIds.Remove(entry.Endpoint.Id);
-                }
+                sb.Append(entry.Text.TrimEnd());
+                sb.AppendLine();
+                sb.AppendLine();
+                wroteAny = true;
+                matchedIds.Remove(entry.Endpoint.Id);
             }
 
             if (matchedIds.Count > 0)

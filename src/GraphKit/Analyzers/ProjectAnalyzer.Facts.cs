@@ -246,6 +246,12 @@ public sealed partial class ProjectAnalyzer
         {
             edgeProps["invocation"] = invocationName;
         }
+        // Include pipeline behaviors if known so narrative can render them
+        var pipelineLabels = ResolvePipelineBehaviorsForRequest(requestInfo?.Fqdn ?? requestType);
+        if (pipelineLabels.Count > 0)
+        {
+            edgeProps["pipeline_behaviors"] = string.Join(", ", pipelineLabels);
+        }
         AddSource(edgeProps, action.FilePath, line);
         AddFactEdge(_facts, controllerId, requestId, "sends_request", edgeProps);
 

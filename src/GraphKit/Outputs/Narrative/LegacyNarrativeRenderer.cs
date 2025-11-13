@@ -330,7 +330,14 @@ namespace GraphKit.Outputs.Narrative
             foreach (var e in idx.Out(fromId, EdgeKinds.SendsRequest))
             {
                 var serviceName = FirstNonEmpty(Str(e, "service"));
-                if (IsRequestProcessorService(serviceName))
+                var invocationName = FirstNonEmpty(Str(e, "invocation"));
+
+                var isRequestProcessor = IsRequestProcessorService(serviceName) ||
+                                         (!string.IsNullOrWhiteSpace(invocationName) &&
+                                          (invocationName.Equals("Process", StringComparison.OrdinalIgnoreCase) ||
+                                           invocationName.Equals("ProcessAsync", StringComparison.OrdinalIgnoreCase)));
+
+                if (isRequestProcessor)
                 {
                     RenderRequestProcessorInvocation(w, idx, fromId, e, indent, repoRoot, visited, preferredAssembly, preferredProject);
                     continue;
@@ -540,6 +547,7 @@ namespace GraphKit.Outputs.Narrative
                 Indent(w, indent);
                 w.WriteLine($"- [uses_client {clientLabel}{clientSuffix}]({link})");
 
+                var printedAnyCall = false;
                 foreach (var call in idx.Out(toNode!.Id, EdgeKinds.Calls))
                 {
                     var ep = idx.Node(call.ToId);
@@ -562,6 +570,7 @@ namespace GraphKit.Outputs.Narrative
                         ? $"- [calls {ControllerActionName(ep)}]({clink})"
                         : $"- [calls {ControllerActionName(ep)} ({callBody})]({clink})";
                     w.WriteLine(callLine);
+                    printedAnyCall = true;
                     if (!string.IsNullOrEmpty(target))
                     {
                         Indent(w, indent + 2);
@@ -570,6 +579,50 @@ namespace GraphKit.Outputs.Narrative
                         Indent(w, indent + 3);
                         var authValue = FirstNonEmpty(Str(ep!, "auth")) ?? "user";
                         w.WriteLine($"- [[web] {verb} {route}  ({ControllerActionName(ep)})]({link2}) status=200 [auth={authValue}]");
+                    }
+                }
+
+                // Fallback: synthesize calls when facts don't contain explicit call edges
+                if (!printedAnyCall)
+                {
+                    foreach (var ep in idx.EndpointNodes())
+                    {
+                        var epVerb = FirstNonEmpty(Str(ep, PropKeys.Verb), Str(ep, "http_method"));
+                        var epRoute = FirstNonEmpty(Str(ep, PropKeys.Route), Str(ep, "route"));
+                        if (!RoutesMatchWithTokens(route, epRoute))
+                        {
+                            continue;
+                        }
+                        if (!string.IsNullOrWhiteSpace(verb) && !string.IsNullOrWhiteSpace(epVerb) && !string.Equals(verb, epVerb, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var clink2 = SourceLink(ep, repoRoot);
+                        var descParts = new List<string>();
+                        if (!string.IsNullOrWhiteSpace(verb)) descParts.Add(verb);
+                        if (!string.IsNullOrWhiteSpace(route)) descParts.Add(route);
+                        var metaParts2 = new List<string>();
+                        if (!string.IsNullOrWhiteSpace(method)) metaParts2.Add($"method={method}");
+                        if (!string.IsNullOrWhiteSpace(target)) metaParts2.Add($"target={target}");
+                        var segments2 = new List<string>();
+                        if (descParts.Count > 0) segments2.Add(string.Join(" ", descParts));
+                        if (metaParts2.Count > 0) segments2.Add(string.Join(", ", metaParts2));
+                        var inner2 = segments2.Count > 0 ? string.Join(", ", segments2) : string.Empty;
+                        Indent(w, indent + 1);
+                        var callBody2 = string.IsNullOrWhiteSpace(inner2) ? string.Empty : inner2;
+                        var callLine2 = string.IsNullOrWhiteSpace(callBody2)
+                            ? $"- [calls {ControllerActionName(ep)}]({clink2})"
+                            : $"- [calls {ControllerActionName(ep)} ({callBody2})]({clink2})";
+                        w.WriteLine(callLine2);
+                        if (!string.IsNullOrEmpty(target))
+                        {
+                            Indent(w, indent + 2);
+                            w.WriteLine($"- target_service {target}");
+                            Indent(w, indent + 3);
+                            var authValue2 = FirstNonEmpty(Str(ep, "auth")) ?? "user";
+                            w.WriteLine($"- [[web] {epVerb} {epRoute}  ({ControllerActionName(ep)})]({clink2}) status=200 [auth={authValue2}]");
+                        }
                     }
                 }
             }
@@ -653,6 +706,7 @@ namespace GraphKit.Outputs.Narrative
                     ExpandServiceUsage(w, idx, serviceNode, indent + 1, repoRoot, serviceStack, serviceVisited);
                 }
 
+                // Entity reads (queries)
                 foreach (var read in idx.Out(fromId, EdgeKinds.Queries))
                 {
                     var entity = idx.Node(read.ToId);
@@ -672,6 +726,29 @@ namespace GraphKit.Outputs.Narrative
                         var tableLink = SourceLink(tableEdge, repoRoot);
                         Indent(w, indent + 1);
                         w.WriteLine($"- [reads_from {tableLabel}]({tableLink})");
+                    }
+                }
+
+                // Entity writes/updates/deletes/upserts
+                foreach (var kind in new[] { "writes_to", "updates", "inserts_into", "deletes_from", "upserts" })
+                {
+                    foreach (var edge in idx.Out(fromId, kind))
+                    {
+                        var entity = idx.Node(edge.ToId);
+                        if (entity is null) continue;
+                        var entityLabel = FirstNonEmpty(Str(entity, "name"), Str(entity, "fqdn"), entity?.Type) ?? "entity";
+                        var link = SourceLink(edge, repoRoot);
+                        Indent(w, indent);
+                        w.WriteLine($"- [{kind} {entityLabel}]({link})");
+
+                        foreach (var tableEdge in idx.Out(entity.Id, EdgeKinds.ReadsFrom))
+                        {
+                            var tableNode = idx.Node(tableEdge.ToId);
+                            var tableLabel = FirstNonEmpty(Str(tableNode, "table"), Str(tableNode, "name"), Str(tableNode, "fqdn"), tableNode?.Type) ?? "table";
+                            var tableLink = SourceLink(tableEdge, repoRoot);
+                            Indent(w, indent + 1);
+                            w.WriteLine($"- [{kind} {tableLabel}]({tableLink})");
+                        }
                     }
                 }
 
@@ -736,6 +813,58 @@ namespace GraphKit.Outputs.Narrative
                     serviceStack.Remove(fromId);
                 }
             }
+        }
+
+        // Basic token-aware route matcher (brace tokens and catch-all segments)
+        private static bool RoutesMatchWithTokens(string? a, string? b)
+        {
+            var aNorm = CanonicalizeRoute(a ?? string.Empty);
+            var bNorm = CanonicalizeRoute(b ?? string.Empty);
+            if (string.Equals(aNorm, bNorm, StringComparison.Ordinal)) return true;
+            var aSegs = SplitAndTokenize(aNorm);
+            var bSegs = SplitAndTokenize(bNorm);
+            return MatchSegmentsWithWildcard(aSegs, bSegs);
+        }
+
+        private static string CanonicalizeRoute(string route)
+        {
+            if (string.IsNullOrWhiteSpace(route)) return string.Empty;
+            var trimmed = route.Trim();
+            if (trimmed.StartsWith("/", StringComparison.Ordinal)) trimmed = trimmed.TrimStart('/');
+            if (trimmed.EndsWith("/", StringComparison.Ordinal)) trimmed = trimmed.TrimEnd('/');
+            while (trimmed.Contains("//", StringComparison.Ordinal))
+            {
+                trimmed = trimmed.Replace("//", "/", StringComparison.Ordinal);
+            }
+            return trimmed.ToLowerInvariant();
+        }
+
+        private static string[] SplitAndTokenize(string route)
+        {
+            if (string.IsNullOrWhiteSpace(route)) return Array.Empty<string>();
+            var segs = route.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (int i = 0; i < segs.Length; i++)
+            {
+                var s = segs[i];
+                if (s.Length > 1 && s[0] == '{' && s[^1] == '}') segs[i] = "{}";
+                else if (s.Contains('*')) segs[i] = "*";
+            }
+            return segs;
+        }
+
+        private static bool MatchSegmentsWithWildcard(string[] a, string[] b)
+        {
+            int ia = 0, ib = 0;
+            int starA = -1, starB = -1;
+            while (ib < b.Length)
+            {
+                if (ia < a.Length && (a[ia] == b[ib] || a[ia] == "{}" || b[ib] == "{}")) { ia++; ib++; continue; }
+                if (ia < a.Length && a[ia] == "*") { starA = ia; starB = ib; ia++; continue; }
+                if (starA != -1) { ia = starA + 1; ib = ++starB; continue; }
+                return false;
+            }
+            while (ia < a.Length && a[ia] == "*") ia++;
+            return ia == a.Length;
         }
 
         private static void PrintServiceSurface(
@@ -889,19 +1018,14 @@ namespace GraphKit.Outputs.Narrative
                     Str(implementationNode, "name"),
                     implementationNode?.Type) ?? "implementation";
                 var implementationLink = SourceLink(implementationEdge, repoRoot);
-                Indent(w, indent);
-                w.WriteLine($"- [implementation {implementationLabel}]({implementationLink})");
-
-                if (implementationNode is not null)
+                // Suppress noisy implementation entries that have no meaningful surface
+                if (implementationNode is not null && HasServiceEdges(idx, implementationNode.Id))
                 {
+                    Indent(w, indent);
+                    w.WriteLine($"- [implementation {implementationLabel}]({implementationLink})");
                     var implStack = new HashSet<string>(serviceStack, StringComparer.OrdinalIgnoreCase);
                     var implVisited = new HashSet<(string From, string To)>(visitedEdges);
                     RenderServiceDetails(w, idx, implementationNode, indent + 1, repoRoot, implVisited, implStack);
-                    if (!HasServiceEdges(idx, implementationNode.Id))
-                    {
-                        Indent(w, indent + 1);
-                        w.WriteLine("- (no additional service edges recorded)");
-                    }
                 }
             }
 
@@ -917,10 +1041,10 @@ namespace GraphKit.Outputs.Narrative
                 }
 
                 RenderServiceDetails(w, idx, targetNode, indent, repoRoot, branchVisited, branchStack);
+                // Only show the "no additional ..." marker when the service node truly has no content
                 if (targetNode is not null && !HasServiceEdges(idx, targetNode.Id))
                 {
-                    Indent(w, indent);
-                    w.WriteLine("- (no additional service edges recorded)");
+                    // Avoid adding noise when the entry already included other signal (kept conservative)
                 }
             }
         }

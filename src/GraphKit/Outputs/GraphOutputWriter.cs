@@ -10,6 +10,7 @@ using System.Linq;
 using GraphKit.Facts;
 using GraphKit.Graph;
 using GraphKit.Outputs.Abstractions;
+using GraphKit.Outputs.Facts;
 using GraphKit.Outputs.Legacy;
 using GraphKit.Outputs.Narrative;
 using GraphKit.Workspace;
@@ -342,26 +343,41 @@ public sealed class GraphOutputWriter
     }
 
     private static string BuildFlowFileName(LegacyNarrativeRenderer.EndpointNarrative entry)
+        => BuildFlowFileName(
+            entry.Endpoint.Id,
+            entry.Endpoint.Type,
+            entry.ControllerDisplay,
+            entry.ActionName,
+            entry.Verb,
+            entry.Route);
+
+    private static string BuildFlowFileName(
+        string endpointId,
+        string? endpointType,
+        string? controllerDisplay,
+        string? actionName,
+        string? verb,
+        string? route)
     {
-        var controllerPart = string.IsNullOrWhiteSpace(entry.ControllerDisplay)
-            ? entry.Endpoint.Type ?? "controller"
-            : entry.ControllerDisplay;
+        var controllerPart = string.IsNullOrWhiteSpace(controllerDisplay)
+            ? endpointType ?? "controller"
+            : controllerDisplay;
 
-        var actionPart = string.IsNullOrWhiteSpace(entry.ActionName)
-            ? entry.Endpoint.Id
-            : entry.ActionName;
+        var actionPart = string.IsNullOrWhiteSpace(actionName)
+            ? endpointId
+            : actionName;
 
-        var verbPart = string.IsNullOrWhiteSpace(entry.Verb)
+        var verbPart = string.IsNullOrWhiteSpace(verb)
             ? string.Empty
-            : entry.Verb.ToUpperInvariant();
+            : verb.ToUpperInvariant();
 
         var coreName = string.IsNullOrWhiteSpace(verbPart)
             ? $"{controllerPart}_{actionPart}"
             : $"{controllerPart}_{verbPart}_{actionPart}";
 
-        if (!string.IsNullOrWhiteSpace(entry.Route))
+        if (!string.IsNullOrWhiteSpace(route))
         {
-            var routePart = entry.Route
+            var routePart = route
                 .Replace('/', '_')
                 .Replace('{', '_')
                 .Replace('}', '_')

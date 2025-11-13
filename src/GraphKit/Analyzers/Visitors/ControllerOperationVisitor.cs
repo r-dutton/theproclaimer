@@ -102,8 +102,15 @@ public sealed partial class ProjectAnalyzer
             }
 
             var controllerFqdn = containing.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            var controllerSymbolId = _action.ControllerSymbolId;
+            if (string.IsNullOrWhiteSpace(controllerFqdn) || string.IsNullOrWhiteSpace(controllerSymbolId))
+            {
+                return;
+            }
+
+            var containingSymbolId = $"T:{controllerFqdn}";
             // match only helper methods on the same controller type and that are not public
-            if (!string.Equals(controllerFqdn, _action.Fqdn, StringComparison.Ordinal) ||
+            if (!string.Equals(containingSymbolId, controllerSymbolId, StringComparison.Ordinal) ||
                 method.DeclaredAccessibility == Accessibility.Public)
             {
                 return;
@@ -369,7 +376,10 @@ public sealed partial class ProjectAnalyzer
                 var literal = TryGetStringLiteral(argument.Value) ?? ValueContent.TryGetStringValue(argument.Value);
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
-                    return literal;
+                    var noQuery = literal!;
+                    var q = noQuery.IndexOf('?', StringComparison.Ordinal);
+                    if (q >= 0) noQuery = noQuery[..q];
+                    return noQuery;
                 }
             }
 
@@ -379,7 +389,10 @@ public sealed partial class ProjectAnalyzer
                               ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
-                    return literal;
+                    var noQuery = literal!;
+                    var q = noQuery.IndexOf('?', StringComparison.Ordinal);
+                    if (q >= 0) noQuery = noQuery[..q];
+                    return noQuery;
                 }
             }
 
