@@ -264,7 +264,12 @@ public sealed partial class ProjectAnalyzer
                     var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
                     if (!string.IsNullOrWhiteSpace(repositoryType))
                     {
-                        serviceInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType!, methodName ?? string.Empty, line, operation));
+                        var entityType = ExtractRepositoryEntityType(repositoryType!) ?? ExtractRepositoryEntityType(typeName);
+                        if (entityType is null && invocation is not null)
+                        {
+                            entityType = ExtractRepositoryEntityTypeFromInvocation(memberAccess.Name, invocation);
+                        }
+                        serviceInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType!, entityType, methodName ?? string.Empty, line, operation));
                     }
                     continue;
                 }
@@ -570,6 +575,8 @@ public sealed partial class ProjectAnalyzer
                 {
                     continue;
                 }
+
+                RecordServiceClientType(service, clientInvocation.ClientType);
 
                 var props = new Dictionary<string, object>();
                 if (!string.IsNullOrWhiteSpace(clientInvocation.HttpMethod))
@@ -1076,7 +1083,24 @@ public sealed partial class ProjectAnalyzer
 
         foreach (var invocation in service.BaseServiceClientInvocations)
         {
-            foreach (var clientType in ResolveClientTypesForService(invocation.BaseServiceType, invocation.ServiceAssembly))
+            var clientTypes = new HashSet<string>(ResolveClientTypesForService(invocation.BaseServiceType, invocation.ServiceAssembly), StringComparer.OrdinalIgnoreCase);
+            if (clientTypes.Count == 0 && invocation.CandidateClientTypes is { Count: > 0 })
+            {
+                foreach (var candidate in invocation.CandidateClientTypes)
+                {
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                    {
+                        clientTypes.Add(candidate);
+                    }
+                }
+            }
+
+            if (clientTypes.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var clientType in clientTypes)
             {
                 service.HttpClientInvocations.Add(new HandlerClientInvocation(
                     clientType,

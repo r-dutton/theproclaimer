@@ -427,8 +427,23 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
+            if (IsRepositoryExtension(invocation.TargetMethod))
+            {
+                return;
+            }
+
             var clientType = Qualify(receiver);
             if (string.IsNullOrWhiteSpace(clientType))
+            {
+                return;
+            }
+
+            if (LooksLikeDomainType(receiver, clientType))
+            {
+                return;
+            }
+
+            if (IsCacheService(clientType!))
             {
                 return;
             }
@@ -502,15 +517,20 @@ public sealed partial class ProjectAnalyzer
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
             var line = GetInvocationLine(invocation);
 
+            var baseTypeSymbol = invocation.TargetMethod?.ContainingType;
+            var baseType = Qualify(baseTypeSymbol) ?? _service.Fqdn;
+            var candidateClients = ExtractWrapperClientCandidates(invocation.TargetMethod);
+
             _service.BaseServiceClientInvocations.Add(new BaseServiceClientInvocation(
-                _service.Fqdn,
+                baseType,
                 _assembly,
                 methodName!,
                 httpVerb ?? string.Empty,
                 normalizedRoute,
                 parameters,
                 line,
-                _ownerMethod));
+                _ownerMethod,
+                candidateClients));
         }
 
         private static bool IsRouteParameter(IParameterSymbol? parameter)
@@ -626,6 +646,174 @@ public sealed partial class ProjectAnalyzer
             }
 
             return 0;
+        }
+
+        private IReadOnlyCollection<string>? ExtractWrapperClientCandidates(IMethodSymbol? wrapperMethod)
+        {
+            if (wrapperMethod is null)
+            {
+                return null;
+            }
+
+            var collector = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var visited = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+            var stack = new Stack<ITypeSymbol?>();
+            if (wrapperMethod.ContainingType is { } containing)
+            {
+                stack.Push(containing);
+            }
+
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+                if (current is null || !visited.Add(current))
+                {
+                    continue;
+                }
+
+                foreach (var member in current.GetMembers())
+                {
+                    switch (member)
+                    {
+                        case IFieldSymbol field when !field.IsStatic:
+                            TryAddClientCandidate(field.Type, collector);
+                            break;
+                        case IPropertySymbol property when !property.IsStatic:
+                            TryAddClientCandidate(property.Type, collector);
+                            break;
+                    }
+                }
+
+                if (current.BaseType is not null)
+                {
+                    stack.Push(current.BaseType);
+                }
+            }
+
+            return collector.Count > 0 ? collector.ToArray() : null;
+        }
+
+        private void TryAddClientCandidate(ITypeSymbol? candidateType, HashSet<string> collector)
+        {
+            if (candidateType is null)
+            {
+                return;
+            }
+
+            var qualified = Qualify(candidateType);
+            if (string.IsNullOrWhiteSpace(qualified))
+            {
+                return;
+            }
+
+            if (!LooksLikeHttpClientCandidate(candidateType, qualified!))
+            {
+                return;
+            }
+
+            collector.Add(qualified!);
+        }
+
+        private static bool LooksLikeHttpClientCandidate(ITypeSymbol typeSymbol, string qualifiedName)
+        {
+            static bool NameMatches(string candidate)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    return false;
+                }
+
+                return candidate.IndexOf("HttpClient", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       candidate.IndexOf("RestClient", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       candidate.IndexOf("OAuthClient", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       candidate.IndexOf("ApiClient", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       candidate.EndsWith("Client", StringComparison.OrdinalIgnoreCase) ||
+                       candidate.EndsWith("Proxy", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (NameMatches(qualifiedName))
+            {
+                return true;
+            }
+
+            if (typeSymbol is INamedTypeSymbol named)
+            {
+                foreach (var iface in named.AllInterfaces)
+                {
+                    var ifaceName = iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                    if (NameMatches(ifaceName))
+                    {
+                        return true;
+                    }
+                }
+
+                var current = named;
+                while (current is not null && !string.Equals(current.Name, "Object", StringComparison.Ordinal))
+                {
+                    var currentDisplay = current.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                    if (NameMatches(currentDisplay))
+                    {
+                        return true;
+                    }
+
+                    current = current.BaseType;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool LooksLikeDomainType(ITypeSymbol? symbol, string? typeName)
+        {
+            if (symbol is not null)
+            {
+                var ns = symbol.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (!string.IsNullOrWhiteSpace(ns) && ns.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (display.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                if (typeName!.IndexOf(".DomainModel.", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    typeName.IndexOf(".Domain.", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsRepositoryExtension(IMethodSymbol method)
+        {
+            if (method is null)
+            {
+                return false;
+            }
+
+            var container = method.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(container) &&
+                container.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            var ns = method.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(ns) &&
+                ns.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

@@ -67,6 +67,10 @@ internal static class ClientLinker
                 }
 
                 var canonicalRoute = CanonicalizeRoute(rawRoute!);
+                if (!LooksSpecific(canonicalRoute))
+                {
+                    continue;
+                }
                 var normalizedVerb = NormalizeHttpVerb(props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null);
 
                 var clientId = uses.To;
@@ -248,6 +252,24 @@ internal static class ClientLinker
             trimmed = trimmed.Replace("//", "/", StringComparison.Ordinal);
         }
         return trimmed.ToLowerInvariant();
+    }
+
+    private static bool LooksSpecific(string canonicalRoute)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalRoute))
+        {
+            return false;
+        }
+
+        foreach (var ch in canonicalRoute)
+        {
+            if (char.IsLetter(ch))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string? NormalizeHttpVerb(string? verb)

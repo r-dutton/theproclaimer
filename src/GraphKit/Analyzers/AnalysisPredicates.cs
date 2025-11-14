@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -111,7 +112,34 @@ internal static class AnalysisPredicates
             return false;
         }
 
+        var methodName = method.Name;
+        if (string.Equals(methodName, "Include", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(methodName, "ThenInclude", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var definition = method.ReducedFrom ?? method;
+        if (definition.IsExtensionMethod && definition.Parameters.Length > 0)
+        {
+            var firstParamType = definition.Parameters[0].Type;
+            if (IsQueryableLikeType(firstParamType) || IsRepositoryType(firstParamType))
+            {
+                return false;
+            }
+        }
+
         var receiver = GetReceiverType(invocation);
+        if (IsQueryableLikeType(receiver))
+        {
+            return false;
+        }
+
+        if (IsCachingType(receiver) || IsCachingType(method.ContainingType))
+        {
+            return false;
+        }
+
         if (IsHttpClientType(receiver) || IsHttpClientType(method.ContainingType))
         {
             return true;
@@ -136,6 +164,68 @@ internal static class AnalysisPredicates
 
         // Recognize wrapper methods that look like HTTP calls by verb naming
         if (LooksLikeHttpWrapper(method.Name))
+        {
+            if (IsRepositoryType(receiver) || IsRepositoryType(method.ContainingType))
+            {
+                return false;
+            }
+
+            var containingTypeForWrapper = (method.ReducedFrom ?? method).ContainingType;
+            if (containingTypeForWrapper is not null)
+            {
+                var containerName = containingTypeForWrapper.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (containerName.IndexOf("Extensions", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return false;
+                }
+            }
+
+            if (!IsLikelyHttpWrapperType(receiver) && !IsLikelyHttpWrapperType(method.ContainingType))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsCachingType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (MatchesMetadataName(type, "Microsoft.Extensions.Caching.Memory.IMemoryCache") ||
+            MatchesMetadataName(type, "Microsoft.Extensions.Caching.Memory.MemoryCache") ||
+            MatchesMetadataName(type, "Microsoft.Extensions.Caching.Distributed.IDistributedCache") ||
+            MatchesMetadataName(type, "Microsoft.Extensions.Caching.Distributed.IDistributedCacheExtensions"))
+        {
+            return true;
+        }
+
+        if (type is INamedTypeSymbol named)
+        {
+            foreach (var iface in named.AllInterfaces)
+            {
+                if (MatchesMetadataName(iface, "Microsoft.Extensions.Caching.Memory.IMemoryCache") ||
+                    iface.Name.Contains("Cache", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        if (display.IndexOf("Caching", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        if (display.IndexOf("Cache", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            display.IndexOf("Http", StringComparison.OrdinalIgnoreCase) < 0)
         {
             return true;
         }
@@ -162,6 +252,38 @@ internal static class AnalysisPredicates
         return false;
     }
 
+    private static bool IsLikelyHttpWrapperType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        if (display.IndexOf("Http", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            display.IndexOf("Client", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            display.IndexOf("Proxy", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        if (type is INamedTypeSymbol named)
+        {
+            foreach (var iface in named.AllInterfaces)
+            {
+                var ifaceName = iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (ifaceName.IndexOf("Http", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ifaceName.IndexOf("Client", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ifaceName.IndexOf("Proxy", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public static bool IsMapperMap(IInvocationOperation invocation)
     {
         if (invocation.TargetMethod is not { } method)
@@ -180,6 +302,38 @@ internal static class AnalysisPredicates
         if (string.Equals(method.Name, "ProjectByIdAsync", StringComparison.Ordinal))
         {
             return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsQueryableLikeType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (MatchesMetadataName(type, "System.Linq.IQueryable"))
+        {
+            return true;
+        }
+
+        if (MatchesMetadataName(type, "System.Collections.Generic.IEnumerable`1"))
+        {
+            return true;
+        }
+
+        if (type is INamedTypeSymbol named)
+        {
+            foreach (var iface in named.AllInterfaces)
+            {
+                if (MatchesMetadataName(iface, "System.Linq.IQueryable") ||
+                    MatchesMetadataName(iface, "System.Collections.Generic.IEnumerable`1"))
+                {
+                    return true;
+                }
+            }
         }
 
         return false;
@@ -329,7 +483,14 @@ internal static class AnalysisPredicates
         }
 
         var display = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-        if (display.Contains("Repository", StringComparison.OrdinalIgnoreCase))
+        if (display.Contains("Repository", StringComparison.OrdinalIgnoreCase) ||
+            LooksLikeRepositoryFacade(display))
+        {
+            return true;
+        }
+
+        var simpleName = TrimGenericArity(type.Name);
+        if (LooksLikeRepositorySimpleName(simpleName))
         {
             return true;
         }
@@ -339,7 +500,9 @@ internal static class AnalysisPredicates
             foreach (var iface in named.AllInterfaces)
             {
                 var ifaceName = iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-                if (ifaceName.Contains("Repository", StringComparison.OrdinalIgnoreCase))
+                if (ifaceName.Contains("Repository", StringComparison.OrdinalIgnoreCase) ||
+                    LooksLikeRepositoryFacade(ifaceName) ||
+                    LooksLikeRepositorySimpleName(TrimGenericArity(iface.Name)))
                 {
                     return true;
                 }
@@ -507,7 +670,25 @@ internal static class AnalysisPredicates
             return invocation.Arguments[0].Value.Type;
         }
 
-        return invocation.TargetMethod.ContainingType;
+        if (invocation.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax memberAccess })
+        {
+            var model = invocation.SemanticModel;
+            if (model is not null)
+            {
+                var expressionType = model.GetTypeInfo(memberAccess.Expression);
+                if (expressionType.Type is { } type)
+                {
+                    return type;
+                }
+
+                if (expressionType.ConvertedType is { } converted)
+                {
+                    return converted;
+                }
+            }
+        }
+
+            return invocation.TargetMethod.ContainingType;
     }
 
     private static readonly string[] HttpWrapperVerbs =
@@ -520,4 +701,57 @@ internal static class AnalysisPredicates
         "Head",
         "Options"
     };
+
+    private static bool LooksLikeRepositoryFacade(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        var normalized = typeName!;
+        if (normalized.IndexOf(".IRead", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            normalized.IndexOf(".IWrite", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            normalized.IndexOf(".IControlledRepository", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            normalized.IndexOf(".IReadRepository", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            normalized.IndexOf(".IWriteRepository", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeRepositorySimpleName(string? simpleName)
+    {
+        if (string.IsNullOrWhiteSpace(simpleName))
+        {
+            return false;
+        }
+
+        var trimmed = TrimGenericArity(simpleName);
+        if (trimmed.Contains("Repository", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return trimmed.Equals("IRead", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("IWrite", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("IControlledRepository", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("IReadRepository", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("IWriteRepository", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("IReadOnlyRepository", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("IWriteOnlyRepository", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string TrimGenericArity(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        var tickIndex = name.IndexOf('`');
+        return tickIndex >= 0 ? name[..tickIndex] : name;
+    }
 }

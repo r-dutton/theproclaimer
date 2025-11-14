@@ -140,7 +140,13 @@ public sealed partial class ProjectAnalyzer
                 if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
                 {
                     var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                    info.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
+                    var entityType = ExtractRepositoryEntityType(resolvedType);
+                    if (entityType is null && invocation is not null)
+                    {
+                        entityType = ExtractRepositoryEntityTypeFromInvocation(memberAccess.Name, invocation);
+                    }
+
+                    info.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, entityType, methodName ?? string.Empty, line, operation));
                     continue;
                 }
 

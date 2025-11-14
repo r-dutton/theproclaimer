@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using GraphKit.Constants;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
@@ -941,7 +942,13 @@ public sealed partial class ProjectAnalyzer
         string? serviceTargetType = null;
         var recordedServiceUsage = false;
 
-        if (IsClientType(baseTypeName) || IsClientType(resolvedBaseType))
+        var repositoryFacade =
+            LooksLikeRepositoryFacadeType(baseTypeName) ||
+            LooksLikeRepositoryFacadeType(resolvedBaseType) ||
+            LooksLikeRepositoryFacadeType(qualifiedType) ||
+            LooksLikeRepositoryFacadeType(resolvedType);
+
+        if ((IsClientType(baseTypeName) || IsClientType(resolvedBaseType)) && !repositoryFacade)
         {
             var clientMethod = serviceMethod ?? access.Name switch
             {
@@ -966,12 +973,24 @@ public sealed partial class ProjectAnalyzer
             var clientType = !string.Equals(resolvedBaseType, baseTypeName, StringComparison.Ordinal)
                 ? resolvedBaseType
                 : baseTypeName;
+            if (LooksLikeRepositoryFacadeType(clientType))
+            {
+                return;
+            }
             var line = GetLineNumber(tree, invocation);
             var targetService = ResolveClientTargetService(clientType);
             info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, httpVerb, relativePath, line, clientMethod, targetService));
         }
         else
         {
+            if (LooksLikeRepositoryFacadeType(baseTypeName) || LooksLikeRepositoryFacadeType(resolvedBaseType))
+            {
+                // Treat as repository/domain invocation, not an HTTP client wrapper.
+                recordedServiceUsage = repositoryEntityResolved;
+                // fall through to other handlers (repository capture already handled earlier)
+            }
+            else
+            {
             // Treat service wrappers (e.g., DataverseService) that expose HTTP-shaped methods as client calls
             var methodName = serviceMethod ?? access.Name switch
             {
@@ -1001,6 +1020,7 @@ public sealed partial class ProjectAnalyzer
                 info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, inferredVerb, inferredRoute, line, methodName, targetService));
                 RecordControllerHttpClientFact(info, clientType, inferredVerb, inferredRoute, methodName, line);
                 recordedServiceUsage = true;
+            }
             }
         }
         if (!recordedServiceUsage && qualifiedType.Contains("IMapper", StringComparison.Ordinal) && access.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
@@ -1064,6 +1084,14 @@ public sealed partial class ProjectAnalyzer
             {
                 info.CacheInvocations.Add(cacheInvocation);
             }
+        }
+        else if (IsLoggerType(resolvedType) || IsLoggerType(qualifiedType))
+        {
+            var loggerType = IsLoggerType(resolvedType) ? resolvedType : qualifiedType;
+            var line = GetLineNumber(tree, invocation);
+            var invocationName = serviceMethod ?? access.Name.ToString();
+            info.ServiceUsages.Add(new ServiceUsage(loggerType ?? "Serilog.Log", line, Method: invocationName, InvocationMethod: invocationName));
+            recordedServiceUsage = true;
         }
         else if (IsRepositoryType(resolvedType) || IsRepositoryType(qualifiedType))
         {
@@ -1971,6 +1999,14 @@ public sealed partial class ProjectAnalyzer
                 .Select(group => group.OrderBy(r => r.Line).First()))
             {
                 NodeReference? repositoryReference = null;
+                NodeReference? entityReference = null;
+
+                if (!string.IsNullOrWhiteSpace(repository.EntityType) &&
+                    TryResolveNodeReference(repository.EntityType, out var resolvedEntity, action.Assembly, action.Project))
+                {
+                    entityReference = resolvedEntity;
+                }
+
                 if (!string.IsNullOrWhiteSpace(repository.RepositoryType) &&
                     TryResolveNodeReference(repository.RepositoryType, out var directReference, action.Assembly, action.Project))
                 {
@@ -1987,6 +2023,17 @@ public sealed partial class ProjectAnalyzer
                     }
                 }
 
+                if (repositoryReference is null && !string.IsNullOrWhiteSpace(repository.RepositoryType))
+                {
+                    repositoryReference = EnsureSyntheticRepositoryNode(
+                        repository.RepositoryType,
+                        repository.EntityType,
+                        action.Assembly,
+                        action.Project,
+                        action.FilePath,
+                        repository.Line);
+                }
+
                 if (repositoryReference is not null)
                 {
                     var props = new Dictionary<string, object>
@@ -1994,6 +2041,11 @@ public sealed partial class ProjectAnalyzer
                         ["method"] = repository.Method,
                         ["operation"] = repository.Operation
                     };
+
+                    if (entityReference is not null)
+                    {
+                        props["entity_id"] = entityReference.Id;
+                    }
 
                     _edges.Add(new GraphEdge
                     {
@@ -2012,8 +2064,7 @@ public sealed partial class ProjectAnalyzer
                     });
                 }
 
-                if (!string.IsNullOrWhiteSpace(repository.EntityType) &&
-                    TryResolveNodeReference(repository.EntityType, out var entityReference, action.Assembly, action.Project))
+                if (entityReference is not null)
                 {
                     var kind = repository.Operation switch
                     {
@@ -3004,6 +3055,48 @@ public sealed partial class ProjectAnalyzer
         return false;
     }
 
+    private static bool LooksLikeRepositoryFacadeType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        if (typeName.IndexOf("Repository", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        if (typeName.IndexOf("IWrite", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            typeName.IndexOf("IRead", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            typeName.IndexOf("IControlledRepository", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        var simple = GetTopLevelSimpleIdentifier(typeName);
+        if (string.IsNullOrWhiteSpace(simple))
+        {
+            return false;
+        }
+
+        if (simple.Contains("Repository", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (simple.Equals("IRead", StringComparison.OrdinalIgnoreCase) ||
+            simple.Equals("IWrite", StringComparison.OrdinalIgnoreCase) ||
+            simple.Equals("IReadRepository", StringComparison.OrdinalIgnoreCase) ||
+            simple.Equals("IWriteRepository", StringComparison.OrdinalIgnoreCase) ||
+            simple.Equals("IControlledRepository", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool TryGetClientStem(string? candidate, out string stem)
     {
         stem = string.Empty;
@@ -3048,6 +3141,59 @@ public sealed partial class ProjectAnalyzer
         }
 
         return false;
+    }
+
+    private NodeReference EnsureSyntheticRepositoryNode(
+        string repositoryType,
+        string? entityType,
+        string? assembly,
+        string? project,
+        string? filePath,
+        int line)
+    {
+        var normalizedAssembly = assembly ?? string.Empty;
+        var normalizedProject = project ?? string.Empty;
+        var fqdn = !string.IsNullOrWhiteSpace(repositoryType)
+            ? repositoryType
+            : (!string.IsNullOrWhiteSpace(entityType) ? $"{entityType}Repository" : "SyntheticRepository");
+
+        var symbolId = $"T:{fqdn}";
+        var repoId = StableId.For(NodeTypes.AppRepository, fqdn, normalizedAssembly, symbolId);
+
+        if (!_nodes.ContainsKey(repoId))
+        {
+            var name = GetTopLevelSimpleIdentifier(fqdn);
+            if (!string.IsNullOrWhiteSpace(entityType))
+            {
+                var entitySimple = GetTopLevelSimpleIdentifier(entityType);
+                if (!string.IsNullOrWhiteSpace(entitySimple))
+                {
+                    name = $"{entitySimple}Repository";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = "Repository";
+            }
+
+            _nodes[repoId] = new GraphNode
+            {
+                Id = repoId,
+                Type = NodeTypes.AppRepository,
+                Name = name,
+                Fqdn = fqdn,
+                Assembly = normalizedAssembly,
+                Project = normalizedProject,
+                FilePath = filePath ?? string.Empty,
+                Span = null,
+                SymbolId = symbolId,
+                Tags = new[] { "app" }
+            };
+        }
+
+        var referenceFile = filePath ?? string.Empty;
+        return new NodeReference(repoId, referenceFile, new GraphSpan { StartLine = line, EndLine = line });
     }
 
     private string? ResolveClientTargetService(string clientType)

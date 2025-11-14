@@ -258,7 +258,18 @@ public sealed partial class ProjectAnalyzer
                         {
                             var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : typeName;
                             var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType ?? string.Empty, methodName ?? string.Empty, line, operation));
+                            string? entityType = null;
+                            if (!string.IsNullOrWhiteSpace(repositoryType))
+                            {
+                                entityType = ExtractRepositoryEntityType(repositoryType);
+                            }
+
+                            if (entityType is null && invocation is not null && memberAccess is not null)
+                            {
+                                entityType = ExtractRepositoryEntityTypeFromInvocation(memberAccess.Name, invocation);
+                            }
+
+                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType ?? string.Empty, entityType, methodName ?? string.Empty, line, operation));
                             continue;
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
@@ -717,25 +728,89 @@ public sealed partial class ProjectAnalyzer
                 var targetType = ResolveImplementationType(repositoryCall.RepositoryType, handler.Assembly, handler.Project) ?? repositoryCall.RepositoryType;
                 var repositoryName = GetTopLevelSimpleIdentifier(targetType);
 
-                if (_repositories.Values.FirstOrDefault(r => r.Name.Equals(repositoryName, StringComparison.Ordinal)) is { } repository)
+                NodeReference? entityReference = null;
+                if (!string.IsNullOrWhiteSpace(repositoryCall.EntityType) &&
+                    TryResolveNodeReference(repositoryCall.EntityType, out var resolvedEntity, handler.Assembly, handler.Project))
                 {
-                    var repositoryId = StableId.For("app.repository", repository.Fqdn, repository.Assembly, repository.SymbolId);
+                    entityReference = resolvedEntity;
+                }
+
+                string? repositoryId = null;
+
+                if (!string.IsNullOrWhiteSpace(repositoryName) &&
+                    _repositories.Values.FirstOrDefault(r => r.Name.Equals(repositoryName, StringComparison.Ordinal)) is { } repository)
+                {
+                    repositoryId = StableId.For("app.repository", repository.Fqdn, repository.Assembly, repository.SymbolId);
+                }
+                else if (!string.IsNullOrWhiteSpace(targetType))
+                {
+                    var syntheticReference = EnsureSyntheticRepositoryNode(
+                        targetType,
+                        null,
+                        handler.Assembly,
+                        handler.Project,
+                        handler.FilePath,
+                        repositoryCall.Line);
+                    repositoryId = syntheticReference.Id;
+                }
+
+                if (repositoryId is null)
+                {
+                    continue;
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = repositoryId,
+                    Kind = "calls",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "mediatr.handler",
+                        Location = new GraphLocation { File = handler.FilePath, Line = repositoryCall.Line }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["method"] = repositoryCall.Method,
+                        ["operation"] = repositoryCall.Operation
+                    },
+                    Evidence = CreateEvidence(handler.FilePath, repositoryCall.Line)
+                });
+
+                if (entityReference is not null)
+                {
+                    var kind = repositoryCall.Operation switch
+                    {
+                        "insert" => "inserts_into",
+                        "update" => "updates",
+                        "delete" => "deletes_from",
+                        "upsert" => "upserts",
+                        "write" => "writes_to",
+                        _ => "queries"
+                    };
+                    var transformType = kind switch
+                    {
+                        "inserts_into" => "repository.insert",
+                        "updates" => "repository.update",
+                        "deletes_from" => "repository.delete",
+                        "upserts" => "repository.upsert",
+                        "writes_to" => "repository.write",
+                        _ => "repository.query"
+                    };
+
                     _edges.Add(new GraphEdge
                     {
                         From = id,
-                        To = repositoryId,
-                        Kind = "calls",
+                        To = entityReference.Id,
+                        Kind = kind,
                         Source = "static",
                         Confidence = 1.0,
                         Transform = new GraphTransform
                         {
-                            Type = "mediatr.handler",
+                            Type = transformType,
                             Location = new GraphLocation { File = handler.FilePath, Line = repositoryCall.Line }
-                        },
-                        Props = new Dictionary<string, object>
-                        {
-                            ["method"] = repositoryCall.Method,
-                            ["operation"] = repositoryCall.Operation
                         },
                         Evidence = CreateEvidence(handler.FilePath, repositoryCall.Line)
                     });

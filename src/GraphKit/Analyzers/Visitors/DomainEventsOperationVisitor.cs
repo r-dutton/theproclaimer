@@ -4,6 +4,7 @@ using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -138,7 +139,15 @@ public sealed partial class ProjectAnalyzer
             }
 
             var operation = DetermineRepositoryOperation(methodName);
-            _handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(typeName!, methodName, line, operation));
+            var entityType = ExtractRepositoryEntityType(typeName!);
+            if (entityType is null &&
+                invocation.Syntax is InvocationExpressionSyntax invocationSyntax &&
+                invocationSyntax.Expression is MemberAccessExpressionSyntax access)
+            {
+                entityType = ExtractRepositoryEntityTypeFromInvocation(access.Name, invocationSyntax);
+            }
+
+            _handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(typeName!, entityType, methodName, line, operation));
             _analyzer.RecordDomainEventHandlerRepositoryFact(_handler, typeName!, methodName, operation, line);
         }
 

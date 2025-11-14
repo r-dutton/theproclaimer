@@ -325,6 +325,19 @@ public sealed partial class ProjectAnalyzer
 
     private void RecordControllerHttpClientFact(ControllerActionInfo action, string clientType, string? verb, string? route, string methodName, int line)
     {
+        if (IsCacheService(clientType) ||
+            clientType.IndexOf("Cache", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return;
+        }
+
+        if (string.Equals(methodName, "GetByIdAsync", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(route, "/id", StringComparison.OrdinalIgnoreCase) &&
+            clientType.IndexOf('.', StringComparison.Ordinal) < 0)
+        {
+            return;
+        }
+
         var controllerId = EnsureControllerFactNode(action);
         var clientId = EnsureHttpClientFactNode(clientType, verb, route);
         var props = EdgeProps(
@@ -460,6 +473,12 @@ public sealed partial class ProjectAnalyzer
 
     private void RecordHandlerHttpClientFact(HandlerInfo handler, string clientType, string? verb, string? route, string? methodName, int line, string? ownerMethod)
     {
+        if (IsCacheService(clientType) ||
+            clientType.IndexOf("Cache", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return;
+        }
+
         var handlerId = EnsureHandlerFactNode(handler);
         var clientId = EnsureHttpClientFactNode(clientType, verb, route);
         var props = EdgeProps(

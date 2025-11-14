@@ -10,9 +10,34 @@ namespace GraphKit.Analyzers;
 public sealed partial class ProjectAnalyzer
 {
     private static bool IsCacheService(string typeName)
-        => typeName.Contains("IMemoryCache", StringComparison.Ordinal)
-            || typeName.Contains("IDistributedCache", StringComparison.Ordinal)
-            || typeName.Contains("IHybridCache", StringComparison.Ordinal);
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        if (typeName.Contains("IMemoryCache", StringComparison.Ordinal) ||
+            typeName.Contains("IDistributedCache", StringComparison.Ordinal) ||
+            typeName.Contains("IHybridCache", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (typeName.Contains("MemoryCache", StringComparison.OrdinalIgnoreCase) ||
+            typeName.Contains("DistributedCache", StringComparison.OrdinalIgnoreCase) ||
+            typeName.Contains("CacheManager", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (typeName.Contains("Cache", StringComparison.OrdinalIgnoreCase) &&
+            !typeName.Contains("Http", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
 
     private CacheInvocation? TryCaptureCacheInvocation(
         MemberAccessExpressionSyntax memberAccess,

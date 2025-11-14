@@ -21,12 +21,19 @@ namespace GraphKit.Analysis.Passes
             foreach (var client in clients)
             {
                 // Expect edges with Kind "uses_client" originating from methods/services
-                var clientUses = bag.Edges.Where(e => e.ToId == client.Id && e.Kind == "uses_client").ToList();
+                var clientUses = bag.Edges.Where(e => e.ToId == client.Id && e.Kind == "uses_client" && e.Props is { }).ToList();
                 foreach (var use in clientUses)
                 {
+                    if (use.Props is not { } useProps)
+                    {
+                        continue;
+                    }
+
+                    var target = useProps.TryGetValue("target_service", out var targetValue) ? targetValue?.ToString() : null;
+
                     // Find matching endpoint by verb+route props if available
-                    var verb = client.Props.TryGetValue("verb", out var v) ? v?.ToString() : null;
-                    var route = client.Props.TryGetValue("route", out var r) ? r?.ToString() : null;
+                    var verb = useProps.TryGetValue("verb", out var v) ? v?.ToString() : null;
+                    var route = useProps.TryGetValue("route", out var r) ? r?.ToString() : null;
                     if (string.IsNullOrWhiteSpace(verb) || string.IsNullOrWhiteSpace(route)) continue;
 
                     var match = endpoints.FirstOrDefault(ep =>
@@ -39,6 +46,10 @@ namespace GraphKit.Analysis.Passes
                             ["provenance"] = "Linker",
                             ["confidence"] = "High"
                         };
+                        if (!string.IsNullOrWhiteSpace(target))
+                        {
+                            props["target_service"] = target;
+                        }
                         edges.Add(new EdgeFact(client.Id, match.Id, "calls", props));
                     }
                 }

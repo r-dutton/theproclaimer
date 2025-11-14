@@ -6,6 +6,7 @@ using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -83,7 +84,15 @@ public sealed partial class ProjectAnalyzer
                 var key = $"{typeName}@{methodName}@{line}";
                 if (_seenRepositoryCalls.Add(key))
                 {
-                    _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, methodName, line, operation));
+                    var entityType = ExtractRepositoryEntityType(typeName);
+                    if (entityType is null &&
+                        invocation.Syntax is InvocationExpressionSyntax invocationSyntax &&
+                        invocationSyntax.Expression is MemberAccessExpressionSyntax access)
+                    {
+                        entityType = ExtractRepositoryEntityTypeFromInvocation(access.Name, invocationSyntax);
+                    }
+
+                    _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, entityType, methodName, line, operation));
                     _analyzer.RecordHandlerRepositoryFact(_handler, typeName!, methodName, operation, line);
                 }
                 return;
@@ -130,12 +139,29 @@ public sealed partial class ProjectAnalyzer
 
         private void HandleHttpCall(IInvocationOperation invocation)
         {
-            var clientSymbol = invocation.Instance?.Type ?? invocation.TargetMethod.ContainingType;
+            if (IsRepositoryExtension(invocation.TargetMethod))
+            {
+                return;
+            }
+
+            var clientSymbol = invocation.Instance?.Type
+                               ?? invocation.Arguments.FirstOrDefault()?.Value.Type
+                               ?? invocation.TargetMethod.ContainingType;
             var clientType = Qualify(clientSymbol) ??
                              clientSymbol?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ??
                              "System.Net.Http.HttpClient";
 
             if (string.IsNullOrWhiteSpace(clientType))
+            {
+                return;
+            }
+
+            if (LooksLikeDomainType(clientSymbol, clientType))
+            {
+                return;
+            }
+
+            if (IsCacheService(clientType!))
             {
                 return;
             }
@@ -356,6 +382,59 @@ public sealed partial class ProjectAnalyzer
             }
 
             return null;
+        }
+
+        private static bool LooksLikeDomainType(ITypeSymbol? symbol, string? typeName)
+        {
+            if (symbol is not null)
+            {
+                var ns = symbol.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (!string.IsNullOrWhiteSpace(ns) && ns.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (display.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                if (typeName!.IndexOf(".DomainModel.", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    typeName.IndexOf(".Domain.", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsRepositoryExtension(IMethodSymbol method)
+        {
+            if (method is null)
+            {
+                return false;
+            }
+
+            var container = method.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(container) &&
+                container.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            var ns = method.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(ns) &&
+                ns.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

@@ -136,7 +136,8 @@ public sealed partial class ProjectAnalyzer
         string? Route,
         IReadOnlyCollection<string>? QueryParameters,
         int Line,
-        string DeclaringMethod);
+        string DeclaringMethod,
+        IReadOnlyCollection<string>? CandidateClientTypes);
 
     private sealed record ServiceWrapperInvocation(
         string MethodName,
@@ -172,7 +173,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType, string? ContainingMember = null);
 
-    private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
+    private sealed record HandlerRepositoryCall(string RepositoryType, string? EntityType, string Method, int Line, string Operation);
 
     private sealed record HandlerClientInvocation(
         string ClientType,
@@ -326,7 +327,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record DomainEventPublication(string PublisherType, string PublisherAssembly, string PublisherProject, string FilePath, string? MethodName, int Line, string EventType);
 
-    private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
+    private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string? EntityType, string Method, int Line, string Operation);
 
     private sealed record NotificationHandlerRequestInvocation(string RequestType, int Line);
 
