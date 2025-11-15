@@ -260,15 +260,18 @@ public sealed partial class ProjectAnalyzer
     private sealed record MappingInfo(string MapId, string FilePath, GraphSpan Span, string ProfileFqdn, string MapName, string SourceType, string DestinationType);
 
     private sealed record RepositoryInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, IReadOnlyDictionary<string, FieldDescriptor> FieldTypes)
-    {
-        public List<RepositoryDbAccess> DbAccesses { get; } = new();
-        public List<RepositoryMapperCall> MapperCalls { get; } = new();
-        public List<CacheInvocation> CacheInvocations { get; } = new();
-        public List<OptionsUsage> OptionsUsages { get; } = new();
-        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
-        public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
-        public HashSet<string> ControlledEntities { get; } = new(StringComparer.OrdinalIgnoreCase);
-    }
+      {
+          public List<RepositoryDbAccess> DbAccesses { get; } = new();
+          public List<RepositoryMapperCall> MapperCalls { get; } = new();
+          public List<CacheInvocation> CacheInvocations { get; } = new();
+          public List<OptionsUsage> OptionsUsages { get; } = new();
+          public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+          public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
+          public HashSet<string> ControlledEntities { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+          // Canonical entity type for this repository, once inferred (fully-qualified type name).
+          public string? EntityTypeFqdn { get; set; }
+      }
 
     private sealed record RepositoryDbAccess(string Member, string Method, int Line, string Operation);
 

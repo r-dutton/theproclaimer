@@ -111,6 +111,7 @@ public sealed partial class ProjectAnalyzer
         foreach (var service in _backgroundServices.Values)
         {
             var id = StableId.For("app.background_service", service.Fqdn, service.Assembly, service.SymbolId);
+            var tags = new List<string> { "app", "service", "background" };
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -122,7 +123,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = service.FilePath,
                 Span = service.Span,
                 SymbolId = service.SymbolId,
-                Tags = new[] { "app" }
+                Tags = tags.ToArray()
             };
 
             foreach (var usage in service.ServiceUsages

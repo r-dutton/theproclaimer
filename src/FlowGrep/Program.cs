@@ -33,7 +33,12 @@ bool noMsg = argsList.Remove("--no-msg");
 bool noDb  = argsList.Remove("--no-db");
 bool noCache = argsList.Remove("--no-cache");
 bool turbo = argsList.Remove("--turbo") || argsList.Remove("-t"); // preserved for compatibility, currently no effect
-bool useRoslyn = argsList.Remove("--use-roslyn");
+// Workspace mode flags:
+// - Roslyn/MSBuild is now the default when available.
+// - --legacy-workspace / --no-roslyn can force the legacy loader.
+// - --use-roslyn is retained as a deprecated alias for compatibility.
+bool disableRoslyn = argsList.Remove("--legacy-workspace") || argsList.Remove("--no-roslyn");
+bool explicitUseRoslyn = argsList.Remove("--use-roslyn");
 int? interprocCallChain = null;
 int? interprocLambdaDepth = null;
 InterproceduralAnalysisKind? interprocKind = null;
@@ -158,23 +163,51 @@ if (interprocCallChain is not null || interprocLambdaDepth is not null || interp
 }
 
 MSBuildWorkspace? roslynWorkspace = null;
+bool useRoslyn = !disableRoslyn;
 
 try
 {
+    if (explicitUseRoslyn && disableRoslyn)
+    {
+        Console.Error.WriteLine("[warn] Both --use-roslyn and --legacy-workspace/--no-roslyn specified; preferring Roslyn/MSBuild.");
+    }
+
+    if (explicitUseRoslyn)
+    {
+        Console.Error.WriteLine("[warn] --use-roslyn is now the default; this flag is deprecated.");
+        useRoslyn = true;
+    }
+
     if (useRoslyn)
     {
-        if (!MSBuildLocator.IsRegistered)
+        try
         {
-            MSBuildLocator.RegisterDefaults();
-        }
+            if (!MSBuildLocator.IsRegistered)
+            {
+                MSBuildLocator.RegisterDefaults();
+            }
 
-        roslynWorkspace = MSBuildWorkspace.Create();
-        roslynWorkspace.WorkspaceFailed += (_, args) =>
+            roslynWorkspace = MSBuildWorkspace.Create();
+            roslynWorkspace.WorkspaceFailed += (_, args) =>
+            {
+                var prefix = args.Diagnostic.Kind == WorkspaceDiagnosticKind.Warning ? "[roslyn][warn]" : "[roslyn][error]";
+                var writer = args.Diagnostic.Kind == WorkspaceDiagnosticKind.Warning ? Console.Out : Console.Error;
+                writer.WriteLine($"{prefix} {args.Diagnostic.Message}");
+            };
+
+            Console.Error.WriteLine("[graph] Workspace mode: Roslyn/MSBuild");
+        }
+        catch (Exception ex)
         {
-            var prefix = args.Diagnostic.Kind == WorkspaceDiagnosticKind.Warning ? "[roslyn][warn]" : "[roslyn][error]";
-            var writer = args.Diagnostic.Kind == WorkspaceDiagnosticKind.Warning ? Console.Out : Console.Error;
-            writer.WriteLine($"{prefix} {args.Diagnostic.Message}");
-        };
+            Console.Error.WriteLine($"[roslyn][error] Failed to initialize MSBuild workspace ({ex.GetType().Name}: {ex.Message}). Falling back to legacy workspace.");
+            Console.Error.WriteLine("[graph] Workspace mode: Legacy/Adhoc");
+            useRoslyn = false;
+            roslynWorkspace = null;
+        }
+    }
+    else
+    {
+        Console.Error.WriteLine("[graph] Workspace mode: Legacy/Adhoc");
     }
 
     var generator = new GraphGenerator();

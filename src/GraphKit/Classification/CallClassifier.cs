@@ -1,3 +1,4 @@
+using GraphKit.Analyzers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -5,82 +6,83 @@ namespace GraphKit.Classification
 {
     public sealed class CallClassifier
     {
-        // TODO: inject symbol references/namespaces as needed
+        private readonly TypeClassifier _typeClassifier = new();
+
+        /// <summary>
+        /// Classify an invocation into a coarse semantic bucket using existing analyzer predicates
+        /// and symbol-based type classification.
+        /// </summary>
         public CallKind Classify(IInvocationOperation inv)
         {
-            var m = inv.TargetMethod;
-            // Replace with your existing IsXxx helpers or name-based checks:
-            if (IsMediatorSend(m)) return CallKind.MediatorSend;
-            if (IsMediatorPublish(m)) return CallKind.MediatorPublish;
-            if (IsHandlerHandle(m)) return CallKind.HandlerHandle;
-            if (IsRepoCall(m)) return CallKind.Repo;
-            if (IsDbContextCall(m)) return CallKind.Db;
-            if (IsHttpClientCall(m)) return CallKind.Http;
-            if (IsMapperMap(m)) return CallKind.Mapper;
-            if (IsValidatorCall(m)) return CallKind.Validator;
-            if (IsPipelineBehavior(m)) return CallKind.Pipeline;
+            if (inv is null || inv.TargetMethod is not { } method)
+            {
+                return CallKind.Other;
+            }
+
+            // Mediator / CQRS patterns
+            if (AnalysisPredicates.IsMediatorSend(inv))
+            {
+                return CallKind.MediatorSend;
+            }
+
+            if (AnalysisPredicates.IsMediatorPublish(inv))
+            {
+                return CallKind.MediatorPublish;
+            }
+
+            if (AnalysisPredicates.IsDomainEventPublish(inv))
+            {
+                return CallKind.DomainEventPublish;
+            }
+
+            if (AnalysisPredicates.IsHandlerHandle(inv))
+            {
+                return CallKind.HandlerHandle;
+            }
+
+            // Storage / EF / repositories
+            if (AnalysisPredicates.IsDbContextOrRepoCall(inv))
+            {
+                var receiver = AnalysisPredicates.GetReceiverType(inv);
+                var classification = _typeClassifier.Classify(receiver ?? method.ContainingType);
+
+                if (classification.IsDbContext)
+                {
+                    return CallKind.DbContext;
+                }
+
+                if (classification.IsRepository)
+                {
+                    return CallKind.Repository;
+                }
+
+                // Default to Repository when in doubt; existing behavior treated all as repo.
+                return CallKind.Repository;
+            }
+
+            // HTTP / clients
+            if (AnalysisPredicates.IsHttpClientCall(inv))
+            {
+                return CallKind.Http;
+            }
+
+            // Mapping / validation / pipeline
+            if (AnalysisPredicates.IsMapperMap(inv))
+            {
+                return CallKind.Mapper;
+            }
+
+            if (AnalysisPredicates.IsValidatorCall(inv))
+            {
+                return CallKind.Validator;
+            }
+
+            if (AnalysisPredicates.IsPipelineBehavior(inv))
+            {
+                return CallKind.Pipeline;
+            }
+
             return CallKind.Other;
-        }
-
-        // Use predicates that are symbol-aware
-        private static bool IsMediatorSend(IMethodSymbol m)
-            => m.Name == "Send" || m.Name == "SendAsync";
-        private static bool IsMediatorPublish(IMethodSymbol m)
-            => m.Name == "Publish" || m.Name == "PublishAsync";
-        private static bool IsHandlerHandle(IMethodSymbol m)
-            => m.Name == "Handle" || m.Name == "HandleAsync";
-        private static bool IsRepoCall(IMethodSymbol m)
-            => m.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
-                   .Contains("Repository", System.StringComparison.OrdinalIgnoreCase);
-        private static bool IsDbContextCall(IMethodSymbol m)
-            => InheritsFrom(m.ContainingType, "Microsoft.EntityFrameworkCore.DbContext");
-        private static bool IsHttpClientCall(IMethodSymbol m)
-            => ImplementsOrIs(m.ContainingType, "System.Net.Http.IHttpClientFactory") ||
-               InheritsFrom(m.ContainingType, "System.Net.Http.HttpClient");
-        private static bool IsMapperMap(IMethodSymbol m)
-            => m.Name == "Map" || m.Name == "ProjectTo" || m.Name == "MapAsync";
-        private static bool IsValidatorCall(IMethodSymbol m)
-            => m.Name.StartsWith("Validate", System.StringComparison.Ordinal);
-        private static bool IsPipelineBehavior(IMethodSymbol m)
-            => ImplementsOrIs(m.ContainingType, "MediatR.IPipelineBehavior");
-
-        private static bool InheritsFrom(ITypeSymbol? type, string metadata)
-        {
-            if (type is INamedTypeSymbol named)
-            {
-                var cur = named;
-                while (cur is not null)
-                {
-                    if (cur.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
-                        .Equals(metadata, System.StringComparison.Ordinal))
-                    {
-                        return true;
-                    }
-                    cur = cur.BaseType;
-                }
-            }
-            return false;
-        }
-
-        private static bool ImplementsOrIs(ITypeSymbol? type, string metadata)
-        {
-            if (type is INamedTypeSymbol named)
-            {
-                if (named.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
-                    .Equals(metadata, System.StringComparison.Ordinal))
-                {
-                    return true;
-                }
-                foreach (var iface in named.AllInterfaces)
-                {
-                    if (iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
-                        .Equals(metadata, System.StringComparison.Ordinal))
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
         }
     }
 }

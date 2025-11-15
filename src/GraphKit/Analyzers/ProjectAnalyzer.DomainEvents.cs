@@ -137,16 +137,21 @@ public sealed partial class ProjectAnalyzer
                     recordedUsage = true;
                 }
 
-                if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                if (resolvedType.EndsWith("Repository", StringComparison.Ordinal) ||
+                    IsRepositoryType(resolvedType) ||
+                    IsRepositoryType(typeName))
                 {
+                    var repositoryType = resolvedType;
                     var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                    var entityType = ExtractRepositoryEntityType(resolvedType);
-                    if (entityType is null && invocation is not null)
-                    {
-                        entityType = ExtractRepositoryEntityTypeFromInvocation(memberAccess.Name, invocation);
-                    }
+                    var entityType = ResolveRepositoryEntityType(
+                        repositoryType,
+                        typeName,
+                        info.Assembly,
+                        info.Project,
+                        memberAccess.Name,
+                        invocation);
 
-                    info.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, entityType, methodName ?? string.Empty, line, operation));
+                    info.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(repositoryType, entityType, methodName ?? string.Empty, line, operation));
                     continue;
                 }
 
@@ -503,7 +508,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = handler.FilePath ?? string.Empty,
                 Span = handler.Span,
                 SymbolId = handler.SymbolId,
-                Tags = new[] { "domain", "event" }
+                Tags = new[] { "domain", "event", "handler" }
             };
 
             if (FindDomainEventByType(handler.EventType) is { } domainEvent)

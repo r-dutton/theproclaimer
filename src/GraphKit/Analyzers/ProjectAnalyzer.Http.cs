@@ -98,6 +98,14 @@ public sealed partial class ProjectAnalyzer
             }
 
             var id = StableId.For("http.client", client.Fqdn, client.Assembly, client.SymbolId);
+            var tags = new List<string> { "integration", "client" };
+            if (props.TryGetValue("external", out var externalObj) &&
+                externalObj is bool isExternal &&
+                isExternal)
+            {
+                tags.Add("external");
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -109,7 +117,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = client.FilePath,
                 Span = client.Span,
                 SymbolId = client.SymbolId,
-                Tags = new[] { "integration" },
+                Tags = tags.ToArray(),
                 Props = props.Count > 0 ? props : null
             };
 

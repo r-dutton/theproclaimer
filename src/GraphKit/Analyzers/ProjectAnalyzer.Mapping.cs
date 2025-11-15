@@ -33,7 +33,7 @@ public sealed partial class ProjectAnalyzer
             FilePath = profileFile,
             Span = profileSpan,
             SymbolId = profileSymbolId,
-            Tags = new[] { "mapping" }
+            Tags = new[] { "mapping", "profile" }
         };
 
         var model = project.GetModel(tree);

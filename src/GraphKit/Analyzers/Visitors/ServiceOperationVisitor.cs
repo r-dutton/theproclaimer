@@ -4,6 +4,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.Http;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -448,21 +449,21 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var methodName = invocation.TargetMethod?.Name ?? string.Empty;
-            var httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
-
             string? route = null;
-            foreach (var arg in invocation.Arguments)
+            string httpVerb;
+            if (RouteCanonicalizer.TryReconstruct(invocation, ValueContent, out var canonicalVerb, out var rawRoute))
             {
-                if (IsRouteParameter(arg.Parameter))
-                {
-                    route = ValueContent.TryGetStringValue(arg.Value);
-                    if (!string.IsNullOrWhiteSpace(route)) break;
-                }
+                httpVerb = canonicalVerb;
+                route = rawRoute;
             }
-            route ??= invocation.Arguments.Length > 0
-                ? ValueContent.TryGetStringValue(invocation.Arguments[0].Value)
-                : null;
+            else
+            {
+                var methodName = invocation.TargetMethod?.Name ?? string.Empty;
+                httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
+                route = invocation.Arguments.Length > 0
+                    ? ValueContent.TryGetStringValue(invocation.Arguments[0].Value)
+                    : null;
+            }
 
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
             var line = GetInvocationLine(invocation);

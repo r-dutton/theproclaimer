@@ -204,7 +204,7 @@ namespace GraphKit.Outputs.Narrative
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var summarizeInfrastructure = ShouldSummarizeInfrastructure(serviceLabel);
+            var summarizeInfrastructure = ShouldSummarizeInfrastructure(targetNode);
 
             foreach (var method in methodValues)
             {
@@ -1190,11 +1190,8 @@ namespace GraphKit.Outputs.Narrative
                 emitted = true;
             }
 
-            if (!emitted)
-            {
-                Indent(w, indent);
-                w.WriteLine("- (no additional service edges recorded)");
-            }
+            // If nothing emitted, we omit any marker to keep
+            // narrative output focused on actual edges.
         }
 
         private static void ExpandServiceUsage(
@@ -1371,30 +1368,35 @@ namespace GraphKit.Outputs.Narrative
         private static string SourceLink(EdgeFact e, string repoRoot)
             => SourceLink(e.Props, repoRoot);
 
-        private static readonly string[] InfrastructureServiceTokens = new[]
+        private static bool ShouldSummarizeInfrastructure(NodeFact? serviceNode)
         {
-            "requestinfoservice",
-            "tenantservice",
-            "tenantidentificationservice",
-            "ittenantidentificationservice",
-            "logger<",
-            "ihttpcontextaccessor",
-            "cache"
-        };
-
-        private static bool ShouldSummarizeInfrastructure(string? serviceLabel)
-        {
-            if (string.IsNullOrWhiteSpace(serviceLabel))
+            if (serviceNode is null)
             {
                 return false;
             }
 
-            var normalized = serviceLabel.Replace(".", string.Empty, StringComparison.OrdinalIgnoreCase)
-                .ToLowerInvariant();
-
-            foreach (var token in InfrastructureServiceTokens)
+            if (!serviceNode.Props.TryGetValue("tags", out var raw) || raw is null)
             {
-                if (normalized.Contains(token, StringComparison.OrdinalIgnoreCase))
+                return false;
+            }
+
+            IEnumerable<string> tags = raw switch
+            {
+                string s => s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                IEnumerable<object?> seq => seq.Select(o => o?.ToString() ?? string.Empty),
+                _ => new[] { raw.ToString() ?? string.Empty }
+            };
+
+            foreach (var tag in tags)
+            {
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    continue;
+                }
+
+                if (string.Equals(tag, "infra", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(tag, "cache", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(tag, "logging", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }

@@ -298,6 +298,97 @@ public sealed partial class ProjectAnalyzer
         return false;
     }
 
+    /// <summary>
+    /// Resolve a repository info record for the given type name, preferring exact matches and
+    /// then falling back to name-based selection with the same scoring rules used for node resolution.
+    /// </summary>
+    private bool TryResolveRepositoryInfo(string repositoryType, out RepositoryInfo repository, string? preferredAssembly = null, string? preferredProject = null)
+    {
+        repository = default!;
+        if (string.IsNullOrWhiteSpace(repositoryType))
+        {
+            return false;
+        }
+
+        if (_repositories.TryGetValue(repositoryType, out repository))
+        {
+            return true;
+        }
+
+        var simple = GetSimpleIdentifier(repositoryType);
+        var typeAssemblyRoot = GetTypeAssemblyRoot(repositoryType);
+
+        var candidate = SelectBestCandidate(
+            _repositories.Values.Where(r => r.Name.Equals(simple, StringComparison.OrdinalIgnoreCase)),
+            preferredAssembly,
+            preferredProject,
+            typeAssemblyRoot,
+            r => r.Assembly,
+            r => r.Project,
+            r => r.Fqdn);
+
+        if (candidate is not null)
+        {
+            repository = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Resolve the entity type for a repository call, preferring symbol-bound RepositoryInfo.EntityTypeFqdn
+    /// and using per-invocation generic/argument hints, with legacy string heuristics as a final fallback.
+    /// </summary>
+    private string? ResolveRepositoryEntityType(
+        string? repositoryType,
+        string? originalRepositoryType,
+        string? preferredAssembly,
+        string? preferredProject,
+        SimpleNameSyntax? methodNameSyntax = null,
+        InvocationExpressionSyntax? invocation = null)
+    {
+        string? entityType = null;
+
+        if (!string.IsNullOrWhiteSpace(repositoryType) &&
+            TryResolveRepositoryInfo(repositoryType!, out var repository, preferredAssembly, preferredProject))
+        {
+            entityType = repository.EntityTypeFqdn;
+        }
+
+        if (string.IsNullOrWhiteSpace(entityType) &&
+            !string.IsNullOrWhiteSpace(originalRepositoryType) &&
+            !string.Equals(repositoryType, originalRepositoryType, StringComparison.OrdinalIgnoreCase) &&
+            TryResolveRepositoryInfo(originalRepositoryType!, out var originalRepository, preferredAssembly, preferredProject))
+        {
+            entityType = originalRepository.EntityTypeFqdn;
+        }
+
+        if (methodNameSyntax is not null && invocation is not null)
+        {
+            var invocationEntityType = ExtractRepositoryEntityTypeFromInvocation(methodNameSyntax, invocation);
+            if (!string.IsNullOrWhiteSpace(invocationEntityType))
+            {
+                entityType = invocationEntityType;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            entityType = ExtractRepositoryEntityType(repositoryType)
+                ?? ExtractRepositoryEntityType(originalRepositoryType)
+                ?? TryDeriveEntityTypeFromRepositoryName(repositoryType)
+                ?? TryDeriveEntityTypeFromRepositoryName(originalRepositoryType);
+        }
+
+        if (!string.IsNullOrWhiteSpace(entityType))
+        {
+            entityType = QualifyTypeName(entityType!, preferredAssembly, preferredProject);
+        }
+
+        return entityType;
+    }
+
     private bool TryResolveEntityNodeReference(string typeName, out NodeReference reference, string? preferredAssembly, string? preferredProject)
     {
         reference = default;
@@ -2743,7 +2834,7 @@ private static bool NamespaceRootMatches(string candidateType, string referenceT
         return separatorIndex > 0 ? assembly[..separatorIndex] : assembly;
     }
 
-    private static bool IsLoggerType(string? typeName)
+    internal static bool IsLoggerType(string? typeName)
         => !string.IsNullOrWhiteSpace(typeName) &&
            (typeName.Contains("ILogger", StringComparison.Ordinal) ||
             typeName.Contains("Serilog", StringComparison.OrdinalIgnoreCase) ||

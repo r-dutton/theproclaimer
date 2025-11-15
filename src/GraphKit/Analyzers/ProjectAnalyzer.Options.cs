@@ -188,7 +188,7 @@ public sealed partial class ProjectAnalyzer
             FilePath = info.FilePath,
             Span = info.Span,
             SymbolId = info.SymbolId,
-            Tags = new[] { "configuration" },
+            Tags = new[] { "configuration", "infra" },
             Props = props
         };
 

@@ -5,6 +5,7 @@ using System.Linq;
 using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.Classification;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
@@ -26,6 +27,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenServiceUsages = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
+        private readonly CallClassifier _callClassifier;
 
         public CqrsOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -43,27 +45,31 @@ public sealed partial class ProjectAnalyzer
             _facts = facts ?? throw new ArgumentNullException(nameof(facts));
             _ = _facts;
             _efVisitor = new EfOperationVisitor(analyzer, handler.Assembly, handler.Project, RecordEfAccess, _facts);
+            _callClassifier = new CallClassifier();
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
             _efVisitor.TryProcess(op);
 
-            if (AnalysisPredicates.IsDbContextOrRepoCall(op))
+            var kind = _callClassifier.Classify(op);
+
+            switch (kind)
             {
-                HandleDataCall(op);
-            }
-            else if (AnalysisPredicates.IsMediatorPublish(op) || AnalysisPredicates.IsDomainEventPublish(op))
-            {
-                HandleMediatorPublish(op);
-            }
-            else if (AnalysisPredicates.IsMapperMap(op))
-            {
-                HandleMapperCall(op);
-            }
-            else if (AnalysisPredicates.IsHttpClientCall(op))
-            {
-                HandleHttpCall(op);
+                case CallKind.Repository:
+                case CallKind.DbContext:
+                    HandleDataCall(op);
+                    break;
+                case CallKind.MediatorPublish:
+                case CallKind.DomainEventPublish:
+                    HandleMediatorPublish(op);
+                    break;
+                case CallKind.Mapper:
+                    HandleMapperCall(op);
+                    break;
+                case CallKind.Http:
+                    HandleHttpCall(op);
+                    break;
             }
 
             HandleRequestDispatch(op);
@@ -84,12 +90,25 @@ public sealed partial class ProjectAnalyzer
                 var key = $"{typeName}@{methodName}@{line}";
                 if (_seenRepositoryCalls.Add(key))
                 {
-                    var entityType = ExtractRepositoryEntityType(typeName);
-                    if (entityType is null &&
-                        invocation.Syntax is InvocationExpressionSyntax invocationSyntax &&
+                    string? entityType = null;
+                    if (invocation.Syntax is InvocationExpressionSyntax invocationSyntax &&
                         invocationSyntax.Expression is MemberAccessExpressionSyntax access)
                     {
-                        entityType = ExtractRepositoryEntityTypeFromInvocation(access.Name, invocationSyntax);
+                        entityType = _analyzer.ResolveRepositoryEntityType(
+                            typeName,
+                            typeName,
+                            _handler.Assembly,
+                            _handler.Project,
+                            access.Name,
+                            invocationSyntax);
+                    }
+                    else
+                    {
+                        entityType = _analyzer.ResolveRepositoryEntityType(
+                            typeName,
+                            typeName,
+                            _handler.Assembly,
+                            _handler.Project);
                     }
 
                     _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, entityType, methodName, line, operation));

@@ -5,6 +5,8 @@ using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Workspace;
+using GraphKit.Classification;
+using GraphKit.Http;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
@@ -26,6 +28,7 @@ public sealed partial class ProjectAnalyzer
             private readonly ProjectInfo _project;
             private readonly IReadOnlyDictionary<string, string?> _parameterTypes;
             private readonly IReadOnlyDictionary<string, FieldDescriptor> _fieldLookup;
+            private readonly CallClassifier _callClassifier;
 
         public ControllerOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -46,6 +49,7 @@ public sealed partial class ProjectAnalyzer
             _parameterTypes = parameterTypes ?? throw new ArgumentNullException(nameof(parameterTypes));
             _fieldLookup = fieldLookup ?? throw new ArgumentNullException(nameof(fieldLookup));
             _ = _facts;
+            _callClassifier = new CallClassifier();
         }
 
         private static readonly IReadOnlyDictionary<string, int> StatusHelperCodes = new Dictionary<string, int>(StringComparer.Ordinal)
@@ -65,21 +69,23 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
-            if (AnalysisPredicates.IsMediatorSend(op))
+            var kind = _callClassifier.Classify(op);
+
+            switch (kind)
             {
-                HandleMediatorSend(op);
-            }
-            else if (AnalysisPredicates.IsMediatorPublish(op))
-            {
-                HandleMediatorPublish(op);
-            }
-            else if (AnalysisPredicates.IsMapperMap(op))
-            {
-                HandleMapperMap(op);
-            }
-            else if (AnalysisPredicates.IsHttpClientCall(op))
-            {
-                HandleHttpClientCall(op);
+                case CallKind.MediatorSend:
+                    HandleMediatorSend(op);
+                    break;
+                case CallKind.MediatorPublish:
+                case CallKind.DomainEventPublish:
+                    HandleMediatorPublish(op);
+                    break;
+                case CallKind.Mapper:
+                    HandleMapperMap(op);
+                    break;
+                case CallKind.Http:
+                    HandleHttpClientCall(op);
+                    break;
             }
 
             HandleStatusCodeInvocation(op);
@@ -335,12 +341,26 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var route = TryResolveRoute(invocation);
-            if (!string.IsNullOrWhiteSpace(route))
+            string? route = null;
+            string verb;
+            if (RouteCanonicalizer.TryReconstruct(invocation, ValueContent, out var canonicalVerb, out var rawRoute))
             {
-                route = NormalizeRoute(route!);
+                route = NormalizeRoute(rawRoute);
+                verb = canonicalVerb;
             }
-            else if (LooksLikeDomainType(clientSymbol, clientType) || LooksLikeEntityLabel(clientType))
+            else
+            {
+                // Preserve previous behavior when reconstruction fails.
+                verb = NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
+                route = TryResolveRoute(invocation);
+                if (!string.IsNullOrWhiteSpace(route))
+                {
+                    route = NormalizeRoute(route!);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(route) &&
+                (LooksLikeDomainType(clientSymbol, clientType) || LooksLikeEntityLabel(clientType)))
             {
                 return;
             }
@@ -373,7 +393,6 @@ public sealed partial class ProjectAnalyzer
                 }
             }
 
-            var verb = NormalizeHttpVerb(methodName);
             var key = $"{clientType}@{methodName}@{route}@{line}";
             if (!_seenHttpCalls.Add(key))
             {

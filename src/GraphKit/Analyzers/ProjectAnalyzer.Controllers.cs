@@ -1848,7 +1848,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = action.FilePath,
                 Span = action.Span,
                 SymbolId = action.SymbolId,
-                Tags = new[] { "web" },
+                Tags = new[] { "web", "endpoint" },
                 Props = nodeProps
             };
             _nodes[id] = node;
@@ -2739,13 +2739,29 @@ public sealed partial class ProjectAnalyzer
                 return null;
             }
 
-            var invocationEntityType = ExtractRepositoryEntityTypeFromInvocation(access.Name, invocation);
             var operation = DetermineRepositoryOperation(methodName);
-            var entityType = invocationEntityType
-                ?? ExtractRepositoryEntityType(repositoryType)
-                ?? ExtractRepositoryEntityType(originalRepositoryType)
-                ?? TryDeriveEntityTypeFromRepositoryName(repositoryType)
-                ?? TryDeriveEntityTypeFromRepositoryName(originalRepositoryType);
+            // Prefer the canonical entity type bound to this repository, if available.
+            string? entityType = null;
+            if (!string.IsNullOrWhiteSpace(repositoryType) && _repositories.TryGetValue(repositoryType, out var repositoryInfo))
+            {
+                entityType = repositoryInfo.EntityTypeFqdn;
+            }
+
+            // Allow per-invocation overrides when generics/arguments specify a more precise type.
+            var invocationEntityType = ExtractRepositoryEntityTypeFromInvocation(access.Name, invocation);
+            if (!string.IsNullOrWhiteSpace(invocationEntityType))
+            {
+                entityType = invocationEntityType;
+            }
+
+            // Fall back to legacy heuristics when no canonical or invocation type is known.
+            if (string.IsNullOrWhiteSpace(entityType))
+            {
+                entityType = ExtractRepositoryEntityType(repositoryType)
+                    ?? ExtractRepositoryEntityType(originalRepositoryType)
+                    ?? TryDeriveEntityTypeFromRepositoryName(repositoryType)
+                    ?? TryDeriveEntityTypeFromRepositoryName(originalRepositoryType);
+            }
 
             if (!string.IsNullOrWhiteSpace(entityType))
             {
@@ -3562,7 +3578,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = endpoint.FilePath,
                 Span = endpoint.Span,
                 SymbolId = endpoint.SymbolId,
-                Tags = new[] { "web" },
+                Tags = new[] { "web", "endpoint" },
                 Props = props
             };
         }

@@ -98,10 +98,10 @@ public sealed partial class ProjectAnalyzer
             cancellationToken.ThrowIfCancellationRequested();
 
             var tree = root.SyntaxTree;
-            if (tree is null)
-            {
-                continue;
-            }
+              if (tree is null)
+              {
+                  continue;
+              }
 
             CollectStringConstants(project, tree, root, cancellationToken);
         }
@@ -121,18 +121,21 @@ public sealed partial class ProjectAnalyzer
                 ProcessMember(project, tree, member, null, cancellationToken);
             }
 
-            AnalyzeServiceRegistrations(project, tree);
-            AnalyzeHttpClientRegistrations(project, tree);
+              AnalyzeServiceRegistrations(project, tree);
+              AnalyzeHttpClientRegistrations(project, tree);
 
             var filePath = document.FilePath ?? tree.FilePath ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(filePath) &&
-                Path.GetFileName(filePath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
-            {
-                AnalyzeMinimalEndpoints(project, tree);
-            }
+              if (!string.IsNullOrWhiteSpace(filePath) &&
+                  Path.GetFileName(filePath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
+              {
+                  AnalyzeMinimalEndpoints(project, tree);
+              }
 
-            _ = model;
+              _ = model;
         }
+
+        // After repositories and entities have been collected, bind repositories to their canonical entity types.
+        BindRepositoryEntities(project);
     }
 
     public GraphDocument BuildDocument(string analyzerVersion)

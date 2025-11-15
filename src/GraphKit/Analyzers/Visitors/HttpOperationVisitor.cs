@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.Http;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -47,10 +48,13 @@ public sealed partial class ProjectAnalyzer
 
         private void HandleHttpInvocation(IInvocationOperation invocation)
         {
-            var verb = NormalizeHttpVerb(invocation.TargetMethod.Name) ?? invocation.TargetMethod.Name.ToUpperInvariant();
-            var route = TryResolveRoute(invocation);
-            var normalizedRoute = route is null ? null : NormalizeRoute(route);
-            var parameters = ExtractQueryParameters(route);
+            if (!RouteCanonicalizer.TryReconstruct(invocation, ValueContent, out var verb, out var rawRoute))
+            {
+                return;
+            }
+
+            var normalizedRoute = RouteCanonicalizer.CanonRoute(rawRoute);
+            var parameters = ExtractQueryParameters(rawRoute);
             var line = GetInvocationLine(invocation);
             var key = $"{_ownerMethod}@{verb}@{normalizedRoute}@{line}";
             if (!_seenCalls.Add(key))
@@ -66,68 +70,6 @@ public sealed partial class ProjectAnalyzer
                 parameters);
             _client.OutboundCalls.Add(call);
             _analyzer.RecordHttpClientOutboundCallFact(_client, call);
-        }
-
-        private string? TryResolveRoute(IInvocationOperation invocation)
-        {
-            foreach (var argument in invocation.Arguments)
-            {
-                if (!IsRouteParameter(argument.Parameter))
-                {
-                    continue;
-                }
-
-                var value = TryGetString(argument.Value);
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-
-            if (invocation.Arguments.Length > 0)
-            {
-                var value = TryGetString(invocation.Arguments[0].Value);
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-
-            return null;
-        }
-
-        private string? TryGetString(IOperation? operation)
-        {
-            if (operation is null)
-            {
-                return null;
-            }
-
-            if (operation.ConstantValue is { HasValue: true, Value: string s })
-            {
-                return s;
-            }
-
-            if (operation is IConversionOperation conversion)
-            {
-                return TryGetString(conversion.Operand);
-            }
-
-            return ValueContent.TryGetStringValue(operation);
-        }
-
-        private static bool IsRouteParameter(IParameterSymbol? parameter)
-        {
-            if (parameter is null)
-            {
-                return false;
-            }
-
-            return parameter.Name.Equals("requestUri", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("uri", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("endpoint", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("path", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int GetInvocationLine(IInvocationOperation invocation)

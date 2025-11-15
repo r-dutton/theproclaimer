@@ -185,7 +185,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = configuration.FilePath,
                 Span = configuration.Span,
                 SymbolId = key,
-                Tags = new[] { "configuration" },
+                Tags = new[] { "configuration", "infra" },
                 Props = props
             };
         }
@@ -202,7 +202,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = string.Empty,
                 Span = null,
                 SymbolId = key,
-                Tags = new[] { "configuration" }
+                Tags = new[] { "configuration", "infra" }
             };
         }
 

@@ -264,13 +264,17 @@ public sealed partial class ProjectAnalyzer
                     var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
                     if (!string.IsNullOrWhiteSpace(repositoryType))
                     {
-                        var entityType = ExtractRepositoryEntityType(repositoryType!) ?? ExtractRepositoryEntityType(typeName);
-                        if (entityType is null && invocation is not null)
-                        {
-                            entityType = ExtractRepositoryEntityTypeFromInvocation(memberAccess.Name, invocation);
-                        }
+                        var entityType = ResolveRepositoryEntityType(
+                            repositoryType!,
+                            typeName,
+                            project.AssemblyName,
+                            project.RelativeDirectory,
+                            memberAccess.Name,
+                            invocation);
+
                         serviceInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType!, entityType, methodName ?? string.Empty, line, operation));
                     }
+
                     continue;
                 }
 
@@ -464,6 +468,20 @@ public sealed partial class ProjectAnalyzer
                 };
             }
 
+            var tags = new List<string> { "app" };
+            if (service.LogInvocations.Count > 0)
+            {
+                tags.Add("logging");
+            }
+            if (service.CacheInvocations.Count > 0)
+            {
+                tags.Add("cache");
+            }
+            if (service.FrameworkInteractions.Count > 0)
+            {
+                tags.Add("infra");
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -475,7 +493,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = service.FilePath,
                 Span = service.Span,
                 SymbolId = service.SymbolId,
-                Tags = new[] { "app" },
+                Tags = tags.Count > 0 ? tags.ToArray() : null,
                 Props = serviceProps
             };
 

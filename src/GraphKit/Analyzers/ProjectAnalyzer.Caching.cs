@@ -89,6 +89,16 @@ public sealed partial class ProjectAnalyzer
         if (!_nodes.ContainsKey(id))
         {
             var name = GetTopLevelSimpleIdentifier(info.TypeName);
+            var tags = new List<string> { "cache", "infra" };
+            if (string.Equals(nodeType, "cache.memory", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.Add("memory");
+            }
+            else if (string.Equals(nodeType, "cache.distributed", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.Add("distributed");
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -99,7 +109,7 @@ public sealed partial class ProjectAnalyzer
                 Project = string.Empty,
                 FilePath = string.Empty,
                 SymbolId = info.TypeName,
-                Tags = new[] { "cache" }
+                Tags = tags.ToArray()
             };
         }
 

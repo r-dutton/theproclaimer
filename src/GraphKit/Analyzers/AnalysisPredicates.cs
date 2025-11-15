@@ -191,7 +191,7 @@ internal static class AnalysisPredicates
         return false;
     }
 
-    private static bool IsCachingType(ITypeSymbol? type)
+    public static bool IsCachingType(ITypeSymbol? type)
     {
         if (type is null)
         {
@@ -447,7 +447,7 @@ internal static class AnalysisPredicates
         return false;
     }
 
-    private static bool IsEntityFrameworkType(ITypeSymbol? type)
+    public static bool IsEntityFrameworkType(ITypeSymbol? type)
     {
         if (type is null)
         {
@@ -475,7 +475,7 @@ internal static class AnalysisPredicates
         return false;
     }
 
-    private static bool IsRepositoryType(ITypeSymbol? type)
+    public static bool IsRepositoryType(ITypeSymbol? type)
     {
         if (type is null)
         {
@@ -512,7 +512,7 @@ internal static class AnalysisPredicates
         return false;
     }
 
-    private static bool IsHttpClientType(ITypeSymbol? type)
+    public static bool IsHttpClientType(ITypeSymbol? type)
     {
         if (type is null)
         {
@@ -658,7 +658,7 @@ internal static class AnalysisPredicates
         return display.Replace("global::", string.Empty, StringComparison.Ordinal);
     }
 
-    private static ITypeSymbol? GetReceiverType(IInvocationOperation invocation)
+    public static ITypeSymbol? GetReceiverType(IInvocationOperation invocation)
     {
         if (invocation.Instance?.Type is { } instanceType)
         {

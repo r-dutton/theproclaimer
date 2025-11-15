@@ -258,18 +258,19 @@ public sealed partial class ProjectAnalyzer
                         {
                             var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : typeName;
                             var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                            string? entityType = null;
                             if (!string.IsNullOrWhiteSpace(repositoryType))
                             {
-                                entityType = ExtractRepositoryEntityType(repositoryType);
+                                var entityType = ResolveRepositoryEntityType(
+                                    repositoryType!,
+                                    typeName,
+                                    project.AssemblyName,
+                                    project.RelativeDirectory,
+                                    memberAccess.Name,
+                                    invocation);
+
+                                handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType!, entityType, methodName ?? string.Empty, line, operation));
                             }
 
-                            if (entityType is null && invocation is not null && memberAccess is not null)
-                            {
-                                entityType = ExtractRepositoryEntityTypeFromInvocation(memberAccess.Name, invocation);
-                            }
-
-                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType ?? string.Empty, entityType, methodName ?? string.Empty, line, operation));
                             continue;
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
@@ -591,7 +592,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = string.Empty,
                 Span = null,
                 SymbolId = symbolId,
-                Tags = new[] { "framework" }
+                Tags = new[] { "framework", "infra" }
             };
         }
 
@@ -651,7 +652,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = request.FilePath,
                 Span = request.Span,
                 SymbolId = request.SymbolId,
-                Tags = new[] { "app" }
+                Tags = new[] { "app", "request" }
             };
         }
     }
@@ -686,7 +687,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = handler.FilePath,
                 Span = handler.Span,
                 SymbolId = handler.SymbolId,
-                Tags = new[] { "app" },
+                Tags = new[] { "app", "handler" },
                 Props = handlerProps
             };
 

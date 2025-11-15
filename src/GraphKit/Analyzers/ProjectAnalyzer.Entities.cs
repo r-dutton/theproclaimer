@@ -71,6 +71,7 @@ public sealed partial class ProjectAnalyzer
         foreach (var entity in _entities.Values)
         {
             var id = StableId.For("ef.entity", entity.Fqdn, entity.Assembly, entity.SymbolId);
+            var entityTags = new List<string> { "data", "entity" };
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -82,7 +83,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = entity.FilePath,
                 Span = entity.Span,
                 SymbolId = entity.SymbolId,
-                Tags = new[] { "data" },
+                Tags = entityTags.ToArray(),
                 Props = new Dictionary<string, object>
                 {
                     ["table"] = entity.TableName
@@ -92,6 +93,7 @@ public sealed partial class ProjectAnalyzer
             if (_tables.TryGetValue(entity.TableName, out var table))
             {
                 var tableId = StableId.For("db.table", table.Name, entity.Assembly, entity.SymbolId);
+                var tableTags = new List<string> { "db", "table" };
                 _nodes[tableId] = new GraphNode
                 {
                     Id = tableId,
@@ -103,7 +105,7 @@ public sealed partial class ProjectAnalyzer
                     FilePath = table.FilePath,
                     Span = entity.Span,
                     SymbolId = entity.SymbolId,
-                    Tags = new[] { "db" }
+                    Tags = tableTags.ToArray()
                 };
 
                 _edges.Add(new GraphEdge
@@ -158,6 +160,7 @@ public sealed partial class ProjectAnalyzer
         foreach (var context in _dbContexts.Values)
         {
             var id = StableId.For("ef.db_context", context.Fqdn, context.Assembly, context.SymbolId);
+            var contextTags = new List<string> { "data", "db-context" };
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -169,7 +172,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = context.FilePath,
                 Span = context.Span,
                 SymbolId = context.SymbolId,
-                Tags = new[] { "data" }
+                Tags = contextTags.ToArray()
             };
 
             foreach (var dbSet in context.DbSets)
