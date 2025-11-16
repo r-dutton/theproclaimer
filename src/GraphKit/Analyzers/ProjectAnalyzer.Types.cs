@@ -34,7 +34,14 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
 
-    private sealed record ControllerClientInvocation(string ClientType, string? HttpMethod, string? RelativePath, int Line, string? ClientMethod = null, string? TargetService = null);
+    private sealed record ControllerClientInvocation(
+        string ClientType,
+        string? HttpMethod,
+        string? RelativePath,
+        int Line,
+        string? ClientMethod = null,
+        string? TargetService = null,
+        bool ContainsTaintedInput = false);
 
     private sealed record ControllerMappingInvocation(string? SourceType, string? DestinationType, string? AssignedVariable, int Line);
 
@@ -183,7 +190,8 @@ public sealed partial class ProjectAnalyzer
         string? ClientMethod = null,
         string? TargetService = null,
         IReadOnlyCollection<string>? QueryParameters = null,
-        string? OwnerMethod = null);
+        string? OwnerMethod = null,
+        bool ContainsTaintedInput = false);
 
     private sealed record HandlerMapperCall(string? SourceType, string? DestinationType, int Line);
 
@@ -216,7 +224,13 @@ public sealed partial class ProjectAnalyzer
         public List<HttpClientCall> OutboundCalls { get; } = new();
     }
 
-    private sealed record HttpClientCall(string DeclaringMethod, string HttpMethod, string? Route, int Line, IReadOnlyCollection<string> QueryParameters)
+    private sealed record HttpClientCall(
+        string DeclaringMethod,
+        string HttpMethod,
+        string? Route,
+        int Line,
+        IReadOnlyCollection<string> QueryParameters,
+        bool ContainsTaintedInput = false)
     {
         public string? CanonicalRoute
         {
