@@ -12,6 +12,7 @@ namespace GraphKit.FlowAnalysis.Core
         protected readonly SemanticModel Model;
         protected readonly FlowPointsToFacade PointsTo;
         protected readonly FlowValueContentFacade ValueContent;
+        private readonly Stack<NestedFlowScope> _nestedFlows = new();
 
         protected FlowDataFlowOperationVisitor(
             Compilation compilation, SemanticModel model,
@@ -120,10 +121,20 @@ namespace GraphKit.FlowAnalysis.Core
             }
         }
 
+        public NestedFlowScope? CurrentNestedFlow => _nestedFlows.Count == 0
+            ? null
+            : _nestedFlows.Peek();
+
         public virtual void Visit(IOperation op)
         {
             switch (op)
             {
+                case IAnonymousFunctionOperation anonymousFunction:
+                    VisitAnonymousFunction(anonymousFunction);
+                    return;
+                case ILocalFunctionOperation localFunction:
+                    VisitLocalFunction(localFunction);
+                    return;
                 case IInvocationOperation invocation:
                     VisitInvocation(invocation);
                     break;
@@ -164,10 +175,19 @@ namespace GraphKit.FlowAnalysis.Core
 
         protected virtual void VisitInvocation(IInvocationOperation op)
         {
-            foreach (var argument in op.Arguments)
-            {
-                Visit(argument.Value);
-            }
+            // Intentionally empty. Invocation arguments are already traversed
+            // via the generic child-iteration in Visit(IOperation), so doing
+            // extra work here would visit each argument twice.
+        }
+
+        protected virtual void VisitAnonymousFunction(IAnonymousFunctionOperation op)
+        {
+            VisitNestedFlow(op, ControlFlowGraph.GetAnonymousFunctionControlFlowGraph(op));
+        }
+
+        protected virtual void VisitLocalFunction(ILocalFunctionOperation op)
+        {
+            VisitNestedFlow(op, ControlFlowGraph.GetLocalFunctionControlFlowGraph(op));
         }
 
         // Optional hooks for derived visitors
@@ -177,5 +197,59 @@ namespace GraphKit.FlowAnalysis.Core
         protected virtual void OnBranch(ControlFlowBranch branch, IOperation? condition) { }
         protected virtual void OnEnterRegion(ControlFlowRegion region) { }
         protected virtual void OnLeaveRegion(ControlFlowRegion region) { }
+        protected virtual void OnNestedFlowEntered(in NestedFlowScope scope) { }
+        protected virtual void OnNestedFlowExited(in NestedFlowScope scope) { }
+
+        protected virtual IInvocationOperation? FindEnclosingCallsite(IOperation operation)
+        {
+            if (operation is null)
+            {
+                return null;
+            }
+
+            var parent = operation.Parent;
+            while (parent is not null)
+            {
+                if (parent is IInvocationOperation invocation)
+                {
+                    return invocation;
+                }
+
+                parent = parent.Parent;
+            }
+
+            return null;
+        }
+
+        private void VisitNestedFlow(IOperation owner, ControlFlowGraph? nestedGraph)
+        {
+            if (nestedGraph is null)
+            {
+                foreach (var child in owner.ChildOperations)
+                {
+                    Visit(child);
+                }
+
+                return;
+            }
+
+            var scope = new NestedFlowScope(owner, FindEnclosingCallsite(owner));
+            _nestedFlows.Push(scope);
+            OnNestedFlowEntered(scope);
+
+            try
+            {
+                Visit(nestedGraph);
+            }
+            finally
+            {
+                OnNestedFlowExited(scope);
+                _nestedFlows.Pop();
+            }
+        }
+
+        protected readonly record struct NestedFlowScope(
+            IOperation Operation,
+            IInvocationOperation? Callsite);
     }
 }
