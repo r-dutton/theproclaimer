@@ -32,10 +32,10 @@ public sealed class FlowValueContentFacade
 
     private static readonly ValueContentAnalysisResult? PlaceholderResult = null;
 
-    private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
-        static _ => false,
-        static _ => false,
-        static _ => false);
+    private static readonly InterproceduralAnalysisPredicate AllowAllPredicate = new(
+        static _ => true,
+        static _ => true,
+        static _ => true);
 
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
 
@@ -45,11 +45,14 @@ public sealed class FlowValueContentFacade
     {
         Settings = configuration;
         PruningPredicate = pruningPredicate;
+        AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
     }
 
     public InterproceduralSettings Settings { get; }
 
     public FlowCallsitePredicate PruningPredicate { get; }
+
+    private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
     public string? TryGetStringValue(IOperation op)
     {
@@ -201,27 +204,18 @@ public sealed class FlowValueContentFacade
             (uint)Math.Max(0, settings.MaxCallChainLength),
             (uint)Math.Max(0, settings.MaxLambdaOrLocalFunctionDepth));
 
-        var pointsToResult = PointsToAnalysis.TryGetOrComputeResult(
+        var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
             controlFlowGraph,
             owningSymbol,
             EmptyAnalyzerOptions,
             wellKnownProvider,
             PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
             interproceduralConfiguration,
-            NoOpPredicate,
+            out _,
+            out _,
             pessimisticAnalysis: false,
             performCopyAnalysis: false,
-            exceptionPathsAnalysis: false);
-
-        var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
-            controlFlowGraph,
-            owningSymbol,
-            wellKnownProvider,
-            EmptyAnalyzerOptions,
-            FlowAnalysisRule,
-            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
-            settings.Kind,
-            pessimisticAnalysis: false);
+            interproceduralAnalysisPredicate: AnalysisPredicate);
 
         return valueContentResult;
     }
@@ -339,6 +333,22 @@ public sealed class FlowValueContentFacade
 
     private static bool IsBenignAnalysisException(Exception exception)
         => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
+
+    private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
+    {
+        if (predicate is null)
+        {
+            return AllowAllPredicate;
+        }
+
+        bool ShouldAnalyzeInvocation(IOperation operation)
+            => operation is IInvocationOperation invocation && predicate(invocation);
+
+        return new InterproceduralAnalysisPredicate(
+            ShouldAnalyzeInvocation,
+            static _ => true,
+            static _ => true);
+    }
 
     private readonly struct AnalysisCacheKey : IEquatable<AnalysisCacheKey>
     {
