@@ -9,6 +9,7 @@ using GraphKit.Classification;
 using GraphKit.Http;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -29,6 +30,7 @@ public sealed partial class ProjectAnalyzer
             private readonly IReadOnlyDictionary<string, string?> _parameterTypes;
             private readonly IReadOnlyDictionary<string, FieldDescriptor> _fieldLookup;
             private readonly CallClassifier _callClassifier;
+            private readonly ControlFlowTraversalState _flowState = new();
 
         public ControllerOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -69,6 +71,12 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             var kind = _callClassifier.Classify(op);
 
             switch (kind)
@@ -94,6 +102,26 @@ public sealed partial class ProjectAnalyzer
             TryHandleLoggerInvocation(op);
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void TryHandleHelperInvocation(IInvocationOperation invocation)
@@ -452,7 +480,8 @@ public sealed partial class ProjectAnalyzer
                 var literal = TryGetStringLiteral(argument.Value);
                 if (string.IsNullOrWhiteSpace(literal))
                 {
-                    literal = ValueContent.DescribeStringValue(argument.Value).FirstNonEmptyLiteralOrDefault;
+                    var description = ValueContent.DescribeStringValue(argument.Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(argument.Value);
                 }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
@@ -468,7 +497,8 @@ public sealed partial class ProjectAnalyzer
                 var literal = TryGetStringLiteral(invocation.Arguments[0].Value);
                 if (string.IsNullOrWhiteSpace(literal))
                 {
-                    literal = ValueContent.DescribeStringValue(invocation.Arguments[0].Value).FirstNonEmptyLiteralOrDefault;
+                    var description = ValueContent.DescribeStringValue(invocation.Arguments[0].Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(invocation.Arguments[0].Value);
                 }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
@@ -511,6 +541,31 @@ public sealed partial class ProjectAnalyzer
             if (operation is IConversionOperation conversion)
             {
                 return TryGetStringLiteral(conversion.Operand);
+            }
+
+            return null;
+        }
+
+        private string? TryRenderValue(IOperation? operation)
+        {
+            if (operation is null)
+            {
+                return null;
+            }
+
+            foreach (var candidate in ValueContent.EnumerateContentCandidates(operation))
+            {
+                var literal = candidate.TryGetLiteralText();
+                if (!string.IsNullOrWhiteSpace(literal))
+                {
+                    return literal;
+                }
+
+                var placeholder = candidate.ToDisplayString();
+                if (!string.IsNullOrWhiteSpace(placeholder))
+                {
+                    return placeholder;
+                }
             }
 
             return null;

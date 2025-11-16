@@ -4,6 +4,7 @@ using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -19,6 +20,7 @@ public sealed partial class ProjectAnalyzer
         private readonly Action<string, string, string?, int, string> _recordPublish;
         private readonly HashSet<string> _seenPublishes = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public MessagingOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -43,12 +45,38 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             if (IsBusPublish(op))
             {
                 HandleBusPublish(op);
             }
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private bool IsBusPublish(IInvocationOperation invocation)

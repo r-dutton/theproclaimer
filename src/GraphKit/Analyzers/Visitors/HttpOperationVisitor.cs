@@ -5,6 +5,7 @@ using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Http;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -18,6 +19,7 @@ public sealed partial class ProjectAnalyzer
         private readonly string _ownerMethod;
         private readonly HashSet<string> _seenCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public HttpOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -38,12 +40,38 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             if (AnalysisPredicates.IsHttpClientCall(op))
             {
                 HandleHttpInvocation(op);
             }
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void HandleHttpInvocation(IInvocationOperation invocation)
