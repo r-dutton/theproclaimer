@@ -39,16 +39,20 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
         public FlowPointsToFacade(
             InterproceduralSettings configuration,
-            FlowCallsitePredicate pruningPredicate)
+            FlowCallsitePredicate pruningPredicate,
+            FlowPointsToAnalysisOptions options)
         {
             Configuration = configuration;
             PruningPredicate = pruningPredicate;
             AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
+            Options = options;
         }
 
         public InterproceduralSettings Configuration { get; }
 
         public FlowCallsitePredicate PruningPredicate { get; }
+
+        public FlowPointsToAnalysisOptions Options { get; }
 
         private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
@@ -188,6 +192,7 @@ namespace GraphKit.FlowAnalysis.Dependencies
         {
             var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
             var settings = Configuration;
+            var pointsToOptions = Options;
 
             var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
                 EmptyAnalyzerOptions,
@@ -203,12 +208,12 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 owningSymbol,
                 EmptyAnalyzerOptions,
                 wellKnownProvider,
-                PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+                pointsToOptions.PointsToAnalysisKind,
                 interproceduralConfiguration,
                 AnalysisPredicate,
-                false,
-                false,
-                false);
+                pointsToOptions.PessimisticAnalysis,
+                pointsToOptions.PerformCopyAnalysis,
+                pointsToOptions.ExceptionPathsAnalysis);
         }
 
         private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)

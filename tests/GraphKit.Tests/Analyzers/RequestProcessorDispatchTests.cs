@@ -69,7 +69,8 @@ public sealed class RequestProcessorDispatchTests
             compilationFactory: () => compilation);
 
         var analyzer = new ProjectAnalyzer(tempRoot);
-        var pointsTo = new FlowPointsToFacade(analyzer.InterproceduralConfiguration, _ => true);
+        var pointsToOptions = ProjectAnalyzer.ProjectAnalyzerConfiguration.Default.GetPointsToAnalysisOptions();
+        var pointsTo = new FlowPointsToFacade(analyzer.InterproceduralConfiguration, _ => true, pointsToOptions);
 
         var model = compilation.GetSemanticModel(tree);
         var invocationSyntax = tree.GetRoot()

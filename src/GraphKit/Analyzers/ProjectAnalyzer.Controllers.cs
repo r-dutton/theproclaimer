@@ -486,7 +486,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree, model, valueContentFacade) is { } configurationUsage)
                 {
                     info.ConfigurationUsages.Add(configurationUsage);
                 }
@@ -748,7 +748,7 @@ public sealed partial class ProjectAnalyzer
         var resolvedType = ResolveImplementationType(qualifiedType, info.Assembly, info.Project) ?? qualifiedType;
         if (IsConfigurationType(resolvedType) || IsConfigurationType(qualifiedType))
         {
-            if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? qualifiedType, tree) is { } configurationUsage)
+            if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? qualifiedType, tree, model, valueContentFacade) is { } configurationUsage)
             {
                 info.ConfigurationUsages.Add(configurationUsage);
             }

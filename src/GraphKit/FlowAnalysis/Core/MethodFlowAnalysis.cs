@@ -7,12 +7,15 @@ namespace GraphKit.FlowAnalysis.Core;
 
 public sealed class MethodFlowAnalysis
 {
-    public MethodFlowAnalysis(MethodFlowContext context)
+    public MethodFlowAnalysis(MethodFlowContext context, InterproceduralSettings settings)
     {
         Context = context;
+        Settings = settings;
     }
 
     public MethodFlowContext Context { get; }
+
+    public InterproceduralSettings Settings { get; }
 
     public PointsToAnalysisResult? PointsToAnalysis { get; internal set; }
 
