@@ -38,11 +38,15 @@ public sealed partial class ProjectAnalyzer
             ControllerActionInfo action,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade nullAnalysis,
+            FlowCopyAnalysisFacade copyAnalysis,
+            FlowPredicateAnalysisFacade predicateAnalysis,
+            FlowTaintedDataFacade taintedData,
             FactWriter facts,
             ProjectInfo project,
             IReadOnlyDictionary<string, string?> parameterTypes,
             IReadOnlyDictionary<string, FieldDescriptor> fieldLookup)
-            : base(model.Compilation, model, pointsTo, valueContent)
+            : base(model.Compilation, model, pointsTo, valueContent, nullAnalysis, copyAnalysis, predicateAnalysis, taintedData)
         {
             _analyzer = analyzer;
             _action = action;
@@ -329,6 +333,11 @@ public sealed partial class ProjectAnalyzer
 
         private void HandleHttpClientCall(IInvocationOperation invocation)
         {
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
+            {
+                return;
+            }
+
             if (IsRepositoryQueryInvocation(invocation))
             {
                 return;
@@ -339,7 +348,18 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
-            var clientSymbol = invocation.Instance?.Type
+            var instance = invocation.Instance;
+            if (instance is null && invocation.TargetMethod.IsExtensionMethod && invocation.Arguments.Length > 0)
+            {
+                instance = invocation.Arguments[0].Value;
+            }
+
+            if (instance is not null && (NullAnalysis?.IsDefinitelyNull(instance) ?? false))
+            {
+                return;
+            }
+
+            var clientSymbol = instance?.Type
                                ?? invocation.Arguments.FirstOrDefault()?.Value.Type
                                ?? TryGetReceiverSymbol(invocation)
                                ?? invocation.TargetMethod.ContainingType;
@@ -427,13 +447,18 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
+            var targetService = _analyzer.ResolveClientTargetService(clientType);
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
+
             _action.HttpClientInvocations.Add(new ControllerClientInvocation(
                 clientType,
                 verb,
                 route,
                 line,
-                methodName));
-            _analyzer.RecordControllerHttpClientFact(_action, clientType, verb, route, methodName, line);
+                methodName,
+                targetService,
+                ContainsTaintedInput: containsTaint));
+            _analyzer.RecordControllerHttpClientFact(_action, clientType, verb, route, methodName, line, containsTaint);
         }
 
         private string? Qualify(ITypeSymbol? symbol)
@@ -477,7 +502,12 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var literal = TryGetStringLiteral(argument.Value) ?? TryRenderValue(argument.Value);
+                var literal = TryGetStringLiteral(argument.Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    var description = ValueContent.DescribeStringValue(argument.Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(argument.Value);
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     var noQuery = literal!;
@@ -489,8 +519,12 @@ public sealed partial class ProjectAnalyzer
 
             if (invocation.Arguments.Length > 0)
             {
-                var literal = TryGetStringLiteral(invocation.Arguments[0].Value) ??
-                              TryRenderValue(invocation.Arguments[0].Value);
+                var literal = TryGetStringLiteral(invocation.Arguments[0].Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    var description = ValueContent.DescribeStringValue(invocation.Arguments[0].Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(invocation.Arguments[0].Value);
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     var noQuery = literal!;
