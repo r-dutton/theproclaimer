@@ -56,6 +56,8 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
         private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
+        internal InterproceduralAnalysisPredicate InterproceduralPredicate => AnalysisPredicate;
+
         public bool TryGetAbstractValue(IOperation operation, out PointsToAbstractValue value)
         {
             value = null!;
