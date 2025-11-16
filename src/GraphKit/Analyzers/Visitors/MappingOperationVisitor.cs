@@ -5,6 +5,7 @@ using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Graph;
 using GraphKit.Workspace;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -21,6 +22,7 @@ public sealed partial class ProjectAnalyzer
         private readonly GraphSpan _profileSpan;
         private readonly HashSet<string> _registeredMappings;
         private readonly FactWriter _facts;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public MappingOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -49,12 +51,38 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             if (IsCreateMapInvocation(op))
             {
                 HandleCreateMap(op);
             }
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private bool IsCreateMapInvocation(IInvocationOperation invocation)

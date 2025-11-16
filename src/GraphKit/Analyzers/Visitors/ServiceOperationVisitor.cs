@@ -6,6 +6,7 @@ using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Http;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -24,6 +25,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenCaches;
         private readonly HashSet<string> _seenValidators;
         private readonly HashSet<string> _seenLogs;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public ServiceOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -61,6 +63,12 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             if (AnalysisPredicates.IsValidatorCall(op))
             {
                 HandleValidatorCall(op);
@@ -87,6 +95,12 @@ public sealed partial class ProjectAnalyzer
 
         public override void Visit(IOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.Visit(op);
+                return;
+            }
+
             switch (op)
             {
                 case IFieldReferenceOperation fieldReference:
@@ -119,6 +133,26 @@ public sealed partial class ProjectAnalyzer
             }
 
             base.Visit(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void HandleValidatorCall(IInvocationOperation invocation)
