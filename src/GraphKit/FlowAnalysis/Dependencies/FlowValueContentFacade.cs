@@ -41,15 +41,19 @@ public sealed class FlowValueContentFacade
 
     public FlowValueContentFacade(
         InterproceduralSettings configuration,
-        FlowCallsitePredicate pruningPredicate)
+        FlowCallsitePredicate pruningPredicate,
+        FlowPointsToAnalysisOptions pointsToOptions)
     {
         Settings = configuration;
         PruningPredicate = pruningPredicate;
+        PointsToOptions = pointsToOptions;
     }
 
     public InterproceduralSettings Settings { get; }
 
     public FlowCallsitePredicate PruningPredicate { get; }
+
+    public FlowPointsToAnalysisOptions PointsToOptions { get; }
 
     public string? TryGetStringValue(IOperation op)
     {
@@ -192,6 +196,7 @@ public sealed class FlowValueContentFacade
         var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
 
         var settings = Settings;
+        var pointsToOptions = PointsToOptions;
         var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
             EmptyAnalyzerOptions,
             ImmutableArray.Create(FlowAnalysisRule),
@@ -206,12 +211,12 @@ public sealed class FlowValueContentFacade
             owningSymbol,
             EmptyAnalyzerOptions,
             wellKnownProvider,
-            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+            pointsToOptions.PointsToAnalysisKind,
             interproceduralConfiguration,
             NoOpPredicate,
-            pessimisticAnalysis: false,
-            performCopyAnalysis: false,
-            exceptionPathsAnalysis: false);
+            pessimisticAnalysis: pointsToOptions.PessimisticAnalysis,
+            performCopyAnalysis: pointsToOptions.PerformCopyAnalysis,
+            exceptionPathsAnalysis: pointsToOptions.ExceptionPathsAnalysis);
 
         var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
             controlFlowGraph,
@@ -219,9 +224,9 @@ public sealed class FlowValueContentFacade
             wellKnownProvider,
             EmptyAnalyzerOptions,
             FlowAnalysisRule,
-            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+            pointsToOptions.PointsToAnalysisKind,
             settings.Kind,
-            pessimisticAnalysis: false);
+            pessimisticAnalysis: pointsToOptions.PessimisticAnalysis);
 
         return valueContentResult;
     }
