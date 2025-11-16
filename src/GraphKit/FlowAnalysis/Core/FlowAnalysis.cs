@@ -11,7 +11,7 @@ namespace GraphKit.FlowAnalysis.Core;
 public static class FlowAnalysis
 {
     private static readonly ConditionalWeakTable<Compilation, ConcurrentDictionary<IMethodSymbol, MethodFlowContext>> ContextCache = new();
-    private static readonly ConditionalWeakTable<Compilation, ConcurrentDictionary<IMethodSymbol, MethodFlowAnalysis>> AnalysisCache = new();
+    private static readonly ConditionalWeakTable<Compilation, ConcurrentDictionary<IMethodSymbol, ConcurrentDictionary<InterproceduralSettings, MethodFlowAnalysis>>> AnalysisCache = new();
 
     public static MethodFlowContext GetOrCreateMethodContext(
         Compilation compilation,
@@ -36,16 +36,20 @@ public static class FlowAnalysis
     {
         var cache = AnalysisCache.GetValue(
             compilation,
-            static _ => new ConcurrentDictionary<IMethodSymbol, MethodFlowAnalysis>(SymbolEqualityComparer.Default));
+            static _ => new ConcurrentDictionary<IMethodSymbol, ConcurrentDictionary<InterproceduralSettings, MethodFlowAnalysis>>(SymbolEqualityComparer.Default));
 
-        return cache.GetOrAdd(
+        var methodCache = cache.GetOrAdd(
             method,
-            static (symbol, state) =>
+            static _ => new ConcurrentDictionary<InterproceduralSettings, MethodFlowAnalysis>());
+
+        return methodCache.GetOrAdd(
+            settings,
+            static (settings, state) =>
             {
-                var context = GetOrCreateMethodContext(state.Compilation, symbol, state.CancellationToken);
-                return new MethodFlowAnalysis(context);
+                var context = GetOrCreateMethodContext(state.Compilation, state.Method, state.CancellationToken);
+                return new MethodFlowAnalysis(context, settings);
             },
-            (Compilation: compilation, Settings: settings, CancellationToken: cancellationToken));
+            (Compilation: compilation, Method: method, CancellationToken: cancellationToken));
     }
 
     private static MethodFlowContext CreateContext(
