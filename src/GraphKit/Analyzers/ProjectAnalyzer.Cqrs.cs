@@ -529,7 +529,11 @@ public sealed partial class ProjectAnalyzer
 
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(pointsTo);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var copyAnalysis = CreateCopyAnalysisFacade(callsitePredicate);
+        var nullAnalysis = CreateNullAnalysisFacade(pointsTo);
+        var predicateAnalysis = CreatePredicateAnalysisFacade(pointsTo);
+        var taintedData = CreateTaintedDataFacade(callsitePredicate);
 
         foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
         {
@@ -552,7 +556,18 @@ public sealed partial class ProjectAnalyzer
 
             var tree = methodSyntax.SyntaxTree;
             var model = project.GetModel(tree);
-            var visitor = new CqrsOperationVisitor(this, model, handler, method.Name, pointsTo, valueContent, _facts);
+            var visitor = new CqrsOperationVisitor(
+                this,
+                model,
+                handler,
+                method.Name,
+                pointsTo,
+                valueContent,
+                nullAnalysis,
+                copyAnalysis,
+                predicateAnalysis,
+                taintedData,
+                _facts);
             var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(project.Compilation, method, InterproceduralConfiguration);
             analysis.Context.Accept(visitor);
         }
@@ -924,6 +939,11 @@ public sealed partial class ProjectAnalyzer
                 if (!string.IsNullOrWhiteSpace(targetService))
                 {
                     props["target_service"] = targetService!;
+                }
+
+                if (preferredInvocation.ContainsTaintedInput)
+                {
+                    props["contains_tainted_input"] = true;
                 }
 
                 EnrichClientPropsFromHttpClient(preferredInvocation, props, handler.Assembly, handler.Project);

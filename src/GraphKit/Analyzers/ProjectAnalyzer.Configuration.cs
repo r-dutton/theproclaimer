@@ -32,16 +32,22 @@ public sealed partial class ProjectAnalyzer
         FlowPointsToPrecision? precision = null)
         => new(_interproceduralConfiguration, predicate, _configuration.GetPointsToAnalysisOptions(precision));
 
-    private FlowValueContentFacade CreateValueContentFacade(FlowPointsToFacade pointsToFacade)
-        => new(_interproceduralConfiguration, pointsToFacade);
-
     private FlowValueContentFacade CreateValueContentFacade(
         FlowCallsitePredicate predicate,
         FlowPointsToPrecision? precision = null)
-        => new(
-            _interproceduralConfiguration,
-            predicate,
-            _configuration.GetPointsToAnalysisOptions(precision));
+        => new(_interproceduralConfiguration, predicate, _configuration.GetPointsToAnalysisOptions(precision));
+
+    private FlowCopyAnalysisFacade CreateCopyAnalysisFacade(FlowCallsitePredicate predicate)
+        => new(_interproceduralConfiguration, predicate);
+
+    private FlowNullAnalysisFacade CreateNullAnalysisFacade(FlowPointsToFacade pointsTo)
+        => new(pointsTo);
+
+    private FlowPredicateAnalysisFacade CreatePredicateAnalysisFacade(FlowPointsToFacade pointsTo)
+        => new(pointsTo);
+
+    private FlowTaintedDataFacade CreateTaintedDataFacade(FlowCallsitePredicate predicate)
+        => new(_interproceduralConfiguration, predicate, FlowTaintedDataConfiguration.Empty);
 
     private static FlowCallsitePredicate ComposeInterproceduralPredicate(FlowCallsitePredicate predicate)
         => invocation => !ShouldPruneInterproceduralInvocation(invocation) && predicate(invocation);

@@ -212,7 +212,7 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 pointsToOptions.ExceptionPathsAnalysis);
         }
 
-        private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
+        internal static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
         {
             if (predicate is null)
             {
@@ -228,7 +228,7 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 static _ => true);
         }
 
-        private static SyntaxNode? FindDeclarationSyntax(ISymbol symbol, SyntaxNode contextSyntax)
+        internal static SyntaxNode? FindDeclarationSyntax(ISymbol symbol, SyntaxNode contextSyntax)
         {
             foreach (var reference in symbol.DeclaringSyntaxReferences)
             {
@@ -244,8 +244,24 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 : null;
         }
 
-        private static bool IsBenignAnalysisException(Exception exception)
+        internal static bool IsBenignAnalysisException(Exception exception)
             => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
+
+        internal PointsToAnalysisResult? TryGetAnalysisResult(IOperation operation)
+        {
+            if (operation is null || operation.SemanticModel is not { } model)
+            {
+                return null;
+            }
+
+            var owningSymbol = model.GetEnclosingSymbol(operation.Syntax.SpanStart);
+            if (owningSymbol is null)
+            {
+                return null;
+            }
+
+            return TryGetAnalysis(owningSymbol, model, operation.Syntax, out var analysis) ? analysis : null;
+        }
 
         private readonly struct AnalysisCacheKey : IEquatable<AnalysisCacheKey>
         {

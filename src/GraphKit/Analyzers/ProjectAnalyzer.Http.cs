@@ -38,7 +38,11 @@ public sealed partial class ProjectAnalyzer
         var compilation = project.Compilation;
         var httpCallsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForHttpClient);
         var pointsToFacade = CreatePointsToFacade(httpCallsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(pointsToFacade);
+        var valueContentFacade = CreateValueContentFacade(httpCallsitePredicate);
+        var copyAnalysisFacade = CreateCopyAnalysisFacade(httpCallsitePredicate);
+        var nullAnalysisFacade = CreateNullAnalysisFacade(pointsToFacade);
+        var predicateAnalysisFacade = CreatePredicateAnalysisFacade(pointsToFacade);
+        var taintedDataFacade = CreateTaintedDataFacade(httpCallsitePredicate);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -54,7 +58,18 @@ public sealed partial class ProjectAnalyzer
 
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
-                var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade, _facts);
+                var visitor = new HttpOperationVisitor(
+                    this,
+                    model,
+                    info,
+                    methodSymbol.Name,
+                    pointsToFacade,
+                    valueContentFacade,
+                    nullAnalysisFacade,
+                    copyAnalysisFacade,
+                    predicateAnalysisFacade,
+                    taintedDataFacade,
+                    _facts);
                 var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     compilation,
                     methodSymbol,
@@ -154,7 +169,7 @@ public sealed partial class ProjectAnalyzer
                                 : sendName.Identifier.Text.ToUpperInvariant();
                             var formattedRoute = candidateRoute is null ? null : FormatRoute(candidateRoute);
                             var line = GetLineNumber(tree, invocation);
-                            info.OutboundCalls.Add(new HttpClientCall(declaringMethod, normalizedMethod, formattedRoute, line, queryParameters));
+                            info.OutboundCalls.Add(new HttpClientCall(declaringMethod, normalizedMethod, formattedRoute, line, queryParameters, false));
                             continue;
                         }
                     }
@@ -168,7 +183,7 @@ public sealed partial class ProjectAnalyzer
                     var httpMethod = InferHttpVerb(methodIdentifier);
                     var route = ExtractRouteLiteral(tree, invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression);
                     var line = GetLineNumber(tree, invocation);
-                    info.OutboundCalls.Add(new HttpClientCall(declaringMethod, httpMethod, route, line, Array.Empty<string>()));
+                    info.OutboundCalls.Add(new HttpClientCall(declaringMethod, httpMethod, route, line, Array.Empty<string>(), false));
                     continue;
                 }
 
@@ -464,7 +479,7 @@ public sealed partial class ProjectAnalyzer
 
             var route = FormatRoute(hint);
             var line = GetLineNumber(tree, invocation);
-            call = new HttpClientCall(declaringMethod, httpMethod, route, line, hint.QueryParameters.ToArray());
+            call = new HttpClientCall(declaringMethod, httpMethod, route, line, hint.QueryParameters.ToArray(), false);
             return true;
         }
 
@@ -498,7 +513,7 @@ public sealed partial class ProjectAnalyzer
 
         var formattedRoute = FormatRoute(routeHint);
         var callLine = GetLineNumber(tree, invocation);
-        call = new HttpClientCall(declaringMethod, inferredHttpMethod!, formattedRoute, callLine, routeHint.QueryParameters.ToArray());
+        call = new HttpClientCall(declaringMethod, inferredHttpMethod!, formattedRoute, callLine, routeHint.QueryParameters.ToArray(), false);
         return true;
     }
 

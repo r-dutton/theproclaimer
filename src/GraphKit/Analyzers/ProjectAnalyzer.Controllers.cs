@@ -38,7 +38,11 @@ public sealed partial class ProjectAnalyzer
         var compilation = project.Compilation;
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsToFacade = CreatePointsToFacade(callsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(pointsToFacade);
+        var valueContentFacade = CreateValueContentFacade(callsitePredicate);
+        var copyAnalysisFacade = CreateCopyAnalysisFacade(callsitePredicate);
+        var nullAnalysisFacade = CreateNullAnalysisFacade(pointsToFacade);
+        var predicateAnalysisFacade = CreatePredicateAnalysisFacade(pointsToFacade);
+        var taintedDataFacade = CreateTaintedDataFacade(callsitePredicate);
 
             foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
             {
@@ -124,6 +128,10 @@ public sealed partial class ProjectAnalyzer
                     info,
                     pointsToFacade,
                     valueContentFacade,
+                    nullAnalysisFacade,
+                    copyAnalysisFacade,
+                    predicateAnalysisFacade,
+                    taintedDataFacade,
                     _facts,
                     project,
                     parameterTypes,
@@ -1018,7 +1026,7 @@ public sealed partial class ProjectAnalyzer
                 var line = GetLineNumber(tree, invocation);
                 var targetService = ResolveClientTargetService(clientType);
                 info.HttpClientInvocations.Add(new ControllerClientInvocation(clientType, inferredVerb, inferredRoute, line, methodName, targetService));
-                RecordControllerHttpClientFact(info, clientType, inferredVerb, inferredRoute, methodName, line);
+                RecordControllerHttpClientFact(info, clientType, inferredVerb, inferredRoute, methodName, line, false);
                 recordedServiceUsage = true;
             }
             }
@@ -3341,6 +3349,11 @@ public sealed partial class ProjectAnalyzer
         if (!string.IsNullOrWhiteSpace(invocation.TargetService))
         {
             props["target_service"] = invocation.TargetService!;
+        }
+
+        if (invocation.ContainsTaintedInput)
+        {
+            props["contains_tainted_input"] = true;
         }
 
         return props;

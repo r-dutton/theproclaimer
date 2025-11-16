@@ -35,8 +35,12 @@ public sealed partial class ProjectAnalyzer
             string ownerMethod,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade nullAnalysis,
+            FlowCopyAnalysisFacade copyAnalysis,
+            FlowPredicateAnalysisFacade predicateAnalysis,
+            FlowTaintedDataFacade taintedData,
             ServiceInfo service)
-            : base(model.Compilation, model, pointsTo, valueContent)
+            : base(model.Compilation, model, pointsTo, valueContent, nullAnalysis, copyAnalysis, predicateAnalysis, taintedData)
         {
             _analyzer = analyzer;
             _assembly = assembly;
@@ -345,6 +349,18 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
+            if (TryResolveAliasedField(property.Instance, out var aliasedField))
+            {
+                var aliasType = Qualify(aliasedField?.Type);
+                if (!string.IsNullOrWhiteSpace(aliasType))
+                {
+                    var line = GetPropertyLine(property);
+                    RecordServiceUsage(aliasType!, propertyName, line);
+                }
+
+                return;
+            }
+
             var instanceType = property.Instance.Type;
             if (instanceType is not null && !instanceType.IsReferenceType)
             {
@@ -408,6 +424,28 @@ public sealed partial class ProjectAnalyzer
             return fallback;
         }
 
+        private bool TryResolveAliasedField(IOperation instance, out IFieldSymbol? fieldSymbol)
+        {
+            fieldSymbol = null;
+            if (CopyAnalysis is null)
+            {
+                return false;
+            }
+
+            foreach (var field in CopyAnalysis.GetReferencedFields(instance))
+            {
+                var owner = Qualify(field.ContainingType);
+                if (!string.IsNullOrWhiteSpace(owner) &&
+                    string.Equals(owner, _service.Fqdn, StringComparison.OrdinalIgnoreCase))
+                {
+                    fieldSymbol = field;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private void RecordServiceUsage(
             string serviceTypeName,
             string invocationMember,
@@ -457,6 +495,16 @@ public sealed partial class ProjectAnalyzer
 
         private void TryHandleHttpInvocation(IInvocationOperation invocation, ITypeSymbol receiver)
         {
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
+            {
+                return;
+            }
+
+            if (invocation.Instance is not null && (NullAnalysis?.IsDefinitelyNull(invocation.Instance) ?? false))
+            {
+                return;
+            }
+
             if (!AnalysisPredicates.IsHttpClientCall(invocation))
             {
                 return;
@@ -495,7 +543,8 @@ public sealed partial class ProjectAnalyzer
                 var methodName = invocation.TargetMethod?.Name ?? string.Empty;
                 httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
                 route = invocation.Arguments.Length > 0
-                    ? TryRenderValue(ValueContent, invocation.Arguments[0].Value)
+                    ? ValueContent.DescribeStringValue(invocation.Arguments[0].Value).FirstNonEmptyLiteralOrDefault
+                          ?? TryRenderValue(ValueContent, invocation.Arguments[0].Value)
                     : null;
             }
 
@@ -510,13 +559,19 @@ public sealed partial class ProjectAnalyzer
                 invocation.TargetMethod?.Name,
                 null,
                 parameters,
-                _ownerMethod));
+                _ownerMethod,
+                containsTaint));
         }
 
         private void TryHandleHttpWrapper(IInvocationOperation invocation)
         {
             var methodName = invocation.TargetMethod?.Name;
             if (string.IsNullOrWhiteSpace(methodName))
+            {
+                return;
+            }
+
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
             {
                 return;
             }
@@ -531,7 +586,10 @@ public sealed partial class ProjectAnalyzer
             string? httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName);
             if (httpVerb is null && invocation.Arguments.Length > 0)
             {
-                var verbCandidate = TryRenderValue(ValueContent, invocation.Arguments[0].Value);
+                // Try to resolve verb from first argument (HttpMethod or string)
+                var verbDescription = ValueContent.DescribeStringValue(invocation.Arguments[0].Value);
+                var verbCandidate = verbDescription.FirstNonEmptyLiteralOrDefault ??
+                                   TryRenderValue(ValueContent, invocation.Arguments[0].Value);
                 httpVerb = verbCandidate?.ToUpperInvariant();
             }
 
@@ -540,16 +598,19 @@ public sealed partial class ProjectAnalyzer
             {
                 if (IsRouteParameter(arg.Parameter))
                 {
-                    route = TryRenderValue(ValueContent, arg.Value);
+                    var description = ValueContent.DescribeStringValue(arg.Value);
+                    route = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(ValueContent, arg.Value);
                     if (!string.IsNullOrWhiteSpace(route)) break;
                 }
             }
             route ??= invocation.Arguments.Length > 1
-                ? TryRenderValue(ValueContent, invocation.Arguments[1].Value)
+                ? ValueContent.DescribeStringValue(invocation.Arguments[1].Value).FirstNonEmptyLiteralOrDefault
+                      ?? TryRenderValue(ValueContent, invocation.Arguments[1].Value)
                 : null;
 
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
             var line = GetInvocationLine(invocation);
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
 
             var baseTypeSymbol = invocation.TargetMethod?.ContainingType;
             var baseType = Qualify(baseTypeSymbol) ?? _service.Fqdn;
