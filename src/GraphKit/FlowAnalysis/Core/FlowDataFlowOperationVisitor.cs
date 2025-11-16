@@ -24,24 +24,100 @@ namespace GraphKit.FlowAnalysis.Core
             ValueContent = valueContent;
         }
 
-        public virtual void Visit(ControlFlowGraph graph)
+        protected BasicBlock? CurrentBlock { get; private set; }
+
+        public virtual void Visit(ControlFlowGraph? graph)
         {
+            if (graph is null)
+            {
+                return;
+            }
+
+            var visited = new HashSet<int>();
+            var worklist = new Queue<BasicBlock>();
+
+            void Enqueue(BasicBlock? block)
+            {
+                if (block is null || !block.IsReachable)
+                {
+                    return;
+                }
+
+                if (visited.Add(block.Ordinal))
+                {
+                    worklist.Enqueue(block);
+                }
+            }
+
+            Enqueue(graph.EntryPoint);
+
             foreach (var block in graph.Blocks)
             {
+                Enqueue(block);
+            }
+
+            while (worklist.Count > 0)
+            {
+                var block = worklist.Dequeue();
                 Visit(block);
+
+                foreach (var branch in EnumerateSuccessors(block))
+                {
+                    foreach (var region in branch.LeavingRegions)
+                    {
+                        OnLeaveRegion(region);
+                    }
+
+                    foreach (var finallyRegion in branch.FinallyRegions)
+                    {
+                        OnEnterRegion(finallyRegion);
+                    }
+
+                    foreach (var region in branch.EnteringRegions)
+                    {
+                        OnEnterRegion(region);
+                    }
+
+                    OnBranch(branch, block.BranchValue);
+
+                    Enqueue(branch.Destination);
+                }
+            }
+        }
+
+        private static IEnumerable<ControlFlowBranch> EnumerateSuccessors(BasicBlock block)
+        {
+            if (block.ConditionalSuccessor is { } conditional)
+            {
+                yield return conditional;
+            }
+
+            if (block.FallThroughSuccessor is { } fallthrough)
+            {
+                yield return fallthrough;
             }
         }
 
         public virtual void Visit(BasicBlock block)
         {
-            foreach (var operation in block.Operations)
-            {
-                Visit(operation);
-            }
+            var previous = CurrentBlock;
+            CurrentBlock = block;
 
-            if (block.BranchValue is { } branchOperation)
+            try
             {
-                Visit(branchOperation);
+                foreach (var operation in block.Operations)
+                {
+                    Visit(operation);
+                }
+
+                if (block.BranchValue is { } branchOperation)
+                {
+                    Visit(branchOperation);
+                }
+            }
+            finally
+            {
+                CurrentBlock = previous;
             }
         }
 
@@ -118,6 +194,9 @@ namespace GraphKit.FlowAnalysis.Core
         protected virtual void OnReturn(IReturnOperation op) { }
         protected virtual void OnAssignment(ISimpleAssignmentOperation op) { }
         protected virtual void OnConditional(IConditionalOperation op) { }
+        protected virtual void OnBranch(ControlFlowBranch branch, IOperation? condition) { }
+        protected virtual void OnEnterRegion(ControlFlowRegion region) { }
+        protected virtual void OnLeaveRegion(ControlFlowRegion region) { }
         protected virtual void OnNestedFlowEntered(in NestedFlowScope scope) { }
         protected virtual void OnNestedFlowExited(in NestedFlowScope scope) { }
 

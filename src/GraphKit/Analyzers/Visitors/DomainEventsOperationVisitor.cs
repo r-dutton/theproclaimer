@@ -6,6 +6,7 @@ using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Classification;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -23,6 +24,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenMappings = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
         private readonly CallClassifier _callClassifier;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public DomainEventsOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -44,6 +46,12 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             var kind = _callClassifier.Classify(op);
 
             switch (kind)
@@ -65,6 +73,26 @@ public sealed partial class ProjectAnalyzer
             }
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void HandleMediatorSend(IInvocationOperation invocation)
