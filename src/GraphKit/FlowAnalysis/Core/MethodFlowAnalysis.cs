@@ -1,3 +1,4 @@
+using GraphKit.FlowAnalysis.Interprocedural;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.PointsToAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.ValueContentAnalysis;
 using ValueContentAnalysisResult = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.DataFlowAnalysisResult<Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.ValueContentAnalysis.ValueContentBlockAnalysisResult, Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.ValueContentAnalysis.ValueContentAbstractValue>;
@@ -18,6 +19,10 @@ public sealed class MethodFlowAnalysis
     public ValueContentAnalysisResult? ValueContentAnalysis { get; internal set; }
 
     public bool PointsToComputed { get; internal set; }
+
+    public InterproceduralSettings? PointsToSettings { get; internal set; }
+
+    public FlowCallsitePredicate? PointsToPruningPredicate { get; internal set; }
 
     public bool PointsToIncludesCopyAnalysis { get; internal set; }
 

@@ -32,6 +32,11 @@ public sealed class FlowValueContentFacade
 
     private static readonly ValueContentAnalysisResult? PlaceholderResult = null;
 
+    private static readonly InterproceduralAnalysisPredicate AllowAllPredicate = new(
+        static _ => true,
+        static _ => true,
+        static _ => true);
+
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
 
     public FlowValueContentFacade(
@@ -42,6 +47,7 @@ public sealed class FlowValueContentFacade
         Settings = configuration;
         PruningPredicate = pruningPredicate;
         PerformCopyAnalysis = performCopyAnalysis;
+        AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
     }
 
     public InterproceduralSettings Settings { get; }
@@ -49,6 +55,8 @@ public sealed class FlowValueContentFacade
     public FlowCallsitePredicate PruningPredicate { get; }
 
     public bool PerformCopyAnalysis { get; }
+
+    private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
     public string? TryGetStringValue(IOperation op)
     {
@@ -172,6 +180,8 @@ public sealed class FlowValueContentFacade
                     {
                         methodAnalysis.PointsToAnalysis = pointsToResult;
                         methodAnalysis.PointsToComputed = true;
+                        methodAnalysis.PointsToSettings = Settings;
+                        methodAnalysis.PointsToPruningPredicate = PruningPredicate;
                         if (PerformCopyAnalysis)
                         {
                             methodAnalysis.PointsToIncludesCopyAnalysis = true;
@@ -220,9 +230,26 @@ public sealed class FlowValueContentFacade
             out pointsToResult,
             settings.Kind,
             pessimisticAnalysis: false,
-            performCopyAnalysisIfNotUserConfigured: PerformCopyAnalysis);
+            performCopyAnalysisIfNotUserConfigured: PerformCopyAnalysis,
+            interproceduralAnalysisPredicate: AnalysisPredicate);
 
         return valueContentResult;
+    }
+
+    private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
+    {
+        if (predicate is null)
+        {
+            return AllowAllPredicate;
+        }
+
+        bool ShouldAnalyzeInvocation(IOperation operation)
+            => operation is IInvocationOperation invocation && predicate(invocation);
+
+        return new InterproceduralAnalysisPredicate(
+            ShouldAnalyzeInvocation,
+            static _ => true,
+            static _ => true);
     }
 
     private static bool TryExtractString(
