@@ -37,8 +37,8 @@ public sealed partial class ProjectAnalyzer
         var model = project.GetModel(tree);
         var compilation = project.Compilation;
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsToFacade = CreatePointsToFacade(callsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(pointsToFacade);
+        var pointsToFacade = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Controllers);
+        var valueContentFacade = CreateValueContentFacade(pointsToFacade, FlowAnalysisFeature.Controllers);
         var copyAnalysisFacade = CreateCopyAnalysisFacade(callsitePredicate);
         var nullAnalysisFacade = CreateNullAnalysisFacade(pointsToFacade);
         var predicateAnalysisFacade = CreatePredicateAnalysisFacade(pointsToFacade);

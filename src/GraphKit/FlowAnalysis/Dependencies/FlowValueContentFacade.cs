@@ -79,6 +79,18 @@ public sealed class FlowValueContentFacade
     {
     }
 
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade,
+        FlowPointsToAnalysisOptions overrideOptions)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade?.PruningPredicate ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            overrideOptions,
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
     public FlowValueContentFacade(FlowPointsToFacade pointsToFacade)
         : this(
             pointsToFacade?.Configuration ?? throw new ArgumentNullException(nameof(pointsToFacade)),

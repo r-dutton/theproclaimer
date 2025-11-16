@@ -37,8 +37,8 @@ public sealed partial class ProjectAnalyzer
         var model = project.GetModel(tree);
         var compilation = project.Compilation;
         var httpCallsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForHttpClient);
-        var pointsToFacade = CreatePointsToFacade(httpCallsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(pointsToFacade);
+        var pointsToFacade = CreatePointsToFacade(httpCallsitePredicate, feature: FlowAnalysisFeature.Http);
+        var valueContentFacade = CreateValueContentFacade(pointsToFacade, FlowAnalysisFeature.Http);
         var copyAnalysisFacade = CreateCopyAnalysisFacade(httpCallsitePredicate);
         var nullAnalysisFacade = CreateNullAnalysisFacade(pointsToFacade);
         var predicateAnalysisFacade = CreatePredicateAnalysisFacade(pointsToFacade);
@@ -52,7 +52,7 @@ public sealed partial class ProjectAnalyzer
                 methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
             }
             catch (ArgumentException)
-            {
+            
                 methodSymbol = null;
             }
 

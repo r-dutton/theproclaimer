@@ -29,15 +29,44 @@ public sealed partial class ProjectAnalyzer
 
     private FlowPointsToFacade CreatePointsToFacade(
         FlowCallsitePredicate predicate,
-        FlowPointsToPrecision? precision = null)
-        => new(_interproceduralConfiguration, predicate, _configuration.GetPointsToAnalysisOptions(precision));
+        FlowPointsToPrecision? precision = null,
+        string? feature = null)
+    {
+        var options = EnsureCopyAnalysisOption(
+            _configuration.GetPointsToAnalysisOptions(precision),
+            feature);
+        return new(_interproceduralConfiguration, predicate, options);
+    }
+
     private FlowValueContentFacade CreateValueContentFacade(
         FlowCallsitePredicate predicate,
+        string? feature = null,
         FlowPointsToPrecision? precision = null)
-        => new(_interproceduralConfiguration, predicate, _configuration.GetPointsToAnalysisOptions(precision));
+    {
+        var options = EnsureCopyAnalysisOption(
+            _configuration.GetPointsToAnalysisOptions(precision),
+            feature);
+        return new(_interproceduralConfiguration, predicate, options);
+    }
 
-    private FlowValueContentFacade CreateValueContentFacade(FlowPointsToFacade pointsToFacade)
-        => new(_interproceduralConfiguration, pointsToFacade);
+    private FlowValueContentFacade CreateValueContentFacade(
+        FlowPointsToFacade pointsToFacade,
+        string? feature = null)
+    {
+        if (pointsToFacade is null)
+        {
+            throw new ArgumentNullException(nameof(pointsToFacade));
+        }
+
+        var requiresCopyAnalysis = ShouldPerformCopyAnalysis(feature);
+        if (!requiresCopyAnalysis || pointsToFacade.Options.PerformCopyAnalysis)
+        {
+            return new(_interproceduralConfiguration, pointsToFacade);
+        }
+
+        var upgradedOptions = pointsToFacade.Options with { PerformCopyAnalysis = true };
+        return new(_interproceduralConfiguration, pointsToFacade, upgradedOptions);
+    }
 
     private FlowCopyAnalysisFacade CreateCopyAnalysisFacade(FlowCallsitePredicate predicate)
         => new(_interproceduralConfiguration, predicate);
@@ -92,6 +121,10 @@ public sealed partial class ProjectAnalyzer
 
         public FlowPointsToPrecision DefaultPointsToPrecision { get; init; } = FlowPointsToPrecision.Fast;
 
+        public bool EnableValueContentCopyAnalysis { get; init; }
+
+        public string[] ValueContentCopyAnalysisFeatures { get; init; } = Array.Empty<string>();
+
         public PointsToAnalysisKind PointsToAnalysisKind { get; init; } = FlowPointsToAnalysisOptions.Fast.PointsToAnalysisKind;
 
         public bool PerformCopyAnalysis { get; init; } = FlowPointsToAnalysisOptions.Fast.PerformCopyAnalysis;
@@ -107,8 +140,11 @@ public sealed partial class ProjectAnalyzer
             var normalizedCallChain = Math.Max(0, MaxInterproceduralCallChainLength);
             var normalizedLambdaDepth = Math.Max(0, MaxInterproceduralLambdaOrLocalFunctionDepth);
 
+            var normalizedFeatures = ValueContentCopyAnalysisFeatures ?? Array.Empty<string>();
+
             if (normalizedCallChain == MaxInterproceduralCallChainLength &&
-                normalizedLambdaDepth == MaxInterproceduralLambdaOrLocalFunctionDepth)
+                normalizedLambdaDepth == MaxInterproceduralLambdaOrLocalFunctionDepth &&
+                ReferenceEquals(ValueContentCopyAnalysisFeatures, normalizedFeatures))
             {
                 return this;
             }
@@ -116,7 +152,8 @@ public sealed partial class ProjectAnalyzer
             return this with
             {
                 MaxInterproceduralCallChainLength = normalizedCallChain,
-                MaxInterproceduralLambdaOrLocalFunctionDepth = normalizedLambdaDepth
+                MaxInterproceduralLambdaOrLocalFunctionDepth = normalizedLambdaDepth,
+                ValueContentCopyAnalysisFeatures = normalizedFeatures
             };
         }
 
@@ -140,6 +177,33 @@ public sealed partial class ProjectAnalyzer
                 PessimisticAnalysis,
                 ExceptionPathsAnalysis);
         }
+    }
+
+    private FlowPointsToAnalysisOptions EnsureCopyAnalysisOption(
+        FlowPointsToAnalysisOptions options,
+        string? feature)
+    {
+        if (ShouldPerformCopyAnalysis(feature) && !options.PerformCopyAnalysis)
+        {
+            return options with { PerformCopyAnalysis = true };
+        }
+
+        return options;
+    }
+
+    private bool ShouldPerformCopyAnalysis(string? feature)
+    {
+        if (_configuration.EnableValueContentCopyAnalysis)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(feature))
+        {
+            return false;
+        }
+
+        return _valueContentCopyAnalysisFeatures.Contains(feature);
     }
 
     private static bool IsConfigurationType(string? typeName)
@@ -339,6 +403,19 @@ public sealed partial class ProjectAnalyzer
                 Evidence = CreateEvidence(usage.FilePath, usage.Line)
             });
         }
+    }
+
+    private static class FlowAnalysisFeature
+    {
+        public const string Controllers = "controllers";
+        public const string Http = "http";
+        public const string Mapping = "mapping";
+        public const string Messaging = "messaging";
+        public const string Notifications = "notifications";
+        public const string DomainEvents = "domain-events";
+        public const string Services = "services";
+        public const string Cqrs = "cqrs";
+        public const string Pipelines = "pipelines";
     }
 
     private sealed class ConfigurationUsageComparer : IEqualityComparer<(string Key, string Accessor, string FilePath)>

@@ -528,8 +528,8 @@ public sealed partial class ProjectAnalyzer
         }
 
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(pointsTo);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Cqrs);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Cqrs);
         var copyAnalysis = CreateCopyAnalysisFacade(callsitePredicate);
         var nullAnalysis = CreateNullAnalysisFacade(pointsTo);
         var predicateAnalysis = CreatePredicateAnalysisFacade(pointsTo);

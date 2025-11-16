@@ -37,8 +37,8 @@ public sealed partial class ProjectAnalyzer
         CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations, project.AssemblyName, project.RelativeDirectory);
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(pointsTo);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Pipelines);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Pipelines);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -127,8 +127,8 @@ public sealed partial class ProjectAnalyzer
         CaptureBehaviorDependencies(classDeclaration, tree, fieldTypes, info.ServiceUsages, info.OptionsUsages, info.CacheInvocations, project.AssemblyName, project.RelativeDirectory);
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(pointsTo);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Pipelines);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Pipelines);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {

@@ -151,7 +151,10 @@ namespace GraphKit.FlowAnalysis.Dependencies
                         Configuration,
                         CancellationToken.None);
 
-                    if (!methodAnalysis.PointsToComputed)
+                    var settingsMismatch = !methodAnalysis.PointsToSettings.HasValue || !methodAnalysis.PointsToSettings.Value.Equals(Configuration);
+                    var predicateMismatch = methodAnalysis.PointsToPruningPredicate != PruningPredicate;
+
+                    if (!methodAnalysis.PointsToComputed || settingsMismatch || predicateMismatch)
                     {
                         var methodContext = methodAnalysis.Context;
                         var declaration = methodContext.Declaration ?? declarationSyntax;
@@ -166,6 +169,9 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
                         methodAnalysis.PointsToAnalysis = computed;
                         methodAnalysis.PointsToComputed = true;
+                        methodAnalysis.PointsToSettings = Configuration;
+                        methodAnalysis.PointsToPruningPredicate = PruningPredicate;
+                        methodAnalysis.PointsToIncludesCopyAnalysis = false;
                     }
 
                     return methodAnalysis.PointsToAnalysis;
