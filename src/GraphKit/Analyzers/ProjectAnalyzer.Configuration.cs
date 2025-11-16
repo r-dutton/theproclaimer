@@ -99,7 +99,6 @@ public sealed partial class ProjectAnalyzer
         public bool EnableValueContentCopyAnalysis { get; init; }
 
         public string[] ValueContentCopyAnalysisFeatures { get; init; } = Array.Empty<string>();
-
         public FlowPointsToPrecision DefaultPointsToPrecision { get; init; } = FlowPointsToPrecision.Fast;
 
         public PointsToAnalysisKind PointsToAnalysisKind { get; init; } = FlowPointsToAnalysisOptions.Fast.PointsToAnalysisKind;

@@ -64,7 +64,7 @@ public sealed class FlowValueContentFacade
     public bool PerformCopyAnalysis { get; }
 
     private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
-
+ 
     public string? TryGetStringValue(IOperation op)
     {
         if (op is null)
