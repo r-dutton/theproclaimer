@@ -6,6 +6,7 @@ using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Http;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -24,6 +25,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenCaches;
         private readonly HashSet<string> _seenValidators;
         private readonly HashSet<string> _seenLogs;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public ServiceOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -65,6 +67,12 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             if (AnalysisPredicates.IsValidatorCall(op))
             {
                 HandleValidatorCall(op);
@@ -91,6 +99,12 @@ public sealed partial class ProjectAnalyzer
 
         public override void Visit(IOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.Visit(op);
+                return;
+            }
+
             switch (op)
             {
                 case IFieldReferenceOperation fieldReference:
@@ -123,6 +137,26 @@ public sealed partial class ProjectAnalyzer
             }
 
             base.Visit(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void HandleValidatorCall(IInvocationOperation invocation)
@@ -509,7 +543,7 @@ public sealed partial class ProjectAnalyzer
                 var methodName = invocation.TargetMethod?.Name ?? string.Empty;
                 httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
                 route = invocation.Arguments.Length > 0
-                    ? ValueContent.TryGetStringValue(invocation.Arguments[0].Value)
+                    ? TryRenderValue(ValueContent, invocation.Arguments[0].Value)
                     : null;
             }
 
@@ -551,8 +585,7 @@ public sealed partial class ProjectAnalyzer
             string? httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName);
             if (httpVerb is null && invocation.Arguments.Length > 0)
             {
-                // Try to resolve verb from first argument (HttpMethod or string)
-                var verbCandidate = ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
+                var verbCandidate = TryRenderValue(ValueContent, invocation.Arguments[0].Value);
                 httpVerb = verbCandidate?.ToUpperInvariant();
             }
 
@@ -561,12 +594,12 @@ public sealed partial class ProjectAnalyzer
             {
                 if (IsRouteParameter(arg.Parameter))
                 {
-                    route = ValueContent.TryGetStringValue(arg.Value);
+                    route = TryRenderValue(ValueContent, arg.Value);
                     if (!string.IsNullOrWhiteSpace(route)) break;
                 }
             }
             route ??= invocation.Arguments.Length > 1
-                ? ValueContent.TryGetStringValue(invocation.Arguments[1].Value)
+                ? TryRenderValue(ValueContent, invocation.Arguments[1].Value)
                 : null;
 
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
@@ -598,6 +631,31 @@ public sealed partial class ProjectAnalyzer
                    name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
                    name.Equals("endpoint", StringComparison.OrdinalIgnoreCase) ||
                    name.Equals("path", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string? TryRenderValue(FlowValueContentFacade valueContent, IOperation? operation)
+        {
+            if (operation is null)
+            {
+                return null;
+            }
+
+            foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
+            {
+                var literal = candidate.TryGetLiteralText();
+                if (!string.IsNullOrWhiteSpace(literal))
+                {
+                    return literal;
+                }
+
+                var placeholder = candidate.ToDisplayString();
+                if (!string.IsNullOrWhiteSpace(placeholder))
+                {
+                    return placeholder;
+                }
+            }
+
+            return null;
         }
 
         private static (string? Route, IReadOnlyCollection<string>? QueryParameters) NormalizeRouteWithQuery(string? route)

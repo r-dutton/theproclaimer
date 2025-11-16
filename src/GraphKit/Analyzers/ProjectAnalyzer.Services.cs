@@ -205,7 +205,7 @@ public sealed partial class ProjectAnalyzer
                 if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
                 {
                     if (invocation is not null &&
-                        TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
+                        TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree, model, valueContent) is { } configurationUsage)
                     {
                         serviceInfo.ConfigurationUsages.Add(configurationUsage);
                     }
@@ -392,7 +392,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                 {
                     serviceInfo.ConfigurationUsages.Add(configurationUsage);
                 }
