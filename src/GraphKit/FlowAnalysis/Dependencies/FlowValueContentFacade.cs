@@ -39,28 +39,63 @@ public sealed class FlowValueContentFacade
         static _ => true,
         static _ => true,
         static _ => true);
+
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
+
+    private FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowCallsitePredicate pruningPredicate,
+        FlowPointsToAnalysisOptions pointsToOptions,
+        InterproceduralAnalysisPredicate? interproceduralPredicate)
+    {
+        Settings = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        PruningPredicate = pruningPredicate;
+        PointsToOptions = pointsToOptions;
+        AnalysisPredicate = interproceduralPredicate ?? CreateInterproceduralPredicate(pruningPredicate);
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowCallsitePredicate pruningPredicate,
+        FlowPointsToAnalysisOptions pointsToOptions)
+        : this(configuration, pruningPredicate, pointsToOptions, interproceduralPredicate: null)
+    {
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowCallsitePredicate pruningPredicate)
+        : this(configuration, pruningPredicate, FlowPointsToAnalysisOptions.Fast, interproceduralPredicate: null)
+    {
+    }
 
     public FlowValueContentFacade(
         InterproceduralSettings configuration,
         FlowPointsToFacade pointsToFacade)
+        : this(
+            configuration,
+            pointsToFacade ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade?.InterproceduralPredicate)
     {
-        if (pointsToFacade is null)
-        {
-            throw new ArgumentNullException(nameof(pointsToFacade));
-        }
-
-        Settings = configuration;
-        PointsToOptions = pointsToFacade.Options;
-        PruningPredicate = pointsToFacade.PruningPredicate;
-        AnalysisPredicate = pointsToFacade.InterproceduralPredicate
-            ?? CreateInterproceduralPredicate(pointsToFacade.PruningPredicate);
     }
 
     public FlowValueContentFacade(FlowPointsToFacade pointsToFacade)
         : this(
             pointsToFacade?.Configuration ?? throw new ArgumentNullException(nameof(pointsToFacade)),
-            pointsToFacade.InterproceduralPredicate)
+            pointsToFacade,
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
+    private FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade,
+        InterproceduralAnalysisPredicate? interproceduralPredicate)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade?.PruningPredicate ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade.Options,
+            interproceduralPredicate)
     {
     }
 
@@ -71,7 +106,6 @@ public sealed class FlowValueContentFacade
     public FlowPointsToAnalysisOptions PointsToOptions { get; }
 
     private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
-
     public string? TryGetStringValue(IOperation op)
     {
         if (op is null)

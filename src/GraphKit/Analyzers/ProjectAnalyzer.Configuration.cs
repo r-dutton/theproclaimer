@@ -35,6 +35,14 @@ public sealed partial class ProjectAnalyzer
     private FlowValueContentFacade CreateValueContentFacade(FlowPointsToFacade pointsToFacade)
         => new(_interproceduralConfiguration, pointsToFacade);
 
+    private FlowValueContentFacade CreateValueContentFacade(
+        FlowCallsitePredicate predicate,
+        FlowPointsToPrecision? precision = null)
+        => new(
+            _interproceduralConfiguration,
+            predicate,
+            _configuration.GetPointsToAnalysisOptions(precision));
+
     private static FlowCallsitePredicate ComposeInterproceduralPredicate(FlowCallsitePredicate predicate)
         => invocation => !ShouldPruneInterproceduralInvocation(invocation) && predicate(invocation);
 
