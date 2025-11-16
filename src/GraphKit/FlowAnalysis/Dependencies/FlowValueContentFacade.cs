@@ -45,7 +45,16 @@ public sealed class FlowValueContentFacade
             static _ => true);
     }
 
+    public FlowValueContentFacade(FlowPointsToFacade pointsToFacade)
+        : this(
+            pointsToFacade?.Configuration ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade.InterproceduralPredicate)
+    {
+    }
+
     public InterproceduralSettings Settings { get; }
+
+    internal InterproceduralAnalysisPredicate InterproceduralPredicate => AnalysisPredicate;
 
     private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
