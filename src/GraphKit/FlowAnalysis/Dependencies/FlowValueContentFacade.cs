@@ -57,6 +57,13 @@ public sealed class FlowValueContentFacade
             ?? CreateInterproceduralPredicate(pointsToFacade.PruningPredicate);
     }
 
+    public FlowValueContentFacade(FlowPointsToFacade pointsToFacade)
+        : this(
+            pointsToFacade?.Configuration ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade.InterproceduralPredicate)
+    {
+    }
+
     public InterproceduralSettings Settings { get; }
 
     public FlowCallsitePredicate PruningPredicate { get; }
