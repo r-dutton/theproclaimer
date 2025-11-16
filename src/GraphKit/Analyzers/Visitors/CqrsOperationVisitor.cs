@@ -349,7 +349,11 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var literal = TryGetStringLiteral(argument.Value) ?? ValueContent.TryGetStringValue(argument.Value);
+                var literal = TryGetStringLiteral(argument.Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    literal = ValueContent.DescribeStringValue(argument.Value).FirstNonEmptyLiteralOrDefault;
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     return literal;
@@ -358,8 +362,11 @@ public sealed partial class ProjectAnalyzer
 
             if (invocation.Arguments.Length > 0)
             {
-                var literal = TryGetStringLiteral(invocation.Arguments[0].Value) ??
-                              ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
+                var literal = TryGetStringLiteral(invocation.Arguments[0].Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    literal = ValueContent.DescribeStringValue(invocation.Arguments[0].Value).FirstNonEmptyLiteralOrDefault;
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     return literal;

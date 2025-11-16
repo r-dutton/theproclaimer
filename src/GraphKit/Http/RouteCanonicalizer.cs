@@ -135,7 +135,8 @@ namespace GraphKit.Http
                 return TryGetString(conversion.Operand, valueContent);
             }
 
-            return valueContent.TryGetStringValue(operation);
+            var description = valueContent.DescribeStringValue(operation);
+            return description.FirstNonEmptyLiteralOrDefault;
         }
 
         private static bool IsRouteParameter(IParameterSymbol? parameter)

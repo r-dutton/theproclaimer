@@ -461,7 +461,7 @@ public sealed partial class ProjectAnalyzer
                 var methodName = invocation.TargetMethod?.Name ?? string.Empty;
                 httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
                 route = invocation.Arguments.Length > 0
-                    ? ValueContent.TryGetStringValue(invocation.Arguments[0].Value)
+                    ? ValueContent.DescribeStringValue(invocation.Arguments[0].Value).FirstNonEmptyLiteralOrDefault
                     : null;
             }
 
@@ -498,7 +498,7 @@ public sealed partial class ProjectAnalyzer
             if (httpVerb is null && invocation.Arguments.Length > 0)
             {
                 // Try to resolve verb from first argument (HttpMethod or string)
-                var verbCandidate = ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
+                var verbCandidate = ValueContent.DescribeStringValue(invocation.Arguments[0].Value).FirstNonEmptyLiteralOrDefault;
                 httpVerb = verbCandidate?.ToUpperInvariant();
             }
 
@@ -507,12 +507,12 @@ public sealed partial class ProjectAnalyzer
             {
                 if (IsRouteParameter(arg.Parameter))
                 {
-                    route = ValueContent.TryGetStringValue(arg.Value);
+                    route = ValueContent.DescribeStringValue(arg.Value).FirstNonEmptyLiteralOrDefault;
                     if (!string.IsNullOrWhiteSpace(route)) break;
                 }
             }
             route ??= invocation.Arguments.Length > 1
-                ? ValueContent.TryGetStringValue(invocation.Arguments[1].Value)
+                ? ValueContent.DescribeStringValue(invocation.Arguments[1].Value).FirstNonEmptyLiteralOrDefault
                 : null;
 
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
