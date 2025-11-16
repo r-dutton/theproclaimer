@@ -145,7 +145,6 @@ namespace GraphKit.Http
             {
                 return literal;
             }
-
             foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
             {
                 var literalCandidate = candidate.TryGetLiteralText();

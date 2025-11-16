@@ -134,7 +134,7 @@ public sealed partial class ProjectAnalyzer
         classSymbol ??= project.Compilation.GetTypeByMetadataName(fqdn);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(pointsTo);
         var copyAnalysis = CreateCopyAnalysisFacade(callsitePredicate);
         var nullAnalysis = CreateNullAnalysisFacade(pointsTo);
         var predicateAnalysis = CreatePredicateAnalysisFacade(pointsTo);

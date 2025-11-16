@@ -24,7 +24,7 @@ public sealed class FlowInterproceduralPruningTests
         var settings = ProjectAnalyzer.ProjectAnalyzerConfiguration.Default.ToInterproceduralSettings();
 
         FlowCallsitePredicate predicate = invocation => !IsInfrastructureInvocation(invocation);
-        var valueContent = new FlowValueContentFacade(settings, predicate, FlowPointsToAnalysisOptions.Fast);
+        var valueContent = new FlowValueContentFacade(settings, predicate);
 
         var model = compilation.GetSemanticModel(tree);
         var root = tree.GetRoot();
@@ -70,8 +70,8 @@ public sealed class FlowInterproceduralPruningTests
             return true;
         };
 
-        var pointsTo = new FlowPointsToFacade(settings, pointsToPredicate, FlowPointsToAnalysisOptions.Fast);
-        var valueContent = new FlowValueContentFacade(settings, valueContentPredicate, FlowPointsToAnalysisOptions.Fast);
+        var pointsTo = new FlowPointsToFacade(settings, pointsToPredicate);
+        var valueContent = new FlowValueContentFacade(settings, valueContentPredicate);
 
         var model = compilation.GetSemanticModel(tree);
         var root = tree.GetRoot();
