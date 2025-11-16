@@ -40,7 +40,7 @@ public sealed partial class ProjectAnalyzer
         var compilation = project.Compilation;
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsToFacade = CreatePointsToFacade(callsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(callsitePredicate);
+        var valueContentFacade = CreateValueContentFacade(pointsToFacade);
         var registeredMappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var invocation in Descendants<InvocationExpressionSyntax>(classDeclaration))
