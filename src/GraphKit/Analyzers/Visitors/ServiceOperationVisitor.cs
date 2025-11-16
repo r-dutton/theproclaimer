@@ -461,7 +461,7 @@ public sealed partial class ProjectAnalyzer
                 var methodName = invocation.TargetMethod?.Name ?? string.Empty;
                 httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
                 route = invocation.Arguments.Length > 0
-                    ? ValueContent.TryGetStringValue(invocation.Arguments[0].Value)
+                    ? TryRenderValue(ValueContent, invocation.Arguments[0].Value)
                     : null;
             }
 
@@ -497,8 +497,7 @@ public sealed partial class ProjectAnalyzer
             string? httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName);
             if (httpVerb is null && invocation.Arguments.Length > 0)
             {
-                // Try to resolve verb from first argument (HttpMethod or string)
-                var verbCandidate = ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
+                var verbCandidate = TryRenderValue(ValueContent, invocation.Arguments[0].Value);
                 httpVerb = verbCandidate?.ToUpperInvariant();
             }
 
@@ -507,12 +506,12 @@ public sealed partial class ProjectAnalyzer
             {
                 if (IsRouteParameter(arg.Parameter))
                 {
-                    route = ValueContent.TryGetStringValue(arg.Value);
+                    route = TryRenderValue(ValueContent, arg.Value);
                     if (!string.IsNullOrWhiteSpace(route)) break;
                 }
             }
             route ??= invocation.Arguments.Length > 1
-                ? ValueContent.TryGetStringValue(invocation.Arguments[1].Value)
+                ? TryRenderValue(ValueContent, invocation.Arguments[1].Value)
                 : null;
 
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
@@ -543,6 +542,31 @@ public sealed partial class ProjectAnalyzer
                    name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
                    name.Equals("endpoint", StringComparison.OrdinalIgnoreCase) ||
                    name.Equals("path", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string? TryRenderValue(FlowValueContentFacade valueContent, IOperation? operation)
+        {
+            if (operation is null)
+            {
+                return null;
+            }
+
+            foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
+            {
+                var literal = candidate.TryGetLiteralText();
+                if (!string.IsNullOrWhiteSpace(literal))
+                {
+                    return literal;
+                }
+
+                var placeholder = candidate.ToDisplayString();
+                if (!string.IsNullOrWhiteSpace(placeholder))
+                {
+                    return placeholder;
+                }
+            }
+
+            return null;
         }
 
         private static (string? Route, IReadOnlyCollection<string>? QueryParameters) NormalizeRouteWithQuery(string? route)
