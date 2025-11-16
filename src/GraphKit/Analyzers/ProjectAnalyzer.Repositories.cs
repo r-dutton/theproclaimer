@@ -127,6 +127,9 @@ public sealed partial class ProjectAnalyzer
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var repository = new RepositoryInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, fieldLookup);
+        var model = project.GetModel(tree);
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
 
         if (classDeclaration.BaseList is { Types.Count: > 0 })
         {
@@ -199,7 +202,7 @@ public sealed partial class ProjectAnalyzer
                     var resolvedType = ResolveImplementationType(descriptor.Type, repository.Assembly, repository.Project) ?? descriptor.Type;
                     if (IsConfigurationType(resolvedType) || IsConfigurationType(descriptor.Type))
                     {
-                        if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                        if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                         {
                             repository.ConfigurationUsages.Add(configurationUsage);
                         }
@@ -329,7 +332,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                 {
                     repository.ConfigurationUsages.Add(configurationUsage);
                 }
