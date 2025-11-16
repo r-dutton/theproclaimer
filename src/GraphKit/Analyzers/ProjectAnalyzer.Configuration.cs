@@ -136,7 +136,9 @@ public sealed partial class ProjectAnalyzer
         MemberAccessExpressionSyntax memberAccess,
         InvocationExpressionSyntax invocation,
         string configurationType,
-        SyntaxTree tree)
+        SyntaxTree tree,
+        SemanticModel? model = null,
+        FlowValueContentFacade? valueContent = null)
     {
         var methodName = GetMemberName(memberAccess.Name);
         if (string.IsNullOrWhiteSpace(methodName))
@@ -145,7 +147,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-        var key = argument is null ? null : ExtractConfigurationKey(argument);
+        var key = argument is null ? null : ExtractConfigurationKey(argument, model, valueContent);
         if (string.IsNullOrWhiteSpace(key))
         {
             return null;
@@ -159,10 +161,12 @@ public sealed partial class ProjectAnalyzer
     private ConfigurationUsage? TryCaptureConfigurationIndexer(
         ElementAccessExpressionSyntax elementAccess,
         string configurationType,
-        SyntaxTree tree)
+        SyntaxTree tree,
+        SemanticModel? model = null,
+        FlowValueContentFacade? valueContent = null)
     {
         var argument = elementAccess.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-        var key = argument is null ? null : ExtractConfigurationKey(argument);
+        var key = argument is null ? null : ExtractConfigurationKey(argument, model, valueContent);
         if (string.IsNullOrWhiteSpace(key))
         {
             return null;
@@ -173,7 +177,44 @@ public sealed partial class ProjectAnalyzer
         return new ConfigurationUsage(configurationType, "indexer", key, line, filePath);
     }
 
-    private static string? ExtractConfigurationKey(ExpressionSyntax expression)
+    private string? ExtractConfigurationKey(
+        ExpressionSyntax expression,
+        SemanticModel? model,
+        FlowValueContentFacade? valueContent)
+    {
+        if (model is not null && valueContent is not null)
+        {
+            try
+            {
+                var operation = model.GetOperation(expression);
+                if (operation is not null)
+                {
+                    foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
+                    {
+                        var literal = candidate.TryGetLiteralText();
+                        if (!string.IsNullOrWhiteSpace(literal))
+                        {
+                            return literal;
+                        }
+
+                        var placeholder = candidate.ToDisplayString();
+                        if (!string.IsNullOrWhiteSpace(placeholder))
+                        {
+                            return placeholder;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore semantic model failures; fall back to syntax heuristics.
+            }
+        }
+
+        return ExtractConfigurationKeyFromSyntax(expression);
+    }
+
+    private static string? ExtractConfigurationKeyFromSyntax(ExpressionSyntax expression)
     {
         return expression switch
         {
