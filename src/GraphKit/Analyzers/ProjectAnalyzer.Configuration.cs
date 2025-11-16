@@ -6,6 +6,7 @@ using GraphKit.Graph;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
+using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.PointsToAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using GraphKit.FlowAnalysis.Interprocedural;
 using InterproceduralAnalysisConfiguration = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.InterproceduralAnalysisConfiguration;
@@ -26,11 +27,13 @@ public sealed partial class ProjectAnalyzer
         return normalized;
     }
 
-    private FlowPointsToFacade CreatePointsToFacade(FlowCallsitePredicate predicate)
-        => new(_interproceduralConfiguration, predicate);
+    private FlowPointsToFacade CreatePointsToFacade(
+        FlowCallsitePredicate predicate,
+        FlowPointsToPrecision? precision = null)
+        => new(_interproceduralConfiguration, predicate, _configuration.GetPointsToAnalysisOptions(precision));
 
     private FlowValueContentFacade CreateValueContentFacade(FlowPointsToFacade pointsToFacade)
-        => new(_interproceduralConfiguration, pointsToFacade.InterproceduralPredicate);
+        => new(_interproceduralConfiguration, pointsToFacade);
 
     private static FlowCallsitePredicate ComposeInterproceduralPredicate(FlowCallsitePredicate predicate)
         => invocation => !ShouldPruneInterproceduralInvocation(invocation) && predicate(invocation);
@@ -71,6 +74,16 @@ public sealed partial class ProjectAnalyzer
 
         public InterproceduralAnalysisKind InterproceduralAnalysisKind { get; init; } = InterproceduralAnalysisKind.ContextSensitive;
 
+        public FlowPointsToPrecision DefaultPointsToPrecision { get; init; } = FlowPointsToPrecision.Fast;
+
+        public PointsToAnalysisKind PointsToAnalysisKind { get; init; } = FlowPointsToAnalysisOptions.Fast.PointsToAnalysisKind;
+
+        public bool PerformCopyAnalysis { get; init; } = FlowPointsToAnalysisOptions.Fast.PerformCopyAnalysis;
+
+        public bool PessimisticAnalysis { get; init; } = FlowPointsToAnalysisOptions.Fast.PessimisticAnalysis;
+
+        public bool ExceptionPathsAnalysis { get; init; } = FlowPointsToAnalysisOptions.Fast.ExceptionPathsAnalysis;
+
         public static ProjectAnalyzerConfiguration Default { get; } = new();
 
         public ProjectAnalyzerConfiguration Normalize()
@@ -96,6 +109,21 @@ public sealed partial class ProjectAnalyzer
                 InterproceduralAnalysisKind,
                 MaxInterproceduralCallChainLength,
                 MaxInterproceduralLambdaOrLocalFunctionDepth);
+
+        public FlowPointsToAnalysisOptions GetPointsToAnalysisOptions(FlowPointsToPrecision? precision = null)
+        {
+            var effectivePrecision = precision ?? DefaultPointsToPrecision;
+            if (effectivePrecision == FlowPointsToPrecision.HighPrecision)
+            {
+                return FlowPointsToAnalysisOptions.HighPrecision;
+            }
+
+            return new FlowPointsToAnalysisOptions(
+                PointsToAnalysisKind,
+                PerformCopyAnalysis,
+                PessimisticAnalysis,
+                ExceptionPathsAnalysis);
+        }
     }
 
     private static bool IsConfigurationType(string? typeName)
@@ -106,7 +134,9 @@ public sealed partial class ProjectAnalyzer
         MemberAccessExpressionSyntax memberAccess,
         InvocationExpressionSyntax invocation,
         string configurationType,
-        SyntaxTree tree)
+        SyntaxTree tree,
+        SemanticModel? model = null,
+        FlowValueContentFacade? valueContent = null)
     {
         var methodName = GetMemberName(memberAccess.Name);
         if (string.IsNullOrWhiteSpace(methodName))
@@ -115,7 +145,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-        var key = argument is null ? null : ExtractConfigurationKey(argument);
+        var key = argument is null ? null : ExtractConfigurationKey(argument, model, valueContent);
         if (string.IsNullOrWhiteSpace(key))
         {
             return null;
@@ -129,10 +159,12 @@ public sealed partial class ProjectAnalyzer
     private ConfigurationUsage? TryCaptureConfigurationIndexer(
         ElementAccessExpressionSyntax elementAccess,
         string configurationType,
-        SyntaxTree tree)
+        SyntaxTree tree,
+        SemanticModel? model = null,
+        FlowValueContentFacade? valueContent = null)
     {
         var argument = elementAccess.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-        var key = argument is null ? null : ExtractConfigurationKey(argument);
+        var key = argument is null ? null : ExtractConfigurationKey(argument, model, valueContent);
         if (string.IsNullOrWhiteSpace(key))
         {
             return null;
@@ -143,7 +175,44 @@ public sealed partial class ProjectAnalyzer
         return new ConfigurationUsage(configurationType, "indexer", key, line, filePath);
     }
 
-    private static string? ExtractConfigurationKey(ExpressionSyntax expression)
+    private string? ExtractConfigurationKey(
+        ExpressionSyntax expression,
+        SemanticModel? model,
+        FlowValueContentFacade? valueContent)
+    {
+        if (model is not null && valueContent is not null)
+        {
+            try
+            {
+                var operation = model.GetOperation(expression);
+                if (operation is not null)
+                {
+                    foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
+                    {
+                        var literal = candidate.TryGetLiteralText();
+                        if (!string.IsNullOrWhiteSpace(literal))
+                        {
+                            return literal;
+                        }
+
+                        var placeholder = candidate.ToDisplayString();
+                        if (!string.IsNullOrWhiteSpace(placeholder))
+                        {
+                            return placeholder;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore semantic model failures; fall back to syntax heuristics.
+            }
+        }
+
+        return ExtractConfigurationKeyFromSyntax(expression);
+    }
+
+    private static string? ExtractConfigurationKeyFromSyntax(ExpressionSyntax expression)
     {
         return expression switch
         {
