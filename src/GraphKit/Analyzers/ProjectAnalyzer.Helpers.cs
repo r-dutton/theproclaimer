@@ -1771,7 +1771,6 @@ public sealed partial class ProjectAnalyzer
         "IDistributedCache",
         "Log"
     };
-
     private static bool IsFrameworkServiceType(string? serviceType)
     {
         if (string.IsNullOrWhiteSpace(serviceType))

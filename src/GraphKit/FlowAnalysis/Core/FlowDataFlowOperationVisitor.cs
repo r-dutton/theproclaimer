@@ -62,6 +62,13 @@ namespace GraphKit.FlowAnalysis.Core
                 case IConditionalOperation conditional:
                     OnConditional(conditional);
                     break;
+                default:
+                    foreach (var child in op.ChildOperations)
+                    {
+                        Visit(child);
+                    }
+
+                    return;
             }
 
             foreach (var child in op.ChildOperations)
