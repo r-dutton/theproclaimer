@@ -31,16 +31,13 @@ public sealed partial class ProjectAnalyzer
         FlowCallsitePredicate predicate,
         FlowPointsToPrecision? precision = null)
         => new(_interproceduralConfiguration, predicate, _configuration.GetPointsToAnalysisOptions(precision));
-    private FlowValueContentFacade CreateValueContentFacade(FlowPointsToFacade pointsToFacade)
-        => new(_interproceduralConfiguration, pointsToFacade);
-
     private FlowValueContentFacade CreateValueContentFacade(
         FlowCallsitePredicate predicate,
         FlowPointsToPrecision? precision = null)
-        => new(
-            _interproceduralConfiguration,
-            predicate,
-            _configuration.GetPointsToAnalysisOptions(precision));
+        => new(_interproceduralConfiguration, predicate, _configuration.GetPointsToAnalysisOptions(precision));
+
+    private FlowValueContentFacade CreateValueContentFacade(FlowPointsToFacade pointsToFacade)
+        => new(_interproceduralConfiguration, pointsToFacade);
 
     private FlowCopyAnalysisFacade CreateCopyAnalysisFacade(FlowCallsitePredicate predicate)
         => new(_interproceduralConfiguration, predicate);
