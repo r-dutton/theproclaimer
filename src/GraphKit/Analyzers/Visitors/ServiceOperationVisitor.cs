@@ -495,7 +495,8 @@ public sealed partial class ProjectAnalyzer
                 var methodName = invocation.TargetMethod?.Name ?? string.Empty;
                 httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
                 route = invocation.Arguments.Length > 0
-                    ? TryRenderValue(ValueContent, invocation.Arguments[0].Value)
+                    ? ValueContent.DescribeStringValue(invocation.Arguments[0].Value).FirstNonEmptyLiteralOrDefault
+                          ?? TryRenderValue(ValueContent, invocation.Arguments[0].Value)
                     : null;
             }
 
@@ -531,7 +532,10 @@ public sealed partial class ProjectAnalyzer
             string? httpVerb = ProjectAnalyzer.NormalizeHttpVerb(methodName);
             if (httpVerb is null && invocation.Arguments.Length > 0)
             {
-                var verbCandidate = TryRenderValue(ValueContent, invocation.Arguments[0].Value);
+                // Try to resolve verb from first argument (HttpMethod or string)
+                var verbDescription = ValueContent.DescribeStringValue(invocation.Arguments[0].Value);
+                var verbCandidate = verbDescription.FirstNonEmptyLiteralOrDefault ??
+                                   TryRenderValue(ValueContent, invocation.Arguments[0].Value);
                 httpVerb = verbCandidate?.ToUpperInvariant();
             }
 
@@ -540,12 +544,14 @@ public sealed partial class ProjectAnalyzer
             {
                 if (IsRouteParameter(arg.Parameter))
                 {
-                    route = TryRenderValue(ValueContent, arg.Value);
+                    var description = ValueContent.DescribeStringValue(arg.Value);
+                    route = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(ValueContent, arg.Value);
                     if (!string.IsNullOrWhiteSpace(route)) break;
                 }
             }
             route ??= invocation.Arguments.Length > 1
-                ? TryRenderValue(ValueContent, invocation.Arguments[1].Value)
+                ? ValueContent.DescribeStringValue(invocation.Arguments[1].Value).FirstNonEmptyLiteralOrDefault
+                      ?? TryRenderValue(ValueContent, invocation.Arguments[1].Value)
                 : null;
 
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
