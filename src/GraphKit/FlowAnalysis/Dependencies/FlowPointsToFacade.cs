@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Analyzer.Utilities;
 using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
