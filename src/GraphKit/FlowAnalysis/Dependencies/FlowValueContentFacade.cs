@@ -32,24 +32,22 @@ public sealed class FlowValueContentFacade
 
     private static readonly ValueContentAnalysisResult? PlaceholderResult = null;
 
-    private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
-        static _ => false,
-        static _ => false,
-        static _ => false);
-
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
 
     public FlowValueContentFacade(
         InterproceduralSettings configuration,
-        FlowCallsitePredicate pruningPredicate)
+        InterproceduralAnalysisPredicate analysisPredicate)
     {
         Settings = configuration;
-        PruningPredicate = pruningPredicate;
+        AnalysisPredicate = analysisPredicate ?? new InterproceduralAnalysisPredicate(
+            static _ => true,
+            static _ => true,
+            static _ => true);
     }
 
     public InterproceduralSettings Settings { get; }
 
-    public FlowCallsitePredicate PruningPredicate { get; }
+    private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
     public string? TryGetStringValue(IOperation op)
     {
@@ -208,7 +206,7 @@ public sealed class FlowValueContentFacade
             wellKnownProvider,
             PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
             interproceduralConfiguration,
-            NoOpPredicate,
+            AnalysisPredicate,
             pessimisticAnalysis: false,
             performCopyAnalysis: false,
             exceptionPathsAnalysis: false);
