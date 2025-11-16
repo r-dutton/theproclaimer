@@ -8,6 +8,7 @@ using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.Classification;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -28,6 +29,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenServiceUsages = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
         private readonly CallClassifier _callClassifier;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public CqrsOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -50,6 +52,12 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             _efVisitor.TryProcess(op);
 
             var kind = _callClassifier.Classify(op);
@@ -75,6 +83,26 @@ public sealed partial class ProjectAnalyzer
             HandleRequestDispatch(op);
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void HandleDataCall(IInvocationOperation invocation)
@@ -349,7 +377,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var literal = TryGetStringLiteral(argument.Value) ?? ValueContent.TryGetStringValue(argument.Value);
+                var literal = TryGetStringLiteral(argument.Value) ?? TryRenderValue(argument.Value);
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     return literal;
@@ -359,7 +387,7 @@ public sealed partial class ProjectAnalyzer
             if (invocation.Arguments.Length > 0)
             {
                 var literal = TryGetStringLiteral(invocation.Arguments[0].Value) ??
-                              ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
+                              TryRenderValue(invocation.Arguments[0].Value);
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     return literal;
@@ -398,6 +426,31 @@ public sealed partial class ProjectAnalyzer
             if (operation is IConversionOperation conversion)
             {
                 return TryGetStringLiteral(conversion.Operand);
+            }
+
+            return null;
+        }
+
+        private string? TryRenderValue(IOperation? operation)
+        {
+            if (operation is null)
+            {
+                return null;
+            }
+
+            foreach (var candidate in ValueContent.EnumerateContentCandidates(operation))
+            {
+                var literal = candidate.TryGetLiteralText();
+                if (!string.IsNullOrWhiteSpace(literal))
+                {
+                    return literal;
+                }
+
+                var placeholder = candidate.ToDisplayString();
+                if (!string.IsNullOrWhiteSpace(placeholder))
+                {
+                    return placeholder;
+                }
             }
 
             return null;

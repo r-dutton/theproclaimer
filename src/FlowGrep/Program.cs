@@ -18,6 +18,7 @@ using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
+using GraphKit.FlowAnalysis.Dependencies;
 
 var argsList = args.ToList();
 string workspace = Environment.CurrentDirectory;
@@ -42,6 +43,11 @@ bool explicitUseRoslyn = argsList.Remove("--use-roslyn");
 int? interprocCallChain = null;
 int? interprocLambdaDepth = null;
 InterproceduralAnalysisKind? interprocKind = null;
+PointsToAnalysisKind? pointsToKind = null;
+bool? pointsToCopyAnalysis = null;
+bool? pointsToPessimisticAnalysis = null;
+bool? pointsToExceptionPathsAnalysis = null;
+FlowPointsToPrecision? pointsToPrecision = null;
 if (argsList.Remove("--legacy"))
 {
     renderOptions.Source = RenderSource.Legacy;
@@ -126,6 +132,60 @@ for (int i = 0; i < argsList.Count; i++)
                 Console.Error.WriteLine($"[warn] Unknown interprocedural analysis kind '{kindValue}'.");
             }
             break;
+        case "--points-to-kind":
+            var pointsToKindValue = argsList[++i];
+            if (Enum.TryParse<PointsToAnalysisKind>(pointsToKindValue, ignoreCase: true, out var parsedPointsToKind))
+            {
+                pointsToKind = parsedPointsToKind;
+            }
+            else
+            {
+                Console.Error.WriteLine($"[warn] Unknown points-to analysis kind '{pointsToKindValue}'.");
+            }
+            break;
+        case "--points-to-copy-analysis":
+            if (TryParseBooleanOption(argsList[++i], out var copyAnalysis))
+            {
+                pointsToCopyAnalysis = copyAnalysis;
+            }
+            else
+            {
+                Console.Error.WriteLine("[warn] Expected true/false after --points-to-copy-analysis.");
+            }
+            break;
+        case "--points-to-pessimistic":
+        case "--points-to-pessimistic-analysis":
+            if (TryParseBooleanOption(argsList[++i], out var pessimistic))
+            {
+                pointsToPessimisticAnalysis = pessimistic;
+            }
+            else
+            {
+                Console.Error.WriteLine("[warn] Expected true/false after --points-to-pessimistic-analysis.");
+            }
+            break;
+        case "--points-to-exception-paths":
+        case "--points-to-exception-paths-analysis":
+            if (TryParseBooleanOption(argsList[++i], out var exceptionPaths))
+            {
+                pointsToExceptionPathsAnalysis = exceptionPaths;
+            }
+            else
+            {
+                Console.Error.WriteLine("[warn] Expected true/false after --points-to-exception-paths.");
+            }
+            break;
+        case "--points-to-precision":
+            var precisionValue = argsList[++i];
+            if (Enum.TryParse<FlowPointsToPrecision>(precisionValue, ignoreCase: true, out var parsedPrecision))
+            {
+                pointsToPrecision = parsedPrecision;
+            }
+            else
+            {
+                Console.Error.WriteLine($"[warn] Unknown points-to precision '{precisionValue}'.");
+            }
+            break;
     }
 }
 
@@ -141,7 +201,14 @@ renderStyle = renderStyle.Equals("graph", StringComparison.OrdinalIgnoreCase)
     : "narrative";
 
 ProjectAnalyzer.ProjectAnalyzerConfiguration? analyzerConfiguration = null;
-if (interprocCallChain is not null || interprocLambdaDepth is not null || interprocKind is not null)
+if (interprocCallChain is not null ||
+    interprocLambdaDepth is not null ||
+    interprocKind is not null ||
+    pointsToKind is not null ||
+    pointsToCopyAnalysis is not null ||
+    pointsToPessimisticAnalysis is not null ||
+    pointsToExceptionPathsAnalysis is not null ||
+    pointsToPrecision is not null)
 {
     var configuration = ProjectAnalyzer.ProjectAnalyzerConfiguration.Default;
     if (interprocCallChain is { } callChainValue)
@@ -159,7 +226,49 @@ if (interprocCallChain is not null || interprocLambdaDepth is not null || interp
         configuration = configuration with { InterproceduralAnalysisKind = kindValue };
     }
 
+    if (pointsToKind is { } pointsToKindValue)
+    {
+        configuration = configuration with { PointsToAnalysisKind = pointsToKindValue };
+    }
+
+    if (pointsToCopyAnalysis is { } copyAnalysisValue)
+    {
+        configuration = configuration with { PerformCopyAnalysis = copyAnalysisValue };
+    }
+
+    if (pointsToPessimisticAnalysis is { } pessimisticValue)
+    {
+        configuration = configuration with { PessimisticAnalysis = pessimisticValue };
+    }
+
+    if (pointsToExceptionPathsAnalysis is { } exceptionPathsValue)
+    {
+        configuration = configuration with { ExceptionPathsAnalysis = exceptionPathsValue };
+    }
+
+    if (pointsToPrecision is { } precisionValue)
+    {
+        configuration = configuration with { DefaultPointsToPrecision = precisionValue };
+    }
+
     analyzerConfiguration = configuration.Normalize();
+}
+
+static bool TryParseBooleanOption(string value, out bool result)
+{
+    if (bool.TryParse(value, out result))
+    {
+        return true;
+    }
+
+    if (int.TryParse(value, out var numeric))
+    {
+        result = numeric != 0;
+        return true;
+    }
+
+    result = false;
+    return false;
 }
 
 MSBuildWorkspace? roslynWorkspace = null;

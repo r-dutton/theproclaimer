@@ -5,6 +5,7 @@ using System.Linq;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -23,6 +24,7 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenServices;
         private readonly HashSet<string> _seenOptions;
         private readonly HashSet<string> _seenCaches;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public PipelineOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -57,6 +59,12 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             var receiver = op.Instance?.Type ?? op.TargetMethod.ContainingType;
             if (receiver is not null)
             {
@@ -64,6 +72,26 @@ public sealed partial class ProjectAnalyzer
             }
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void ProcessInvocation(IInvocationOperation invocation, ITypeSymbol receiver)

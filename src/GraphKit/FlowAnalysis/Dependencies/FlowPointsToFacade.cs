@@ -39,18 +39,24 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
         public FlowPointsToFacade(
             InterproceduralSettings configuration,
-            FlowCallsitePredicate pruningPredicate)
+            FlowCallsitePredicate pruningPredicate,
+            FlowPointsToAnalysisOptions options)
         {
             Configuration = configuration;
             PruningPredicate = pruningPredicate;
-            InterproceduralPredicate = CreateInterproceduralPredicate(pruningPredicate);
+            AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
+            Options = options;
         }
 
         public InterproceduralSettings Configuration { get; }
 
         public FlowCallsitePredicate PruningPredicate { get; }
 
-        internal InterproceduralAnalysisPredicate InterproceduralPredicate { get; }
+        public FlowPointsToAnalysisOptions Options { get; }
+
+        private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
+
+        internal InterproceduralAnalysisPredicate InterproceduralPredicate => AnalysisPredicate;
 
         public bool TryGetAbstractValue(IOperation operation, out PointsToAbstractValue value)
         {
@@ -182,6 +188,7 @@ namespace GraphKit.FlowAnalysis.Dependencies
         {
             var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
             var settings = Configuration;
+            var pointsToOptions = Options;
 
             var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
                 EmptyAnalyzerOptions,
@@ -197,12 +204,12 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 owningSymbol,
                 EmptyAnalyzerOptions,
                 wellKnownProvider,
-                PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+                pointsToOptions.PointsToAnalysisKind,
                 interproceduralConfiguration,
-                InterproceduralPredicate,
-                false,
-                false,
-                false);
+                AnalysisPredicate,
+                pointsToOptions.PessimisticAnalysis,
+                pointsToOptions.PerformCopyAnalysis,
+                pointsToOptions.ExceptionPathsAnalysis);
         }
 
         private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)

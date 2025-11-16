@@ -20,6 +20,9 @@ public sealed partial class ProjectAnalyzer
 
         var info = new BackgroundServiceInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className);
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var model = project.GetModel(tree);
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
 
         foreach (var descriptor in fieldTypes.Values)
         {
@@ -45,7 +48,7 @@ public sealed partial class ProjectAnalyzer
                 var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                 if (IsConfigurationType(typeName) || IsConfigurationType(descriptor.Type))
                 {
-                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, typeName ?? descriptor.Type, tree) is { } configurationUsage)
+                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, typeName ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                     {
                         info.ConfigurationUsages.Add(configurationUsage);
                     }
@@ -96,7 +99,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                 {
                     info.ConfigurationUsages.Add(configurationUsage);
                 }

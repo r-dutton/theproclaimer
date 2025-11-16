@@ -125,17 +125,36 @@ namespace GraphKit.Http
                 return null;
             }
 
-            if (operation.ConstantValue is { HasValue: true, Value: string s })
+            if (operation.ConstantValue is { HasValue: true, Value: string literal })
             {
-                return s;
+                return literal;
             }
 
             if (operation is IConversionOperation conversion)
             {
-                return TryGetString(conversion.Operand, valueContent);
+                var converted = TryGetString(conversion.Operand, valueContent);
+                if (!string.IsNullOrWhiteSpace(converted))
+                {
+                    return converted;
+                }
             }
 
-            return valueContent.TryGetStringValue(operation);
+            foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
+            {
+                var literalCandidate = candidate.TryGetLiteralText();
+                if (!string.IsNullOrWhiteSpace(literalCandidate))
+                {
+                    return literalCandidate;
+                }
+
+                var placeholder = candidate.ToDisplayString();
+                if (!string.IsNullOrWhiteSpace(placeholder))
+                {
+                    return placeholder;
+                }
+            }
+
+            return null;
         }
 
         private static bool IsRouteParameter(IParameterSymbol? parameter)
