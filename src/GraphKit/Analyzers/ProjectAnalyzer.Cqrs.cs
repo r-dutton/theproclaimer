@@ -529,7 +529,7 @@ public sealed partial class ProjectAnalyzer
 
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(pointsTo);
 
         foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
         {

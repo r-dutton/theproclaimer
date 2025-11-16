@@ -43,14 +43,14 @@ namespace GraphKit.FlowAnalysis.Dependencies
         {
             Configuration = configuration;
             PruningPredicate = pruningPredicate;
-            AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
+            InterproceduralPredicate = CreateInterproceduralPredicate(pruningPredicate);
         }
 
         public InterproceduralSettings Configuration { get; }
 
         public FlowCallsitePredicate PruningPredicate { get; }
 
-        private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
+        internal InterproceduralAnalysisPredicate InterproceduralPredicate { get; }
 
         public bool TryGetAbstractValue(IOperation operation, out PointsToAbstractValue value)
         {
@@ -199,7 +199,7 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 wellKnownProvider,
                 PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
                 interproceduralConfiguration,
-                AnalysisPredicate,
+                InterproceduralPredicate,
                 false,
                 false,
                 false);
