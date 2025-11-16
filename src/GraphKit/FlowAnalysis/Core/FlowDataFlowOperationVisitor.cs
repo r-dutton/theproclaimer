@@ -208,9 +208,9 @@ namespace GraphKit.FlowAnalysis.Core
         protected virtual void OnReturn(IReturnOperation op) { }
         protected virtual void OnAssignment(ISimpleAssignmentOperation op) { }
         protected virtual void OnConditional(IConditionalOperation op) { }
-        protected virtual void OnBranch(ControlFlowBranch branch, IOperation? condition) { }
         protected virtual void OnEnterRegion(ControlFlowRegion region) { }
         protected virtual void OnLeaveRegion(ControlFlowRegion region) { }
+        protected virtual void OnBranch(ControlFlowBranch branch, IOperation? branchValue) { }
         protected virtual void OnNestedFlowEntered(in NestedFlowScope scope) { }
         protected virtual void OnNestedFlowExited(in NestedFlowScope scope) { }
 

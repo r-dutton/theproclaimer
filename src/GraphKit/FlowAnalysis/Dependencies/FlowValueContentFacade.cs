@@ -35,10 +35,10 @@ public sealed class FlowValueContentFacade
 
     private static readonly ValueContentAnalysisResult? PlaceholderResult = null;
 
-    private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
-        static _ => false,
-        static _ => false,
-        static _ => false);
+    private static readonly InterproceduralAnalysisPredicate AllowAllPredicate = new(
+        static _ => true,
+        static _ => true,
+        static _ => true);
 
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
 
@@ -50,6 +50,7 @@ public sealed class FlowValueContentFacade
         Settings = configuration;
         PruningPredicate = pruningPredicate;
         PointsToOptions = pointsToOptions;
+        AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
     }
 
     public InterproceduralSettings Settings { get; }
@@ -57,6 +58,8 @@ public sealed class FlowValueContentFacade
     public FlowCallsitePredicate PruningPredicate { get; }
 
     public FlowPointsToAnalysisOptions PointsToOptions { get; }
+
+    private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
     public ValueDescription DescribeStringValue(IOperation? op)
     {
@@ -328,27 +331,19 @@ public sealed class FlowValueContentFacade
             (uint)Math.Max(0, settings.MaxCallChainLength),
             (uint)Math.Max(0, settings.MaxLambdaOrLocalFunctionDepth));
 
-        var pointsToResult = PointsToAnalysis.TryGetOrComputeResult(
+        var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
             controlFlowGraph,
             owningSymbol,
             EmptyAnalyzerOptions,
             wellKnownProvider,
             pointsToOptions.PointsToAnalysisKind,
             interproceduralConfiguration,
-            NoOpPredicate,
+            out _,
+            out _,
             pessimisticAnalysis: pointsToOptions.PessimisticAnalysis,
             performCopyAnalysis: pointsToOptions.PerformCopyAnalysis,
-            exceptionPathsAnalysis: pointsToOptions.ExceptionPathsAnalysis);
-
-        var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
-            controlFlowGraph,
-            owningSymbol,
-            wellKnownProvider,
-            EmptyAnalyzerOptions,
-            FlowAnalysisRule,
-            pointsToOptions.PointsToAnalysisKind,
-            settings.Kind,
-            pessimisticAnalysis: pointsToOptions.PessimisticAnalysis);
+            exceptionPathsAnalysis: pointsToOptions.ExceptionPathsAnalysis,
+            interproceduralAnalysisPredicate: AnalysisPredicate);
 
         return valueContentResult;
     }
@@ -578,6 +573,22 @@ public sealed class FlowValueContentFacade
     private static bool IsBenignAnalysisException(Exception exception)
         => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
 
+    private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
+    {
+        if (predicate is null)
+        {
+            return AllowAllPredicate;
+        }
+
+        bool ShouldAnalyzeInvocation(IOperation operation)
+            => operation is IInvocationOperation invocation && predicate(invocation);
+
+        return new InterproceduralAnalysisPredicate(
+            ShouldAnalyzeInvocation,
+            static _ => true,
+            static _ => true);
+    }
+
     private readonly struct AnalysisCacheKey : IEquatable<AnalysisCacheKey>
     {
         public AnalysisCacheKey(SyntaxTree tree, TextSpan span)
@@ -677,114 +688,6 @@ public sealed class FlowValueContentFacade
     }
 }
 
-public enum FlowContentSegmentKind
-{
-    Literal,
-    NonLiteral,
-    NullLiteral
-}
-
-public readonly record struct FlowContentSegment(FlowContentSegmentKind Kind, string? Value)
-{
-    public static FlowContentSegment Literal(string? value)
-        => new(FlowContentSegmentKind.Literal, value ?? string.Empty);
-
-    public static FlowContentSegment NonLiteral(string? value = null)
-        => new(FlowContentSegmentKind.NonLiteral, value);
-
-    public static FlowContentSegment Null()
-        => new(FlowContentSegmentKind.NullLiteral, null);
-
-    public static FlowContentSegment FromLiteral(object? literal)
-    {
-        if (literal is null)
-        {
-            return Null();
-        }
-
-        if (literal is string text)
-        {
-            return Literal(text);
-        }
-
-        return Literal(literal.ToString());
-    }
-}
-
-public sealed record FlowContentCandidate
-{
-    public FlowContentCandidate(ImmutableArray<FlowContentSegment> segments)
-    {
-        Segments = segments;
-    }
-
-    public ImmutableArray<FlowContentSegment> Segments { get; }
-
-    public static FlowContentCandidate FromLiteral(string? value)
-        => new(ImmutableArray.Create(value is null ? FlowContentSegment.Null() : FlowContentSegment.Literal(value)));
-
-    public static FlowContentCandidate FromSegments(ImmutableArray<FlowContentSegment> segments)
-        => new(segments);
-
-    public static FlowContentCandidate Null { get; } = new(ImmutableArray.Create(FlowContentSegment.Null()));
-
-    public bool IsLiteral => !Segments.IsDefaultOrEmpty && Segments.All(segment => segment.Kind == FlowContentSegmentKind.Literal);
-
-    public bool ContainsNonLiteralSegments => !Segments.IsDefaultOrEmpty && Segments.Any(segment => segment.Kind == FlowContentSegmentKind.NonLiteral);
-
-    public string? TryGetLiteralText()
-    {
-        if (Segments.IsDefaultOrEmpty)
-        {
-            return null;
-        }
-
-        if (Segments.Length == 1 && Segments[0].Kind == FlowContentSegmentKind.NullLiteral)
-        {
-            return null;
-        }
-
-        if (!IsLiteral)
-        {
-            return null;
-        }
-
-        var builder = new StringBuilder();
-        foreach (var segment in Segments)
-        {
-            builder.Append(segment.Value);
-        }
-
-        return builder.ToString();
-    }
-
-    public string ToDisplayString(string nonLiteralPlaceholder = "{*}")
-    {
-        if (Segments.IsDefaultOrEmpty)
-        {
-            return string.Empty;
-        }
-
-        var builder = new StringBuilder();
-        foreach (var segment in Segments)
-        {
-            switch (segment.Kind)
-            {
-                case FlowContentSegmentKind.Literal:
-                    builder.Append(segment.Value);
-                    break;
-                case FlowContentSegmentKind.NullLiteral:
-                    builder.Append("null");
-                    break;
-                default:
-                    builder.Append(string.IsNullOrWhiteSpace(segment.Value) ? nonLiteralPlaceholder : segment.Value);
-                    break;
-            }
-        }
-
-        return builder.ToString();
-    }
-}
 
 public enum FlowContentSegmentKind
 {
