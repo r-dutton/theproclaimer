@@ -785,3 +785,112 @@ public sealed record FlowContentCandidate
         return builder.ToString();
     }
 }
+
+public enum FlowContentSegmentKind
+{
+    Literal,
+    NonLiteral,
+    NullLiteral
+}
+
+public readonly record struct FlowContentSegment(FlowContentSegmentKind Kind, string? Value)
+{
+    public static FlowContentSegment Literal(string? value)
+        => new(FlowContentSegmentKind.Literal, value ?? string.Empty);
+
+    public static FlowContentSegment NonLiteral(string? value = null)
+        => new(FlowContentSegmentKind.NonLiteral, value);
+
+    public static FlowContentSegment Null()
+        => new(FlowContentSegmentKind.NullLiteral, null);
+
+    public static FlowContentSegment FromLiteral(object? literal)
+    {
+        if (literal is null)
+        {
+            return Null();
+        }
+
+        if (literal is string text)
+        {
+            return Literal(text);
+        }
+
+        return Literal(literal.ToString());
+    }
+}
+
+public sealed record FlowContentCandidate
+{
+    public FlowContentCandidate(ImmutableArray<FlowContentSegment> segments)
+    {
+        Segments = segments;
+    }
+
+    public ImmutableArray<FlowContentSegment> Segments { get; }
+
+    public static FlowContentCandidate FromLiteral(string? value)
+        => new(ImmutableArray.Create(value is null ? FlowContentSegment.Null() : FlowContentSegment.Literal(value)));
+
+    public static FlowContentCandidate FromSegments(ImmutableArray<FlowContentSegment> segments)
+        => new(segments);
+
+    public static FlowContentCandidate Null { get; } = new(ImmutableArray.Create(FlowContentSegment.Null()));
+
+    public bool IsLiteral => !Segments.IsDefaultOrEmpty && Segments.All(segment => segment.Kind == FlowContentSegmentKind.Literal);
+
+    public bool ContainsNonLiteralSegments => !Segments.IsDefaultOrEmpty && Segments.Any(segment => segment.Kind == FlowContentSegmentKind.NonLiteral);
+
+    public string? TryGetLiteralText()
+    {
+        if (Segments.IsDefaultOrEmpty)
+        {
+            return null;
+        }
+
+        if (Segments.Length == 1 && Segments[0].Kind == FlowContentSegmentKind.NullLiteral)
+        {
+            return null;
+        }
+
+        if (!IsLiteral)
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var segment in Segments)
+        {
+            builder.Append(segment.Value);
+        }
+
+        return builder.ToString();
+    }
+
+    public string ToDisplayString(string nonLiteralPlaceholder = "{*}")
+    {
+        if (Segments.IsDefaultOrEmpty)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var segment in Segments)
+        {
+            switch (segment.Kind)
+            {
+                case FlowContentSegmentKind.Literal:
+                    builder.Append(segment.Value);
+                    break;
+                case FlowContentSegmentKind.NullLiteral:
+                    builder.Append("null");
+                    break;
+                default:
+                    builder.Append(string.IsNullOrWhiteSpace(segment.Value) ? nonLiteralPlaceholder : segment.Value);
+                    break;
+            }
+        }
+
+        return builder.ToString();
+    }
+}
