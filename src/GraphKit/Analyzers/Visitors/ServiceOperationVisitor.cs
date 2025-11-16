@@ -549,6 +549,7 @@ public sealed partial class ProjectAnalyzer
 
             var (normalizedRoute, parameters) = NormalizeRouteWithQuery(route);
             var line = GetInvocationLine(invocation);
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
 
             _service.HttpClientInvocations.Add(new HandlerClientInvocation(
                 clientType!,
@@ -619,7 +620,8 @@ public sealed partial class ProjectAnalyzer
                 parameters,
                 line,
                 _ownerMethod,
-                candidateClients));
+                candidateClients,
+                containsTaint));
         }
 
         private static bool IsRouteParameter(IParameterSymbol? parameter)

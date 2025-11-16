@@ -144,7 +144,8 @@ public sealed partial class ProjectAnalyzer
         IReadOnlyCollection<string>? QueryParameters,
         int Line,
         string DeclaringMethod,
-        IReadOnlyCollection<string>? CandidateClientTypes);
+        IReadOnlyCollection<string>? CandidateClientTypes,
+        bool ContainsTaintedInput = false);
 
     private sealed record ServiceWrapperInvocation(
         string MethodName,

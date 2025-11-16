@@ -1142,7 +1142,7 @@ public sealed partial class ProjectAnalyzer
                     ResolveClientTargetService(clientType),
                     invocation.QueryParameters,
                     invocation.DeclaringMethod,
-                    false));
+                    invocation.ContainsTaintedInput));
 
                 RecordServiceClientType(service, clientType);
             }
