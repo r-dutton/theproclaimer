@@ -32,6 +32,18 @@ public sealed partial class ProjectAnalyzer
     private FlowValueContentFacade CreateValueContentFacade(FlowCallsitePredicate predicate)
         => new(_interproceduralConfiguration, predicate);
 
+    private FlowCopyAnalysisFacade CreateCopyAnalysisFacade(FlowCallsitePredicate predicate)
+        => new(_interproceduralConfiguration, predicate);
+
+    private FlowNullAnalysisFacade CreateNullAnalysisFacade(FlowPointsToFacade pointsTo)
+        => new(pointsTo);
+
+    private FlowPredicateAnalysisFacade CreatePredicateAnalysisFacade(FlowPointsToFacade pointsTo)
+        => new(pointsTo);
+
+    private FlowTaintedDataFacade CreateTaintedDataFacade(FlowCallsitePredicate predicate)
+        => new(_interproceduralConfiguration, predicate, FlowTaintedDataConfiguration.Empty);
+
     private static FlowCallsitePredicate ComposeInterproceduralPredicate(FlowCallsitePredicate predicate)
         => invocation => !ShouldPruneInterproceduralInvocation(invocation) && predicate(invocation);
 

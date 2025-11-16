@@ -26,8 +26,12 @@ public sealed partial class ProjectAnalyzer
             string ownerMethod,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade nullAnalysis,
+            FlowCopyAnalysisFacade copyAnalysis,
+            FlowPredicateAnalysisFacade predicateAnalysis,
+            FlowTaintedDataFacade taintedData,
             FactWriter facts)
-            : base(model.Compilation, model, pointsTo, valueContent)
+            : base(model.Compilation, model, pointsTo, valueContent, nullAnalysis, copyAnalysis, predicateAnalysis, taintedData)
         {
             _analyzer = analyzer;
             _client = client;
@@ -48,6 +52,16 @@ public sealed partial class ProjectAnalyzer
 
         private void HandleHttpInvocation(IInvocationOperation invocation)
         {
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
+            {
+                return;
+            }
+
+            if (invocation.Instance is not null && (NullAnalysis?.IsDefinitelyNull(invocation.Instance) ?? false))
+            {
+                return;
+            }
+
             if (!RouteCanonicalizer.TryReconstruct(invocation, ValueContent, out var verb, out var rawRoute))
             {
                 return;
@@ -62,12 +76,15 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
+
             var call = new HttpClientCall(
                 _ownerMethod,
                 verb,
                 normalizedRoute,
                 line,
-                parameters);
+                parameters,
+                containsTaint);
             _client.OutboundCalls.Add(call);
             _analyzer.RecordHttpClientOutboundCallFact(_client, call);
         }

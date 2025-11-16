@@ -11,15 +11,29 @@ namespace GraphKit.FlowAnalysis.Core
         protected readonly SemanticModel Model;
         protected readonly FlowPointsToFacade PointsTo;
         protected readonly FlowValueContentFacade ValueContent;
+        protected readonly FlowNullAnalysisFacade? NullAnalysis;
+        protected readonly FlowCopyAnalysisFacade? CopyAnalysis;
+        protected readonly FlowPredicateAnalysisFacade? PredicateAnalysis;
+        protected readonly FlowTaintedDataFacade? TaintedData;
 
         protected FlowDataFlowOperationVisitor(
-            Compilation compilation, SemanticModel model,
-            FlowPointsToFacade pointsTo, FlowValueContentFacade valueContent)
+            Compilation compilation,
+            SemanticModel model,
+            FlowPointsToFacade pointsTo,
+            FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade? nullAnalysis = null,
+            FlowCopyAnalysisFacade? copyAnalysis = null,
+            FlowPredicateAnalysisFacade? predicateAnalysis = null,
+            FlowTaintedDataFacade? taintedData = null)
         {
             Compilation = compilation;
             Model = model;
             PointsTo = pointsTo;
             ValueContent = valueContent;
+            NullAnalysis = nullAnalysis;
+            CopyAnalysis = copyAnalysis;
+            PredicateAnalysis = predicateAnalysis;
+            TaintedData = taintedData;
         }
 
         public virtual void Visit(ControlFlowGraph graph)

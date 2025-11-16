@@ -36,8 +36,12 @@ public sealed partial class ProjectAnalyzer
             string ownerMethod,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade nullAnalysis,
+            FlowCopyAnalysisFacade copyAnalysis,
+            FlowPredicateAnalysisFacade predicateAnalysis,
+            FlowTaintedDataFacade taintedData,
             FactWriter facts)
-            : base(model.Compilation, model, pointsTo, valueContent)
+            : base(model.Compilation, model, pointsTo, valueContent, nullAnalysis, copyAnalysis, predicateAnalysis, taintedData)
         {
             _analyzer = analyzer;
             _handler = handler;
@@ -158,6 +162,16 @@ public sealed partial class ProjectAnalyzer
 
         private void HandleHttpCall(IInvocationOperation invocation)
         {
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
+            {
+                return;
+            }
+
+            if (invocation.Instance is not null && (NullAnalysis?.IsDefinitelyNull(invocation.Instance) ?? false))
+            {
+                return;
+            }
+
             if (IsRepositoryExtension(invocation.TargetMethod))
             {
                 return;
@@ -199,6 +213,8 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
+
             _handler.HttpClientInvocations.Add(new HandlerClientInvocation(
                 clientType,
                 verb ?? string.Empty,
@@ -207,8 +223,17 @@ public sealed partial class ProjectAnalyzer
                 invocation.TargetMethod.Name,
                 null,
                 null,
-                _ownerMethod));
-            _analyzer.RecordHandlerHttpClientFact(_handler, clientType, verb, route, invocation.TargetMethod.Name, line, _ownerMethod);
+                _ownerMethod,
+                containsTaint));
+            _analyzer.RecordHandlerHttpClientFact(
+                _handler,
+                clientType,
+                verb,
+                route,
+                invocation.TargetMethod.Name,
+                line,
+                _ownerMethod,
+                containsTaint);
         }
 
         private void HandleRequestDispatch(IInvocationOperation invocation)
