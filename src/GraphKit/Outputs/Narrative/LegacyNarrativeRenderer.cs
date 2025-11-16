@@ -315,6 +315,15 @@ namespace GraphKit.Outputs.Narrative
                         w.WriteLine($"- [{kind} {tableLabel}]({tableLink})");
                     }
                 }
+
+                if (w.GetStringBuilder().Length == initialLength)
+                {
+                    PrintServiceSurface(w, idx, serviceNode.Id, indent, repoRoot);
+                }
+            }
+            finally
+            {
+                serviceStack.Remove(serviceNode.Id);
             }
         }
 

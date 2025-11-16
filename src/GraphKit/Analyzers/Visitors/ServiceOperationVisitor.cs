@@ -589,6 +589,135 @@ public sealed partial class ProjectAnalyzer
             return false;
         }
 
+        private void ProcessFieldPropertyReference(IPropertyReferenceOperation property, IFieldReferenceOperation fieldReference)
+        {
+            var receiver = fieldReference.Field.Type;
+            var qualified = Qualify(receiver);
+            if (string.IsNullOrWhiteSpace(qualified))
+            {
+                return;
+            }
+
+            var propertyName = property.Property?.Name ?? property.Member.Name;
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                return;
+            }
+
+            var line = GetPropertyLine(property);
+            var implementations = CollectImplementationCandidates(qualified!, fieldReference);
+
+            var serviceTypeName = qualified!;
+            if (implementations is { Count: > 0 })
+            {
+                foreach (var implementation in implementations)
+                {
+                    if (_analyzer.TryResolveScopedService(implementation, _assembly, _project, out var scoped))
+                    {
+                        serviceTypeName = scoped;
+                        break;
+                    }
+                }
+            }
+
+            var serviceKey = $"{serviceTypeName}@{propertyName}@{line}";
+            if (!_seenServices.Add(serviceKey))
+            {
+                return;
+            }
+
+            _service.ServiceUsages.Add(new ServiceUsage(
+                serviceTypeName,
+                line,
+                _ownerMethod,
+                propertyName,
+                ImplementationTypes: implementations));
+
+            if (ProjectAnalyzer.IsFrameworkServiceType(serviceTypeName) &&
+                !_service.FrameworkInteractions.Any(fi =>
+                    string.Equals(fi.ServiceType, serviceTypeName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(fi.Member, propertyName, StringComparison.OrdinalIgnoreCase) &&
+                    fi.Line == line))
+            {
+                _service.FrameworkInteractions.Add(new FrameworkInteraction(serviceTypeName, propertyName, line));
+            }
+        }
+
+        private void ProcessFieldReference(IFieldReferenceOperation fieldReference)
+        {
+            var receiver = fieldReference.Field.Type;
+            var qualified = Qualify(receiver);
+            if (string.IsNullOrWhiteSpace(qualified))
+            {
+                return;
+            }
+
+            var fieldName = fieldReference.Field.Name;
+            var line = GetFieldLine(fieldReference);
+            var implementations = CollectImplementationCandidates(qualified!, fieldReference);
+
+            var serviceTypeName = qualified!;
+            if (implementations is { Count: > 0 })
+            {
+                foreach (var implementation in implementations)
+                {
+                    if (_analyzer.TryResolveScopedService(implementation, _assembly, _project, out var scoped))
+                    {
+                        serviceTypeName = scoped;
+                        break;
+                    }
+                }
+            }
+
+            var serviceKey = $"{serviceTypeName}@{fieldName}@{line}";
+            if (!_seenServices.Add(serviceKey))
+            {
+                return;
+            }
+
+            _service.ServiceUsages.Add(new ServiceUsage(
+                serviceTypeName,
+                line,
+                _ownerMethod,
+                fieldName,
+                ImplementationTypes: implementations));
+
+            if (ProjectAnalyzer.IsFrameworkServiceType(serviceTypeName) &&
+                !_service.FrameworkInteractions.Any(fi =>
+                    string.Equals(fi.ServiceType, serviceTypeName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(fi.Member, fieldName, StringComparison.OrdinalIgnoreCase) &&
+                    fi.Line == line))
+            {
+                _service.FrameworkInteractions.Add(new FrameworkInteraction(serviceTypeName, fieldName, line));
+            }
+        }
+
+        private IReadOnlyCollection<string>? CollectImplementationCandidates(string serviceTypeName, IOperation operation)
+        {
+            var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            unique.Add(serviceTypeName);
+
+            var pointedTypes = PointsTo.TryGetLocationTypes(operation);
+            if (!pointedTypes.IsDefaultOrEmpty)
+            {
+                foreach (var candidate in pointedTypes)
+                {
+                    if (Qualify(candidate) is { } resolved)
+                    {
+                        unique.Add(resolved);
+                    }
+                }
+            }
+
+            if (_analyzer.ResolveImplementationType(serviceTypeName, _assembly, _project) is { } resolvedImplementation)
+            {
+                unique.Add(resolvedImplementation);
+            }
+
+            return unique.Count > 0 ? unique.ToList() : null;
+        }
+
         private string? Qualify(ITypeSymbol? symbol)
         {
             if (symbol is null)
