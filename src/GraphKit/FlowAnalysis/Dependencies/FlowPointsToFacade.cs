@@ -30,10 +30,10 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
         private static readonly PointsToAnalysisResult? PlaceholderResult = null;
 
-        private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
-            static _ => false,
-            static _ => false,
-            static _ => false);
+        private static readonly InterproceduralAnalysisPredicate AllowAllPredicate = new(
+            static _ => true,
+            static _ => true,
+            static _ => true);
 
         private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<PointsToAnalysisResult?>> _analysisCache = new();
 
@@ -43,11 +43,14 @@ namespace GraphKit.FlowAnalysis.Dependencies
         {
             Configuration = configuration;
             PruningPredicate = pruningPredicate;
+            AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
         }
 
         public InterproceduralSettings Configuration { get; }
 
         public FlowCallsitePredicate PruningPredicate { get; }
+
+        private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
 
         public bool TryGetAbstractValue(IOperation operation, out PointsToAbstractValue value)
         {
@@ -196,10 +199,26 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 wellKnownProvider,
                 PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
                 interproceduralConfiguration,
-                NoOpPredicate,
+                AnalysisPredicate,
                 false,
                 false,
                 false);
+        }
+
+        private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
+        {
+            if (predicate is null)
+            {
+                return AllowAllPredicate;
+            }
+
+            bool ShouldAnalyzeInvocation(IOperation operation)
+                => operation is IInvocationOperation invocation && predicate(invocation);
+
+            return new InterproceduralAnalysisPredicate(
+                ShouldAnalyzeInvocation,
+                static _ => true,
+                static _ => true);
         }
 
         private static SyntaxNode? FindDeclarationSyntax(ISymbol symbol, SyntaxNode contextSyntax)
