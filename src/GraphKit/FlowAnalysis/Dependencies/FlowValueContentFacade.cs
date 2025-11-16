@@ -109,7 +109,8 @@ public sealed class FlowValueContentFacade
             yield break;
         }
 
-        var emittedLiterals = new HashSet<string?>(StringComparer.Ordinal);
+        // Use the default comparer to allow null entries without throwing when hashing.
+        var emittedLiterals = new HashSet<string?>();
         if (operation.ConstantValue is { HasValue: true } constant)
         {
             if (constant.Value is string constantString)
