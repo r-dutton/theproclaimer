@@ -57,8 +57,8 @@ public sealed partial class ProjectAnalyzer
         var info = new DomainEventHandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, eventType!);
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate, FlowAnalysisFeature.DomainEvents);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.DomainEvents);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.DomainEvents);
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 

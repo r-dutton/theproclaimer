@@ -42,17 +42,73 @@ public sealed class FlowValueContentFacade
 
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
 
-    public FlowValueContentFacade(
+    private FlowValueContentFacade(
         InterproceduralSettings configuration,
         FlowCallsitePredicate pruningPredicate,
         FlowPointsToAnalysisOptions pointsToOptions,
-        bool performCopyAnalysis)
+        InterproceduralAnalysisPredicate? interproceduralPredicate)
     {
-        Settings = configuration;
+        Settings = configuration ?? throw new ArgumentNullException(nameof(configuration));
         PruningPredicate = pruningPredicate;
         PointsToOptions = pointsToOptions;
-        PerformCopyAnalysis = performCopyAnalysis;
-        AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
+        AnalysisPredicate = interproceduralPredicate ?? CreateInterproceduralPredicate(pruningPredicate);
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowCallsitePredicate pruningPredicate,
+        FlowPointsToAnalysisOptions pointsToOptions)
+        : this(configuration, pruningPredicate, pointsToOptions, interproceduralPredicate: null)
+    {
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowCallsitePredicate pruningPredicate)
+        : this(configuration, pruningPredicate, FlowPointsToAnalysisOptions.Fast, interproceduralPredicate: null)
+    {
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade,
+        FlowPointsToAnalysisOptions overrideOptions)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade?.PruningPredicate ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            overrideOptions,
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
+    public FlowValueContentFacade(FlowPointsToFacade pointsToFacade)
+        : this(
+            pointsToFacade?.Configuration ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade,
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
+    private FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade,
+        InterproceduralAnalysisPredicate? interproceduralPredicate)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade?.PruningPredicate ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade.Options,
+            interproceduralPredicate)
+    {
     }
 
     public InterproceduralSettings Settings { get; }
@@ -61,40 +117,62 @@ public sealed class FlowValueContentFacade
 
     public FlowPointsToAnalysisOptions PointsToOptions { get; }
 
-    public bool PerformCopyAnalysis { get; }
-
     private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
- 
-    public string? TryGetStringValue(IOperation op)
+
+    public ValueDescription DescribeStringValue(IOperation? op)
     {
         if (op is null)
         {
-            return null;
+            return ValueDescription.None;
         }
 
-        if (op.ConstantValue is { HasValue: true, Value: string constant })
+        if (op is IConversionOperation conversion)
         {
-            return constant;
+            return DescribeStringValue(conversion.Operand);
         }
 
-        if (op.SemanticModel is not { } model)
+        if (op.ConstantValue is { HasValue: true } constant)
         {
-            return null;
+            if (constant.Value is string literal)
+            {
+                return ValueDescription.FromLiteral(literal);
+            }
+
+            if (constant.Value is null)
+            {
+                return ValueDescription.NullLiteral;
+            }
         }
 
-        var owningSymbol = model.GetEnclosingSymbol(op.Syntax.SpanStart);
-        if (owningSymbol is null)
+        if (!TryGetAnalysisFor(op, out var analysis) || analysis is null)
         {
-            return null;
+            return ValueDescription.None;
         }
 
-        if (!TryGetAnalysis(owningSymbol, model, op.Syntax, out var analysis))
-        {
-            return null;
-        }
-
-        return TryExtractString(analysis, op, out var reconstructed) ? reconstructed : null;
+        return TryDescribeString(analysis, op, out var description) ? description : ValueDescription.None;
     }
+
+    public bool TryGetStringLiterals(IOperation? op, out ImmutableArray<string> values)
+    {
+        var description = DescribeStringValue(op);
+        if (description.HasLiterals)
+        {
+            values = description.Literals;
+            return true;
+        }
+
+        values = ImmutableArray<string>.Empty;
+        return false;
+    }
+
+    public bool MayBeNull(IOperation? op)
+    {
+        var description = DescribeStringValue(op);
+        return description.MayBeNull;
+    }
+
+    public string? TryGetStringValue(IOperation op)
+        => DescribeStringValue(op).FirstNonEmptyLiteralOrDefault;
 
     public bool? TryGetBooleanValue(IOperation op)
     {
@@ -263,8 +341,7 @@ public sealed class FlowValueContentFacade
                     Settings,
                     CancellationToken.None);
 
-                var needsCopyUpgrade = PerformCopyAnalysis && !methodAnalysis.ValueContentIncludesCopyAnalysis;
-                if (!methodAnalysis.ValueContentComputed || needsCopyUpgrade)
+                if (!methodAnalysis.ValueContentComputed)
                 {
                     var methodContext = methodAnalysis.Context;
                     var declaration = methodContext.Declaration ?? declarationSyntax;
@@ -272,27 +349,13 @@ public sealed class FlowValueContentFacade
                     var controlFlow = methodContext.ControlFlowGraph ?? ControlFlowGraph.Create(declaration, methodSemanticModel, CancellationToken.None);
 
                     ValueContentAnalysisResult? computed = PlaceholderResult;
-                    PointsToAnalysisResult? pointsToResult = null;
                     if (controlFlow is not null)
                     {
-                        computed = RunValueContentAnalysis(controlFlow, owningSymbol, compilation, out pointsToResult);
-                    }
-
-                    if (pointsToResult is not null)
-                    {
-                        methodAnalysis.PointsToAnalysis = pointsToResult;
-                        methodAnalysis.PointsToComputed = true;
-                        methodAnalysis.PointsToSettings = Settings;
-                        methodAnalysis.PointsToPruningPredicate = PruningPredicate;
-                        methodAnalysis.PointsToIncludesCopyAnalysis = PointsToOptions.PerformCopyAnalysis || PerformCopyAnalysis;
+                        computed = RunValueContentAnalysis(controlFlow, owningSymbol, compilation);
                     }
 
                     methodAnalysis.ValueContentAnalysis = computed;
                     methodAnalysis.ValueContentComputed = true;
-                    if (PerformCopyAnalysis)
-                    {
-                        methodAnalysis.ValueContentIncludesCopyAnalysis = true;
-                    }
                 }
 
                 return methodAnalysis.ValueContentAnalysis;
@@ -300,7 +363,7 @@ public sealed class FlowValueContentFacade
 
             var semanticModel = compilation.GetSemanticModel(declarationSyntax.SyntaxTree);
             var cfg = ControlFlowGraph.Create(declarationSyntax, semanticModel, CancellationToken.None);
-            return cfg is null ? null : RunValueContentAnalysis(cfg, owningSymbol, compilation, out _);
+            return cfg is null ? null : RunValueContentAnalysis(cfg, owningSymbol, compilation);
         }
         catch (Exception ex) when (IsBenignAnalysisException(ex))
         {
@@ -311,8 +374,7 @@ public sealed class FlowValueContentFacade
     private ValueContentAnalysisResult? RunValueContentAnalysis(
         ControlFlowGraph controlFlowGraph,
         ISymbol owningSymbol,
-        Compilation compilation,
-        out PointsToAnalysisResult? pointsToResult)
+        Compilation compilation)
     {
         var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
 
@@ -327,19 +389,6 @@ public sealed class FlowValueContentFacade
             (uint)Math.Max(0, settings.MaxCallChainLength),
             (uint)Math.Max(0, settings.MaxLambdaOrLocalFunctionDepth));
 
-        var includeCopyAnalysis = pointsToOptions.PerformCopyAnalysis || PerformCopyAnalysis;
-        pointsToResult = PointsToAnalysis.TryGetOrComputeResult(
-            controlFlowGraph,
-            owningSymbol,
-            EmptyAnalyzerOptions,
-            wellKnownProvider,
-            pointsToOptions.PointsToAnalysisKind,
-            interproceduralConfiguration,
-            AnalysisPredicate,
-            pessimisticAnalysis: pointsToOptions.PessimisticAnalysis,
-            performCopyAnalysis: includeCopyAnalysis,
-            exceptionPathsAnalysis: pointsToOptions.ExceptionPathsAnalysis);
-
         var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
             controlFlowGraph,
             owningSymbol,
@@ -350,71 +399,62 @@ public sealed class FlowValueContentFacade
             out _,
             out _,
             pessimisticAnalysis: pointsToOptions.PessimisticAnalysis,
-            performCopyAnalysis: PerformCopyAnalysis,
+            performCopyAnalysis: pointsToOptions.PerformCopyAnalysis,
+            exceptionPathsAnalysis: pointsToOptions.ExceptionPathsAnalysis,
             interproceduralAnalysisPredicate: AnalysisPredicate);
 
         return valueContentResult;
     }
 
-    private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
-    {
-        if (predicate is null)
-        {
-            return AllowAllPredicate;
-        }
-
-        bool ShouldAnalyzeInvocation(IOperation operation)
-            => operation is IInvocationOperation invocation && predicate(invocation);
-
-        return new InterproceduralAnalysisPredicate(
-            ShouldAnalyzeInvocation,
-            static _ => true,
-            static _ => true);
-    }
-
-    private static bool TryExtractString(
+    private static bool TryDescribeString(
         ValueContentAnalysisResult analysis,
         IOperation operation,
-        out string? value)
+        out ValueDescription description)
     {
-        value = null;
+        description = ValueDescription.None;
         var abstractValue = analysis[operation];
         if (abstractValue is null)
         {
             return false;
         }
 
+        description = BuildDescription(abstractValue);
+        return true;
+    }
+
+    private static ValueDescription BuildDescription(ValueContentAbstractValue abstractValue)
+    {
+        var literals = ImmutableArray.CreateBuilder<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var includesNull = false;
+
         if (abstractValue.TryGetSingleNonNullLiteral(out string? literal) && literal is not null)
         {
-            value = literal;
-            return true;
+            seen.Add(literal);
+            literals.Add(literal);
         }
-
-        if (abstractValue.IsLiteralState)
+        else if (abstractValue.IsLiteralState)
         {
             foreach (var candidate in abstractValue.LiteralValues)
             {
-                if (candidate is string text)
+                switch (candidate)
                 {
-                    value = text;
-                    return true;
-                }
-
-                if (candidate is null)
-                {
-                    value = null;
-                    return true;
+                    case string text when seen.Add(text):
+                        literals.Add(text);
+                        break;
+                    case null:
+                        includesNull = true;
+                        break;
                 }
             }
         }
-
-        if (Equals(abstractValue, ValueContentAbstractValue.ContainsNullLiteralState))
+        else if (Equals(abstractValue, ValueContentAbstractValue.ContainsNullLiteralState))
         {
-            value = null;
-            return true;
+            includesNull = true;
         }
 
-        return false;
+        seen.Clear();
+        return new ValueDescription(literals.ToImmutable(), includesNull, abstractValue.NonLiteralState, hasValue: true);
     }
 
     private static bool TryExtractBoolean(
@@ -628,7 +668,84 @@ public sealed class FlowValueContentFacade
         public override int GetHashCode()
             => HashCode.Combine(Tree, Span.Start, Span.Length);
     }
+
+    public readonly record struct ValueDescription
+    {
+        public static ValueDescription None { get; } = new(
+            ImmutableArray<string>.Empty,
+            includesNullLiteral: false,
+            ValueContainsNonLiteralState.Undefined,
+            hasValue: false);
+
+        public static ValueDescription NullLiteral { get; } = new(
+            ImmutableArray<string>.Empty,
+            includesNullLiteral: true,
+            ValueContainsNonLiteralState.No,
+            hasValue: true);
+
+        public static ValueDescription FromLiteral(string literal)
+            => new(ImmutableArray.Create(literal), includesNullLiteral: false, ValueContainsNonLiteralState.No, hasValue: true);
+
+        public ValueDescription(
+            ImmutableArray<string> literals,
+            bool includesNullLiteral,
+            ValueContainsNonLiteralState nonLiteralState,
+            bool hasValue)
+        {
+            Literals = literals.IsDefault ? ImmutableArray<string>.Empty : literals;
+            IncludesNullLiteral = includesNullLiteral;
+            NonLiteralState = nonLiteralState;
+            HasValue = hasValue;
+        }
+
+        public ImmutableArray<string> Literals { get; }
+
+        public bool IncludesNullLiteral { get; }
+
+        public ValueContainsNonLiteralState NonLiteralState { get; }
+
+        public bool HasValue { get; }
+
+        public bool HasLiterals => !Literals.IsDefaultOrEmpty && Literals.Length > 0;
+
+        public bool HasSingleLiteral => HasLiterals && Literals.Length == 1;
+
+        public string? SingleLiteralOrDefault => HasSingleLiteral ? Literals[0] : null;
+
+        public string? FirstLiteralOrDefault => HasLiterals ? Literals[0] : null;
+
+        public string? FirstNonEmptyLiteralOrDefault
+        {
+            get
+            {
+                if (!HasLiterals)
+                {
+                    return null;
+                }
+
+                foreach (var literal in Literals)
+                {
+                    if (!string.IsNullOrWhiteSpace(literal))
+                    {
+                        return literal;
+                    }
+                }
+
+                return Literals[0];
+            }
+        }
+
+        public bool ContainsNonLiteralValues => NonLiteralState is ValueContainsNonLiteralState.Maybe;
+
+        public bool MayBeNull
+            => IncludesNullLiteral
+               || NonLiteralState is ValueContainsNonLiteralState.Maybe
+               || NonLiteralState is ValueContainsNonLiteralState.Invalid
+               || NonLiteralState is ValueContainsNonLiteralState.Undefined
+               || !HasValue;
+    }
 }
+
 
 public enum FlowContentSegmentKind
 {

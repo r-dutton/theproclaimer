@@ -2856,7 +2856,7 @@ private static bool NamespaceRootMatches(string candidateType, string referenceT
             || typeName.Contains("MeterFactory", StringComparison.Ordinal);
     }
 
-    private static bool IsTelemetryType(string? typeName)
+    internal static bool IsTelemetryType(string? typeName)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {

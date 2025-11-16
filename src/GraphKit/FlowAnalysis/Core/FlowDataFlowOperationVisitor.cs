@@ -12,16 +12,30 @@ namespace GraphKit.FlowAnalysis.Core
         protected readonly SemanticModel Model;
         protected readonly FlowPointsToFacade PointsTo;
         protected readonly FlowValueContentFacade ValueContent;
+        protected readonly FlowNullAnalysisFacade? NullAnalysis;
+        protected readonly FlowCopyAnalysisFacade? CopyAnalysis;
+        protected readonly FlowPredicateAnalysisFacade? PredicateAnalysis;
+        protected readonly FlowTaintedDataFacade? TaintedData;
         private readonly Stack<NestedFlowScope> _nestedFlows = new();
 
         protected FlowDataFlowOperationVisitor(
-            Compilation compilation, SemanticModel model,
-            FlowPointsToFacade pointsTo, FlowValueContentFacade valueContent)
+            Compilation compilation,
+            SemanticModel model,
+            FlowPointsToFacade pointsTo,
+            FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade? nullAnalysis = null,
+            FlowCopyAnalysisFacade? copyAnalysis = null,
+            FlowPredicateAnalysisFacade? predicateAnalysis = null,
+            FlowTaintedDataFacade? taintedData = null)
         {
             Compilation = compilation;
             Model = model;
             PointsTo = pointsTo;
             ValueContent = valueContent;
+            NullAnalysis = nullAnalysis;
+            CopyAnalysis = copyAnalysis;
+            PredicateAnalysis = predicateAnalysis;
+            TaintedData = taintedData;
         }
 
         protected BasicBlock? CurrentBlock { get; private set; }
@@ -194,9 +208,9 @@ namespace GraphKit.FlowAnalysis.Core
         protected virtual void OnReturn(IReturnOperation op) { }
         protected virtual void OnAssignment(ISimpleAssignmentOperation op) { }
         protected virtual void OnConditional(IConditionalOperation op) { }
-        protected virtual void OnBranch(ControlFlowBranch branch, IOperation? condition) { }
         protected virtual void OnEnterRegion(ControlFlowRegion region) { }
         protected virtual void OnLeaveRegion(ControlFlowRegion region) { }
+        protected virtual void OnBranch(ControlFlowBranch branch, IOperation? branchValue) { }
         protected virtual void OnNestedFlowEntered(in NestedFlowScope scope) { }
         protected virtual void OnNestedFlowExited(in NestedFlowScope scope) { }
 

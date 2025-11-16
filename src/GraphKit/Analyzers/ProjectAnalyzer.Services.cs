@@ -133,8 +133,12 @@ public sealed partial class ProjectAnalyzer
 
         classSymbol ??= project.Compilation.GetTypeByMetadataName(fqdn);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate, FlowAnalysisFeature.Services);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Services);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Services);
+        var copyAnalysis = CreateCopyAnalysisFacade(callsitePredicate);
+        var nullAnalysis = CreateNullAnalysisFacade(pointsTo);
+        var predicateAnalysis = CreatePredicateAnalysisFacade(pointsTo);
+        var taintedData = CreateTaintedDataFacade(callsitePredicate);
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var baseTypeCandidates = classDeclaration.BaseList?.Types
@@ -435,6 +439,10 @@ public sealed partial class ProjectAnalyzer
                 method.Identifier.Text,
                 pointsTo,
                 valueContent,
+                nullAnalysis,
+                copyAnalysis,
+                predicateAnalysis,
+                taintedData,
                 serviceInfo);
 
             var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
@@ -625,6 +633,11 @@ public sealed partial class ProjectAnalyzer
                 if (!string.IsNullOrWhiteSpace(clientInvocation.OwnerMethod))
                 {
                     props["owner_method"] = clientInvocation.OwnerMethod!;
+                }
+
+                if (clientInvocation.ContainsTaintedInput)
+                {
+                    props["contains_tainted_input"] = true;
                 }
 
                 var propsOrNull = props.Count > 0 ? props : null;
@@ -1128,7 +1141,8 @@ public sealed partial class ProjectAnalyzer
                     invocation.InvokedMethod,
                     ResolveClientTargetService(clientType),
                     invocation.QueryParameters,
-                    invocation.DeclaringMethod));
+                    invocation.DeclaringMethod,
+                    false));
 
                 RecordServiceClientType(service, clientType);
             }

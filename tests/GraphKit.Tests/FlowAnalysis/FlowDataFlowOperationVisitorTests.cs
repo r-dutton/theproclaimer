@@ -70,8 +70,8 @@ public static class LinqSample
             maxCallChainLength: 5,
             maxLambdaOrLocalFunctionDepth: 5);
         FlowCallsitePredicate predicate = _ => true;
-        var pointsTo = new FlowPointsToFacade(settings, predicate, FlowPointsToAnalysisOptions.Fast);
-        var valueContent = new FlowValueContentFacade(settings, predicate, FlowPointsToAnalysisOptions.Fast, performCopyAnalysis: false);
+        var pointsTo = new FlowPointsToFacade(settings, predicate);
+        var valueContent = new FlowValueContentFacade(settings, predicate);
 
         var visitor = new RecordingVisitor(compilation, model, pointsTo, valueContent);
         visitor.Visit(cfg!);

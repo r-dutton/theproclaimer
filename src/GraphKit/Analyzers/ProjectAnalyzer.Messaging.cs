@@ -30,8 +30,8 @@ public sealed partial class ProjectAnalyzer
 
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate, FlowAnalysisFeature.Messaging);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Messaging);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Messaging);
 
         var fieldLookup = new Dictionary<string, FieldDescriptor>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in fieldTypes)
