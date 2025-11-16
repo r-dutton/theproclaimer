@@ -139,6 +139,13 @@ namespace GraphKit.Http
                 }
             }
 
+            var description = valueContent.DescribeStringValue(operation);
+            var literal = description.FirstNonEmptyLiteralOrDefault;
+            if (!string.IsNullOrWhiteSpace(literal))
+            {
+                return literal;
+            }
+
             foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
             {
                 var literalCandidate = candidate.TryGetLiteralText();
