@@ -70,7 +70,7 @@ public sealed class FlowInterproceduralPruningTests
             return true;
         };
 
-        var pointsTo = new FlowPointsToFacade(settings, pointsToPredicate);
+        var pointsTo = new FlowPointsToFacade(settings, pointsToPredicate, FlowPointsToAnalysisOptions.Fast);
         var valueContent = new FlowValueContentFacade(settings, valueContentPredicate, FlowPointsToAnalysisOptions.Fast, performCopyAnalysis: false);
 
         var model = compilation.GetSemanticModel(tree);
