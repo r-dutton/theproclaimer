@@ -134,7 +134,7 @@ public sealed partial class ProjectAnalyzer
         classSymbol ??= project.Compilation.GetTypeByMetadataName(fqdn);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate, FlowAnalysisFeature.Services);
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var baseTypeCandidates = classDeclaration.BaseList?.Types

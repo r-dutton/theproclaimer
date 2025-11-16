@@ -160,6 +160,7 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
                         methodAnalysis.PointsToAnalysis = computed;
                         methodAnalysis.PointsToComputed = true;
+                        methodAnalysis.PointsToIncludesCopyAnalysis = false;
                     }
 
                     return methodAnalysis.PointsToAnalysis;

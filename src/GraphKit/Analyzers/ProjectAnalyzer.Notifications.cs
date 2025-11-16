@@ -47,7 +47,7 @@ public sealed partial class ProjectAnalyzer
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate, FlowAnalysisFeature.Notifications);
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())

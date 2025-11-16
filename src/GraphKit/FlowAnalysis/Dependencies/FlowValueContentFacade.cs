@@ -32,24 +32,23 @@ public sealed class FlowValueContentFacade
 
     private static readonly ValueContentAnalysisResult? PlaceholderResult = null;
 
-    private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
-        static _ => false,
-        static _ => false,
-        static _ => false);
-
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
 
     public FlowValueContentFacade(
         InterproceduralSettings configuration,
-        FlowCallsitePredicate pruningPredicate)
+        FlowCallsitePredicate pruningPredicate,
+        bool performCopyAnalysis)
     {
         Settings = configuration;
         PruningPredicate = pruningPredicate;
+        PerformCopyAnalysis = performCopyAnalysis;
     }
 
     public InterproceduralSettings Settings { get; }
 
     public FlowCallsitePredicate PruningPredicate { get; }
+
+    public bool PerformCopyAnalysis { get; }
 
     public string? TryGetStringValue(IOperation op)
     {
@@ -154,7 +153,8 @@ public sealed class FlowValueContentFacade
                     Settings,
                     CancellationToken.None);
 
-                if (!methodAnalysis.ValueContentComputed)
+                var needsCopyUpgrade = PerformCopyAnalysis && !methodAnalysis.ValueContentIncludesCopyAnalysis;
+                if (!methodAnalysis.ValueContentComputed || needsCopyUpgrade)
                 {
                     var methodContext = methodAnalysis.Context;
                     var declaration = methodContext.Declaration ?? declarationSyntax;
@@ -162,13 +162,28 @@ public sealed class FlowValueContentFacade
                     var controlFlow = methodContext.ControlFlowGraph ?? ControlFlowGraph.Create(declaration, methodSemanticModel, CancellationToken.None);
 
                     ValueContentAnalysisResult? computed = PlaceholderResult;
+                    PointsToAnalysisResult? pointsToResult = null;
                     if (controlFlow is not null)
                     {
-                        computed = RunValueContentAnalysis(controlFlow, owningSymbol, compilation);
+                        computed = RunValueContentAnalysis(controlFlow, owningSymbol, compilation, out pointsToResult);
+                    }
+
+                    if (pointsToResult is not null)
+                    {
+                        methodAnalysis.PointsToAnalysis = pointsToResult;
+                        methodAnalysis.PointsToComputed = true;
+                        if (PerformCopyAnalysis)
+                        {
+                            methodAnalysis.PointsToIncludesCopyAnalysis = true;
+                        }
                     }
 
                     methodAnalysis.ValueContentAnalysis = computed;
                     methodAnalysis.ValueContentComputed = true;
+                    if (PerformCopyAnalysis)
+                    {
+                        methodAnalysis.ValueContentIncludesCopyAnalysis = true;
+                    }
                 }
 
                 return methodAnalysis.ValueContentAnalysis;
@@ -176,7 +191,7 @@ public sealed class FlowValueContentFacade
 
             var semanticModel = compilation.GetSemanticModel(declarationSyntax.SyntaxTree);
             var cfg = ControlFlowGraph.Create(declarationSyntax, semanticModel, CancellationToken.None);
-            return cfg is null ? null : RunValueContentAnalysis(cfg, owningSymbol, compilation);
+            return cfg is null ? null : RunValueContentAnalysis(cfg, owningSymbol, compilation, out _);
         }
         catch (Exception ex) when (IsBenignAnalysisException(ex))
         {
@@ -187,31 +202,12 @@ public sealed class FlowValueContentFacade
     private ValueContentAnalysisResult? RunValueContentAnalysis(
         ControlFlowGraph controlFlowGraph,
         ISymbol owningSymbol,
-        Compilation compilation)
+        Compilation compilation,
+        out PointsToAnalysisResult? pointsToResult)
     {
         var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
 
         var settings = Settings;
-        var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
-            EmptyAnalyzerOptions,
-            ImmutableArray.Create(FlowAnalysisRule),
-            controlFlowGraph,
-            compilation,
-            settings.Kind,
-            (uint)Math.Max(0, settings.MaxCallChainLength),
-            (uint)Math.Max(0, settings.MaxLambdaOrLocalFunctionDepth));
-
-        var pointsToResult = PointsToAnalysis.TryGetOrComputeResult(
-            controlFlowGraph,
-            owningSymbol,
-            EmptyAnalyzerOptions,
-            wellKnownProvider,
-            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
-            interproceduralConfiguration,
-            NoOpPredicate,
-            pessimisticAnalysis: false,
-            performCopyAnalysis: false,
-            exceptionPathsAnalysis: false);
 
         var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
             controlFlowGraph,
@@ -220,8 +216,11 @@ public sealed class FlowValueContentFacade
             EmptyAnalyzerOptions,
             FlowAnalysisRule,
             PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+            out _,
+            out pointsToResult,
             settings.Kind,
-            pessimisticAnalysis: false);
+            pessimisticAnalysis: false,
+            performCopyAnalysisIfNotUserConfigured: PerformCopyAnalysis);
 
         return valueContentResult;
     }

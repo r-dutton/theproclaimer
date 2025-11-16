@@ -38,7 +38,7 @@ public sealed partial class ProjectAnalyzer
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate, FlowAnalysisFeature.Pipelines);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -128,7 +128,7 @@ public sealed partial class ProjectAnalyzer
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
         var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var valueContent = CreateValueContentFacade(callsitePredicate, FlowAnalysisFeature.Pipelines);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {

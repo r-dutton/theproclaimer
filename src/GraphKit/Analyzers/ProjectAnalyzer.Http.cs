@@ -38,7 +38,7 @@ public sealed partial class ProjectAnalyzer
         var compilation = project.Compilation;
         var httpCallsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForHttpClient);
         var pointsToFacade = CreatePointsToFacade(httpCallsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(httpCallsitePredicate);
+        var valueContentFacade = CreateValueContentFacade(httpCallsitePredicate, FlowAnalysisFeature.Http);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {

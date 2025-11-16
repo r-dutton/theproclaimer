@@ -19,5 +19,9 @@ public sealed class MethodFlowAnalysis
 
     public bool PointsToComputed { get; internal set; }
 
+    public bool PointsToIncludesCopyAnalysis { get; internal set; }
+
     public bool ValueContentComputed { get; internal set; }
+
+    public bool ValueContentIncludesCopyAnalysis { get; internal set; }
 }

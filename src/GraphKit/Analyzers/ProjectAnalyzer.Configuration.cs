@@ -29,8 +29,23 @@ public sealed partial class ProjectAnalyzer
     private FlowPointsToFacade CreatePointsToFacade(FlowCallsitePredicate predicate)
         => new(_interproceduralConfiguration, predicate);
 
-    private FlowValueContentFacade CreateValueContentFacade(FlowCallsitePredicate predicate)
-        => new(_interproceduralConfiguration, predicate);
+    private FlowValueContentFacade CreateValueContentFacade(FlowCallsitePredicate predicate, string feature)
+        => new(_interproceduralConfiguration, predicate, ShouldPerformCopyAnalysis(feature));
+
+    private bool ShouldPerformCopyAnalysis(string feature)
+    {
+        if (_configuration.EnableValueContentCopyAnalysis)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(feature))
+        {
+            return false;
+        }
+
+        return _valueContentCopyAnalysisFeatures.Contains(feature);
+    }
 
     private static FlowCallsitePredicate ComposeInterproceduralPredicate(FlowCallsitePredicate predicate)
         => invocation => !ShouldPruneInterproceduralInvocation(invocation) && predicate(invocation);
@@ -71,6 +86,10 @@ public sealed partial class ProjectAnalyzer
 
         public InterproceduralAnalysisKind InterproceduralAnalysisKind { get; init; } = InterproceduralAnalysisKind.ContextSensitive;
 
+        public bool EnableValueContentCopyAnalysis { get; init; }
+
+        public string[] ValueContentCopyAnalysisFeatures { get; init; } = Array.Empty<string>();
+
         public static ProjectAnalyzerConfiguration Default { get; } = new();
 
         public ProjectAnalyzerConfiguration Normalize()
@@ -78,8 +97,11 @@ public sealed partial class ProjectAnalyzer
             var normalizedCallChain = Math.Max(0, MaxInterproceduralCallChainLength);
             var normalizedLambdaDepth = Math.Max(0, MaxInterproceduralLambdaOrLocalFunctionDepth);
 
+            var normalizedFeatures = ValueContentCopyAnalysisFeatures ?? Array.Empty<string>();
+
             if (normalizedCallChain == MaxInterproceduralCallChainLength &&
-                normalizedLambdaDepth == MaxInterproceduralLambdaOrLocalFunctionDepth)
+                normalizedLambdaDepth == MaxInterproceduralLambdaOrLocalFunctionDepth &&
+                ReferenceEquals(ValueContentCopyAnalysisFeatures, normalizedFeatures))
             {
                 return this;
             }
@@ -87,7 +109,8 @@ public sealed partial class ProjectAnalyzer
             return this with
             {
                 MaxInterproceduralCallChainLength = normalizedCallChain,
-                MaxInterproceduralLambdaOrLocalFunctionDepth = normalizedLambdaDepth
+                MaxInterproceduralLambdaOrLocalFunctionDepth = normalizedLambdaDepth,
+                ValueContentCopyAnalysisFeatures = normalizedFeatures
             };
         }
 
@@ -96,6 +119,19 @@ public sealed partial class ProjectAnalyzer
                 InterproceduralAnalysisKind,
                 MaxInterproceduralCallChainLength,
                 MaxInterproceduralLambdaOrLocalFunctionDepth);
+    }
+
+    private static class FlowAnalysisFeature
+    {
+        public const string Controllers = "controllers";
+        public const string Http = "http";
+        public const string Mapping = "mapping";
+        public const string Messaging = "messaging";
+        public const string Notifications = "notifications";
+        public const string DomainEvents = "domain-events";
+        public const string Services = "services";
+        public const string Cqrs = "cqrs";
+        public const string Pipelines = "pipelines";
     }
 
     private static bool IsConfigurationType(string? typeName)
