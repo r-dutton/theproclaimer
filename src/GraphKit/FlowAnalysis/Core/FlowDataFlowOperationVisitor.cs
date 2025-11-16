@@ -99,10 +99,9 @@ namespace GraphKit.FlowAnalysis.Core
 
         protected virtual void VisitInvocation(IInvocationOperation op)
         {
-            foreach (var argument in op.Arguments)
-            {
-                Visit(argument.Value);
-            }
+            // Intentionally empty. Invocation arguments are already traversed
+            // via the generic child-iteration in Visit(IOperation), so doing
+            // extra work here would visit each argument twice.
         }
 
         protected virtual void VisitAnonymousFunction(IAnonymousFunctionOperation op)
