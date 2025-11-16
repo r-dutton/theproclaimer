@@ -52,7 +52,7 @@ public sealed partial class ProjectAnalyzer
                 methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
             }
             catch (ArgumentException)
-            {
+            
                 methodSymbol = null;
             }
 
