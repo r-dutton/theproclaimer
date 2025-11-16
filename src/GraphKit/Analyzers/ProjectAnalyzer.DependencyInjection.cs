@@ -1088,7 +1088,7 @@ public sealed partial class ProjectAnalyzer
                                 Project = string.Empty,
                                 FilePath = string.Empty,
                                 SymbolId = symbolId,
-                                Tags = new[] { "config" }
+                                Tags = new[] { "configuration", "infra" }
                             };
                         }
                         // Edge from IOptions<T> contract to inner POCO implementation
@@ -1225,19 +1225,19 @@ public sealed partial class ProjectAnalyzer
         var id = StableId.For("app.service_contract", effectiveServiceType, assembly, symbolId);
         if (!_nodes.ContainsKey(id))
         {
-            _nodes[id] = new GraphNode
-            {
-                Id = id,
-                Type = "app.service_contract",
-                Name = GetTopLevelSimpleIdentifier(effectiveServiceType),
-                Fqdn = effectiveServiceType,
-                Assembly = assembly,
-                Project = project,
-                FilePath = filePath,
-                Span = span,
-                SymbolId = symbolId,
-                Tags = new[] { "app" }
-            };
+        _nodes[id] = new GraphNode
+        {
+            Id = id,
+            Type = "app.service_contract",
+            Name = GetTopLevelSimpleIdentifier(effectiveServiceType),
+            Fqdn = effectiveServiceType,
+            Assembly = assembly,
+            Project = project,
+            FilePath = filePath,
+            Span = span,
+            SymbolId = symbolId,
+            Tags = new[] { "app", "service-contract" }
+        };
         }
 
         nodeId = id;
@@ -1557,7 +1557,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = string.Empty,
                 Span = null,
                 SymbolId = symbolId,
-                Tags = new[] { "app" }
+                Tags = new[] { "app", "service" }
             });
         }
 

@@ -103,6 +103,7 @@ public sealed class LegacyNarrativeRendererTests
         var narratives = LegacyNarrativeRenderer.Collect(bag, "/repo");
         var text = Assert.Single(narratives).Text;
 
-        Assert.Contains("(no additional service edges recorded)", text);
+        Assert.Contains("[uses_service RequestInfoService]", text);
+        Assert.DoesNotContain("(no additional service edges recorded)", text);
     }
 }

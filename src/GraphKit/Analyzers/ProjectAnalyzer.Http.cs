@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using GraphKit.FlowAnalysis.Dependencies;
 using GraphKit.FlowAnalysis.Interprocedural;
 using GraphKit.Graph;
@@ -38,8 +37,12 @@ public sealed partial class ProjectAnalyzer
         var model = project.GetModel(tree);
         var compilation = project.Compilation;
         var httpCallsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForHttpClient);
-        var pointsToFacade = CreatePointsToFacade(httpCallsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(httpCallsitePredicate);
+        var pointsToFacade = CreatePointsToFacade(httpCallsitePredicate, feature: FlowAnalysisFeature.Http);
+        var valueContentFacade = CreateValueContentFacade(pointsToFacade, FlowAnalysisFeature.Http);
+        var copyAnalysisFacade = CreateCopyAnalysisFacade(httpCallsitePredicate);
+        var nullAnalysisFacade = CreateNullAnalysisFacade(pointsToFacade);
+        var predicateAnalysisFacade = CreatePredicateAnalysisFacade(pointsToFacade);
+        var taintedDataFacade = CreateTaintedDataFacade(httpCallsitePredicate);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
         {
@@ -49,13 +52,24 @@ public sealed partial class ProjectAnalyzer
                 methodSymbol = model.GetDeclaredSymbol(method) as IMethodSymbol;
             }
             catch (ArgumentException)
-            {
+            
                 methodSymbol = null;
             }
 
             if (methodSymbol is not null && TryAcquireMethodAnalysis(methodSymbol))
             {
-                var visitor = new HttpOperationVisitor(this, model, info, methodSymbol.Name, pointsToFacade, valueContentFacade, _facts);
+                var visitor = new HttpOperationVisitor(
+                    this,
+                    model,
+                    info,
+                    methodSymbol.Name,
+                    pointsToFacade,
+                    valueContentFacade,
+                    nullAnalysisFacade,
+                    copyAnalysisFacade,
+                    predicateAnalysisFacade,
+                    taintedDataFacade,
+                    _facts);
                 var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(
                     compilation,
                     methodSymbol,
@@ -155,7 +169,7 @@ public sealed partial class ProjectAnalyzer
                                 : sendName.Identifier.Text.ToUpperInvariant();
                             var formattedRoute = candidateRoute is null ? null : FormatRoute(candidateRoute);
                             var line = GetLineNumber(tree, invocation);
-                            info.OutboundCalls.Add(new HttpClientCall(declaringMethod, normalizedMethod, formattedRoute, line, queryParameters));
+                            info.OutboundCalls.Add(new HttpClientCall(declaringMethod, normalizedMethod, formattedRoute, line, queryParameters, false));
                             continue;
                         }
                     }
@@ -169,7 +183,7 @@ public sealed partial class ProjectAnalyzer
                     var httpMethod = InferHttpVerb(methodIdentifier);
                     var route = ExtractRouteLiteral(tree, invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression);
                     var line = GetLineNumber(tree, invocation);
-                    info.OutboundCalls.Add(new HttpClientCall(declaringMethod, httpMethod, route, line, Array.Empty<string>()));
+                    info.OutboundCalls.Add(new HttpClientCall(declaringMethod, httpMethod, route, line, Array.Empty<string>(), false));
                     continue;
                 }
 
@@ -215,6 +229,14 @@ public sealed partial class ProjectAnalyzer
             }
 
             var id = StableId.For("http.client", client.Fqdn, client.Assembly, client.SymbolId);
+            var tags = new List<string> { "integration", "client" };
+            if (props.TryGetValue("external", out var externalObj) &&
+                externalObj is bool isExternal &&
+                isExternal)
+            {
+                tags.Add("external");
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -226,7 +248,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = client.FilePath,
                 Span = client.Span,
                 SymbolId = client.SymbolId,
-                Tags = new[] { "integration" },
+                Tags = tags.ToArray(),
                 Props = props.Count > 0 ? props : null
             };
 
@@ -457,7 +479,7 @@ public sealed partial class ProjectAnalyzer
 
             var route = FormatRoute(hint);
             var line = GetLineNumber(tree, invocation);
-            call = new HttpClientCall(declaringMethod, httpMethod, route, line, hint.QueryParameters.ToArray());
+            call = new HttpClientCall(declaringMethod, httpMethod, route, line, hint.QueryParameters.ToArray(), false);
             return true;
         }
 
@@ -491,7 +513,7 @@ public sealed partial class ProjectAnalyzer
 
         var formattedRoute = FormatRoute(routeHint);
         var callLine = GetLineNumber(tree, invocation);
-        call = new HttpClientCall(declaringMethod, inferredHttpMethod!, formattedRoute, callLine, routeHint.QueryParameters.ToArray());
+        call = new HttpClientCall(declaringMethod, inferredHttpMethod!, formattedRoute, callLine, routeHint.QueryParameters.ToArray(), false);
         return true;
     }
 
@@ -609,21 +631,7 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
-        if (queryParameters.Count == 0)
-        {
-            var builderText = expression.ToString();
-            foreach (Match match in Regex.Matches(builderText, @"With(?:Required|Optional)QueryParameter\(\s*""([^""]+)"""))
-            {
-                var name = match.Groups[1].Value;
-                var normalized = NormalizeQueryKey(name);
-                if (string.IsNullOrWhiteSpace(normalized))
-                {
-                    continue;
-                }
-
-                queryParameters.Add(normalized);
-            }
-        }
+        // No regex fallback; we rely on invocation chain and value-content only.
 
         return new RouteHint(route, queryParameters);
     }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -68,6 +69,7 @@ public sealed partial class ProjectAnalyzer
     private static readonly int MaxFileParseConcurrency = Math.Max(1, Environment.ProcessorCount - 1);
     private static readonly ConditionalWeakTable<SyntaxNode, NodeDescendantCache> DescendantCache = new();
     private readonly FactWriter _facts;
+    private readonly HashSet<string> _valueContentCopyAnalysisFeatures;
 
     public ProjectAnalyzer(string workspaceRoot, FactWriter? facts = null, ProjectAnalyzerConfiguration? configuration = null)
     {
@@ -76,6 +78,9 @@ public sealed partial class ProjectAnalyzer
         _facts = facts ?? new FactWriter();
         _configuration = EnsureConfiguration(configuration);
         _interproceduralConfiguration = _configuration.ToInterproceduralSettings();
+        _valueContentCopyAnalysisFeatures = new HashSet<string>(
+            _configuration.ValueContentCopyAnalysisFeatures ?? Array.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
         LoadFlowMap();
     }
 
@@ -98,10 +103,10 @@ public sealed partial class ProjectAnalyzer
             cancellationToken.ThrowIfCancellationRequested();
 
             var tree = root.SyntaxTree;
-            if (tree is null)
-            {
-                continue;
-            }
+              if (tree is null)
+              {
+                  continue;
+              }
 
             CollectStringConstants(project, tree, root, cancellationToken);
         }
@@ -121,18 +126,21 @@ public sealed partial class ProjectAnalyzer
                 ProcessMember(project, tree, member, null, cancellationToken);
             }
 
-            AnalyzeServiceRegistrations(project, tree);
-            AnalyzeHttpClientRegistrations(project, tree);
+              AnalyzeServiceRegistrations(project, tree);
+              AnalyzeHttpClientRegistrations(project, tree);
 
             var filePath = document.FilePath ?? tree.FilePath ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(filePath) &&
-                Path.GetFileName(filePath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
-            {
-                AnalyzeMinimalEndpoints(project, tree);
-            }
+              if (!string.IsNullOrWhiteSpace(filePath) &&
+                  Path.GetFileName(filePath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
+              {
+                  AnalyzeMinimalEndpoints(project, tree);
+              }
 
-            _ = model;
+              _ = model;
         }
+
+        // After repositories and entities have been collected, bind repositories to their canonical entity types.
+        BindRepositoryEntities(project);
     }
 
     public GraphDocument BuildDocument(string analyzerVersion)

@@ -1,24 +1,36 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.Workspace;
+using GraphKit.Classification;
+using GraphKit.Http;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
-    private sealed class ControllerOperationVisitor : FlowDataFlowOperationVisitor
-    {
-        private readonly ProjectAnalyzer _analyzer;
-        private readonly ControllerActionInfo _action;
-        private readonly HashSet<string> _seenRequests = new(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _seenMappings = new(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _seenHttpCalls = new(StringComparer.OrdinalIgnoreCase);
-        private readonly FactWriter _facts;
+        private sealed class ControllerOperationVisitor : FlowDataFlowOperationVisitor
+        {
+            private readonly ProjectAnalyzer _analyzer;
+            private readonly ControllerActionInfo _action;
+            private readonly HashSet<string> _seenRequests = new(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string> _seenMappings = new(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string> _seenHttpCalls = new(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string> _seenLoggerUsages = new(StringComparer.OrdinalIgnoreCase);
+            private readonly FactWriter _facts;
+            private readonly ProjectInfo _project;
+            private readonly IReadOnlyDictionary<string, string?> _parameterTypes;
+            private readonly IReadOnlyDictionary<string, FieldDescriptor> _fieldLookup;
+            private readonly CallClassifier _callClassifier;
+            private readonly ControlFlowTraversalState _flowState = new();
 
         public ControllerOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -26,35 +38,233 @@ public sealed partial class ProjectAnalyzer
             ControllerActionInfo action,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
-            FactWriter facts)
-            : base(model.Compilation, model, pointsTo, valueContent)
+            FlowNullAnalysisFacade nullAnalysis,
+            FlowCopyAnalysisFacade copyAnalysis,
+            FlowPredicateAnalysisFacade predicateAnalysis,
+            FlowTaintedDataFacade taintedData,
+            FactWriter facts,
+            ProjectInfo project,
+            IReadOnlyDictionary<string, string?> parameterTypes,
+            IReadOnlyDictionary<string, FieldDescriptor> fieldLookup)
+            : base(model.Compilation, model, pointsTo, valueContent, nullAnalysis, copyAnalysis, predicateAnalysis, taintedData)
         {
             _analyzer = analyzer;
             _action = action;
             _facts = facts ?? throw new ArgumentNullException(nameof(facts));
+            _project = project ?? throw new ArgumentNullException(nameof(project));
+            _parameterTypes = parameterTypes ?? throw new ArgumentNullException(nameof(parameterTypes));
+            _fieldLookup = fieldLookup ?? throw new ArgumentNullException(nameof(fieldLookup));
             _ = _facts;
+            _callClassifier = new CallClassifier();
         }
+
+        private static readonly IReadOnlyDictionary<string, int> StatusHelperCodes = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["Ok"] = 200,
+            ["Created"] = 201,
+            ["CreatedAtAction"] = 201,
+            ["CreatedAtRoute"] = 201,
+            ["NoContent"] = 204,
+            ["BadRequest"] = 400,
+            ["Unauthorized"] = 401,
+            ["Forbidden"] = 403,
+            ["NotFound"] = 404,
+            ["Conflict"] = 409,
+            ["Problem"] = 500
+        };
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
-            if (AnalysisPredicates.IsMediatorSend(op))
+            if (ShouldSkipOperation())
             {
-                HandleMediatorSend(op);
-            }
-            else if (AnalysisPredicates.IsMediatorPublish(op))
-            {
-                HandleMediatorPublish(op);
-            }
-            else if (AnalysisPredicates.IsMapperMap(op))
-            {
-                HandleMapperMap(op);
-            }
-            else if (AnalysisPredicates.IsHttpClientCall(op))
-            {
-                HandleHttpClientCall(op);
+                base.VisitInvocation(op);
+                return;
             }
 
+            var kind = _callClassifier.Classify(op);
+
+            switch (kind)
+            {
+                case CallKind.MediatorSend:
+                    HandleMediatorSend(op);
+                    break;
+                case CallKind.MediatorPublish:
+                case CallKind.DomainEventPublish:
+                    HandleMediatorPublish(op);
+                    break;
+                case CallKind.Mapper:
+                    HandleMapperMap(op);
+                    break;
+                case CallKind.Http:
+                    HandleHttpClientCall(op);
+                    break;
+            }
+
+            HandleStatusCodeInvocation(op);
+            TryHandleServiceInvocation(op);
+            TryHandleHelperInvocation(op);
+            TryHandleLoggerInvocation(op);
+
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
+        }
+
+        private void TryHandleHelperInvocation(IInvocationOperation invocation)
+        {
+            var method = invocation.TargetMethod;
+            if (method is null)
+            {
+                return;
+            }
+
+            var containing = method.ContainingType;
+            if (containing is null)
+            {
+                return;
+            }
+
+            var controllerFqdn = containing.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            var controllerSymbolId = _action.ControllerSymbolId;
+            if (string.IsNullOrWhiteSpace(controllerFqdn) || string.IsNullOrWhiteSpace(controllerSymbolId))
+            {
+                return;
+            }
+
+            var containingSymbolId = $"T:{controllerFqdn}";
+            // match only helper methods on the same controller type and that are not public
+            if (!string.Equals(containingSymbolId, controllerSymbolId, StringComparison.Ordinal) ||
+                method.DeclaredAccessibility == Accessibility.Public)
+            {
+                return;
+            }
+
+            var helperName = method.Name;
+            var helperKey = BuildMethodSymbolId(controllerFqdn, method);
+            var line = GetInvocationLine(invocation);
+            _action.HelperInvocations.Add(new ControllerHelperInvocation(helperKey, $"{controllerFqdn}.{helperName}", line));
+        }
+
+        private static string BuildMethodSymbolId(string controllerFqdn, IMethodSymbol method)
+        {
+            if (string.IsNullOrWhiteSpace(controllerFqdn) || string.IsNullOrWhiteSpace(method.Name))
+            {
+                return $"M:{controllerFqdn}.{method.Name}";
+            }
+
+            if (method.Parameters.Length == 0)
+            {
+                return $"M:{controllerFqdn}.{method.Name}";
+            }
+
+            static string? MapRefKind(RefKind kind)
+                => kind switch { RefKind.Ref => "ref", RefKind.Out => "out", RefKind.In => "in", _ => null };
+
+            var parts = new List<string>(method.Parameters.Length);
+            foreach (var p in method.Parameters)
+            {
+                var typeName = p.Type?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (string.IsNullOrWhiteSpace(typeName))
+                {
+                    typeName = "object";
+                }
+
+                var modifier = MapRefKind(p.RefKind);
+                var segment = string.IsNullOrWhiteSpace(modifier) ? typeName : $"{modifier} {typeName}";
+                parts.Add(segment!.Trim());
+            }
+
+            var signature = string.Join(",", parts);
+            return $"M:{controllerFqdn}.{method.Name}({signature})";
+        }
+
+        private void HandleStatusCodeInvocation(IInvocationOperation invocation)
+        {
+            if (invocation.TargetMethod is null)
+            {
+                return;
+            }
+
+            if (!StatusHelperCodes.TryGetValue(invocation.TargetMethod.Name, out var status))
+            {
+                return;
+            }
+
+            if (!IsReturnContext(invocation))
+            {
+                return;
+            }
+
+            _action.StatusCodes.Add(status);
+        }
+
+        private static bool IsReturnContext(IInvocationOperation invocation)
+        {
+            var parent = invocation.Parent;
+            if (parent is IReturnOperation)
+            {
+                return true;
+            }
+
+            if (parent is IAwaitOperation awaitOp && awaitOp.Parent is IReturnOperation)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private void TryHandleServiceInvocation(IInvocationOperation invocation)
+        {
+            if (invocation.Syntax is not InvocationExpressionSyntax invocationSyntax)
+            {
+                return;
+            }
+
+            if (invocationSyntax.Expression is not MemberAccessExpressionSyntax access)
+            {
+                return;
+            }
+
+            if (_analyzer.TryHandleServiceInvocationSyntax(_action, invocationSyntax, access, _parameterTypes, _fieldLookup, _project))
+            {
+                return;
+            }
+
+            var accessOperation = Model.GetOperation(access.Expression);
+            var resolvedType = _analyzer.TryResolveExpressionType(
+                accessOperation,
+                _parameterTypes,
+                _action.LocalVariables,
+                _project.AssemblyName,
+                _project.RelativeDirectory,
+                _fieldLookup);
+
+            if (string.IsNullOrWhiteSpace(resolvedType))
+            {
+                return;
+            }
+
+            var tree = invocationSyntax.SyntaxTree;
+            _analyzer.HandleServiceInvocation(_action, access, invocationSyntax, resolvedType!, _parameterTypes, tree, _fieldLookup);
         }
 
         private void HandleMediatorSend(IInvocationOperation invocation)
@@ -123,39 +333,132 @@ public sealed partial class ProjectAnalyzer
 
         private void HandleHttpClientCall(IInvocationOperation invocation)
         {
-            var clientSymbol = invocation.Instance?.Type ?? invocation.TargetMethod.ContainingType;
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
+            {
+                return;
+            }
+
+            if (IsRepositoryQueryInvocation(invocation))
+            {
+                return;
+            }
+
+            if (IsRepositoryExtension(invocation.TargetMethod))
+            {
+                return;
+            }
+
+            var instance = invocation.Instance;
+            if (instance is null && invocation.TargetMethod.IsExtensionMethod && invocation.Arguments.Length > 0)
+            {
+                instance = invocation.Arguments[0].Value;
+            }
+
+            if (instance is not null && (NullAnalysis?.IsDefinitelyNull(instance) ?? false))
+            {
+                return;
+            }
+
+            var clientSymbol = instance?.Type
+                               ?? invocation.Arguments.FirstOrDefault()?.Value.Type
+                               ?? TryGetReceiverSymbol(invocation)
+                               ?? invocation.TargetMethod.ContainingType;
             var clientType = Qualify(clientSymbol) ??
                              clientSymbol?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ??
                              "System.Net.Http.HttpClient";
+            var methodName = invocation.TargetMethod.Name;
 
             if (string.IsNullOrWhiteSpace(clientType))
             {
                 return;
             }
 
-            var methodName = invocation.TargetMethod.Name;
-            var verb = NormalizeHttpVerb(methodName);
-
-            var route = TryResolveRoute(invocation);
-            if (!string.IsNullOrWhiteSpace(route))
+            if (LooksLikeDomainType(clientSymbol, clientType))
             {
-                route = NormalizeRoute(route!);
+                return;
+            }
+
+            if (IsCacheService(clientType!))
+            {
+                return;
+            }
+
+            if (string.Equals(methodName, "GetByIdAsync", StringComparison.OrdinalIgnoreCase) &&
+                LooksLikeEntityLabel(clientType))
+            {
+                return;
+            }
+
+            string? route = null;
+            string verb;
+            if (RouteCanonicalizer.TryReconstruct(invocation, ValueContent, out var canonicalVerb, out var rawRoute))
+            {
+                route = NormalizeRoute(rawRoute);
+                verb = canonicalVerb;
+            }
+            else
+            {
+                // Preserve previous behavior when reconstruction fails.
+                verb = NormalizeHttpVerb(methodName) ?? methodName.ToUpperInvariant();
+                route = TryResolveRoute(invocation);
+                if (!string.IsNullOrWhiteSpace(route))
+                {
+                    route = NormalizeRoute(route!);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(route) &&
+                (LooksLikeDomainType(clientSymbol, clientType) || LooksLikeEntityLabel(clientType)))
+            {
+                return;
+            }
+
+            if (string.Equals(methodName, "GetByIdAsync", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(route, "/id", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
             }
 
             var line = GetInvocationLine(invocation);
+            if (!string.IsNullOrWhiteSpace(route) &&
+                (LooksLikeDomainType(clientSymbol, clientType) || LooksLikeEntityLabel(clientType)))
+            {
+                var trimmedRoute = route!.Trim('/');
+                foreach (var argument in invocation.Arguments)
+                {
+                    if (argument.Parameter is { } parameter &&
+                        string.Equals(trimmedRoute, parameter.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+                }
+
+                if (trimmedRoute.IndexOf('/') < 0 &&
+                    trimmedRoute.IndexOf(':') < 0 &&
+                    trimmedRoute.IndexOf('{') < 0)
+                {
+                    return;
+                }
+            }
+
             var key = $"{clientType}@{methodName}@{route}@{line}";
             if (!_seenHttpCalls.Add(key))
             {
                 return;
             }
 
+            var targetService = _analyzer.ResolveClientTargetService(clientType);
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
+
             _action.HttpClientInvocations.Add(new ControllerClientInvocation(
                 clientType,
                 verb,
                 route,
                 line,
-                methodName));
-            _analyzer.RecordControllerHttpClientFact(_action, clientType, verb, route, methodName, line);
+                methodName,
+                targetService,
+                ContainsTaintedInput: containsTaint));
+            _analyzer.RecordControllerHttpClientFact(_action, clientType, verb, route, methodName, line, containsTaint);
         }
 
         private string? Qualify(ITypeSymbol? symbol)
@@ -199,20 +502,35 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var literal = TryGetStringLiteral(argument.Value) ?? ValueContent.TryGetStringValue(argument.Value);
+                var literal = TryGetStringLiteral(argument.Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    var description = ValueContent.DescribeStringValue(argument.Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(argument.Value);
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
-                    return literal;
+                    var noQuery = literal!;
+                    var q = noQuery.IndexOf('?', StringComparison.Ordinal);
+                    if (q >= 0) noQuery = noQuery[..q];
+                    return noQuery;
                 }
             }
 
             if (invocation.Arguments.Length > 0)
             {
-                var literal = TryGetStringLiteral(invocation.Arguments[0].Value) ??
-                              ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
+                var literal = TryGetStringLiteral(invocation.Arguments[0].Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    var description = ValueContent.DescribeStringValue(invocation.Arguments[0].Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(invocation.Arguments[0].Value);
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
-                    return literal;
+                    var noQuery = literal!;
+                    var q = noQuery.IndexOf('?', StringComparison.Ordinal);
+                    if (q >= 0) noQuery = noQuery[..q];
+                    return noQuery;
                 }
             }
 
@@ -251,6 +569,196 @@ public sealed partial class ProjectAnalyzer
             }
 
             return null;
+        }
+
+        private string? TryRenderValue(IOperation? operation)
+        {
+            if (operation is null)
+            {
+                return null;
+            }
+
+            foreach (var candidate in ValueContent.EnumerateContentCandidates(operation))
+            {
+                var literal = candidate.TryGetLiteralText();
+                if (!string.IsNullOrWhiteSpace(literal))
+                {
+                    return literal;
+                }
+
+                var placeholder = candidate.ToDisplayString();
+                if (!string.IsNullOrWhiteSpace(placeholder))
+                {
+                    return placeholder;
+                }
+            }
+
+            return null;
+        }
+
+        private void TryHandleLoggerInvocation(IInvocationOperation invocation)
+        {
+            if (invocation.TargetMethod is not { } method)
+            {
+                return;
+            }
+
+            var candidateType = invocation.Instance?.Type ?? method.ContainingType;
+            if (candidateType is null)
+            {
+                return;
+            }
+
+            var qualified = candidateType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!IsLoggerType(qualified))
+            {
+                return;
+            }
+
+            var line = GetInvocationLine(invocation);
+            var invocationName = method.Name;
+            if (_action.ServiceUsages.Any(s =>
+                    string.Equals(s.ServiceType, qualified, StringComparison.OrdinalIgnoreCase) &&
+                    s.Line == line &&
+                    string.Equals(s.InvocationMethod ?? s.Method, invocationName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            var key = $"{qualified}@{invocationName}@{line}";
+            if (!_seenLoggerUsages.Add(key))
+            {
+                return;
+            }
+
+            _action.ServiceUsages.Add(new ServiceUsage(
+                qualified,
+                line,
+                invocationName,
+                invocationName));
+        }
+
+        private ITypeSymbol? TryGetReceiverSymbol(IInvocationOperation invocation)
+        {
+            if (invocation.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax memberAccess })
+            {
+                var receiver = memberAccess.Expression;
+                var info = Model.GetTypeInfo(receiver);
+                return info.Type ?? info.ConvertedType;
+            }
+
+            return null;
+        }
+
+        private static bool IsRepositoryQueryInvocation(IInvocationOperation invocation)
+        {
+            if (invocation.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax memberAccess })
+            {
+                return false;
+            }
+
+            if (memberAccess.Expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax innerAccess })
+            {
+                var name = innerAccess.Name.Identifier.Text;
+                if (string.Equals(name, "ReadQuery", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "WriteQuery", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool LooksLikeEntityLabel(string? typeName)
+        {
+            if (string.IsNullOrWhiteSpace(typeName))
+            {
+                return false;
+            }
+
+            var trimmed = typeName!;
+            var lastDot = trimmed.LastIndexOf('.');
+            if (lastDot >= 0)
+            {
+                trimmed = trimmed[(lastDot + 1)..];
+            }
+
+            if (trimmed.IndexOf("Client", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                trimmed.IndexOf("Service", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                trimmed.IndexOf("Proxy", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool LooksLikeDomainType(ITypeSymbol? symbol, string? typeName)
+        {
+            if (symbol is not null)
+            {
+                var ns = symbol.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (!string.IsNullOrWhiteSpace(ns) && ns.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (display.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                if (symbol is INamedTypeSymbol named && named.IsGenericType)
+                {
+                    foreach (var typeArgument in named.TypeArguments)
+                    {
+                        var argumentDisplay = typeArgument.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                        if (LooksLikeDomainType(typeArgument, argumentDisplay))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                if (typeName!.IndexOf(".DomainModel.", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    typeName.IndexOf(".Domain.", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsRepositoryExtension(IMethodSymbol method)
+        {
+            if (method is null)
+            {
+                return false;
+            }
+
+            var candidate = method.ReducedFrom ?? method;
+
+            var container = candidate.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(container) &&
+                container.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            var ns = candidate.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(ns) &&
+                ns.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

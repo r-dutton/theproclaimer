@@ -34,7 +34,14 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record ControllerRequestInvocation(string RequestType, int Line);
 
-    private sealed record ControllerClientInvocation(string ClientType, string? HttpMethod, string? RelativePath, int Line, string? ClientMethod = null, string? TargetService = null);
+    private sealed record ControllerClientInvocation(
+        string ClientType,
+        string? HttpMethod,
+        string? RelativePath,
+        int Line,
+        string? ClientMethod = null,
+        string? TargetService = null,
+        bool ContainsTaintedInput = false);
 
     private sealed record ControllerMappingInvocation(string? SourceType, string? DestinationType, string? AssignedVariable, int Line);
 
@@ -136,7 +143,8 @@ public sealed partial class ProjectAnalyzer
         string? Route,
         IReadOnlyCollection<string>? QueryParameters,
         int Line,
-        string DeclaringMethod);
+        string DeclaringMethod,
+        IReadOnlyCollection<string>? CandidateClientTypes);
 
     private sealed record ServiceWrapperInvocation(
         string MethodName,
@@ -172,7 +180,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record HandlerPublisherCall(string PublisherType, string Method, int Line, string? MessageType, string? ContainingMember = null);
 
-    private sealed record HandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
+    private sealed record HandlerRepositoryCall(string RepositoryType, string? EntityType, string Method, int Line, string Operation);
 
     private sealed record HandlerClientInvocation(
         string ClientType,
@@ -182,7 +190,8 @@ public sealed partial class ProjectAnalyzer
         string? ClientMethod = null,
         string? TargetService = null,
         IReadOnlyCollection<string>? QueryParameters = null,
-        string? OwnerMethod = null);
+        string? OwnerMethod = null,
+        bool ContainsTaintedInput = false);
 
     private sealed record HandlerMapperCall(string? SourceType, string? DestinationType, int Line);
 
@@ -215,7 +224,13 @@ public sealed partial class ProjectAnalyzer
         public List<HttpClientCall> OutboundCalls { get; } = new();
     }
 
-    private sealed record HttpClientCall(string DeclaringMethod, string HttpMethod, string? Route, int Line, IReadOnlyCollection<string> QueryParameters)
+    private sealed record HttpClientCall(
+        string DeclaringMethod,
+        string HttpMethod,
+        string? Route,
+        int Line,
+        IReadOnlyCollection<string> QueryParameters,
+        bool ContainsTaintedInput = false)
     {
         public string? CanonicalRoute
         {
@@ -259,15 +274,18 @@ public sealed partial class ProjectAnalyzer
     private sealed record MappingInfo(string MapId, string FilePath, GraphSpan Span, string ProfileFqdn, string MapName, string SourceType, string DestinationType);
 
     private sealed record RepositoryInfo(string Fqdn, string Assembly, string Project, string FilePath, GraphSpan Span, string SymbolId, string Name, IReadOnlyDictionary<string, FieldDescriptor> FieldTypes)
-    {
-        public List<RepositoryDbAccess> DbAccesses { get; } = new();
-        public List<RepositoryMapperCall> MapperCalls { get; } = new();
-        public List<CacheInvocation> CacheInvocations { get; } = new();
-        public List<OptionsUsage> OptionsUsages { get; } = new();
-        public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
-        public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
-        public HashSet<string> ControlledEntities { get; } = new(StringComparer.OrdinalIgnoreCase);
-    }
+      {
+          public List<RepositoryDbAccess> DbAccesses { get; } = new();
+          public List<RepositoryMapperCall> MapperCalls { get; } = new();
+          public List<CacheInvocation> CacheInvocations { get; } = new();
+          public List<OptionsUsage> OptionsUsages { get; } = new();
+          public List<ConfigurationUsage> ConfigurationUsages { get; } = new();
+          public List<HandlerClientInvocation> HttpClientInvocations { get; } = new();
+          public HashSet<string> ControlledEntities { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+          // Canonical entity type for this repository, once inferred (fully-qualified type name).
+          public string? EntityTypeFqdn { get; set; }
+      }
 
     private sealed record RepositoryDbAccess(string Member, string Method, int Line, string Operation);
 
@@ -326,7 +344,7 @@ public sealed partial class ProjectAnalyzer
 
     private sealed record DomainEventPublication(string PublisherType, string PublisherAssembly, string PublisherProject, string FilePath, string? MethodName, int Line, string EventType);
 
-    private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string Method, int Line, string Operation);
+    private sealed record NotificationHandlerRepositoryCall(string RepositoryType, string? EntityType, string Method, int Line, string Operation);
 
     private sealed record NotificationHandlerRequestInvocation(string RequestType, int Line);
 

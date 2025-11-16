@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.Classification;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -20,6 +23,8 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenMappings = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
+        private readonly CallClassifier _callClassifier;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public DomainEventsOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -36,28 +41,58 @@ public sealed partial class ProjectAnalyzer
             _ownerMethod = ownerMethod;
             _facts = facts ?? throw new ArgumentNullException(nameof(facts));
             _ = _facts;
+            _callClassifier = new CallClassifier();
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
-            if (AnalysisPredicates.IsMediatorSend(op))
+            if (ShouldSkipOperation())
             {
-                HandleMediatorSend(op);
+                base.VisitInvocation(op);
+                return;
             }
-            else if (AnalysisPredicates.IsMediatorPublish(op) || AnalysisPredicates.IsDomainEventPublish(op))
+
+            var kind = _callClassifier.Classify(op);
+
+            switch (kind)
             {
-                HandleMediatorPublish(op);
-            }
-            else if (AnalysisPredicates.IsMapperMap(op))
-            {
-                HandleMapperMap(op);
-            }
-            else if (AnalysisPredicates.IsDbContextOrRepoCall(op))
-            {
-                HandleRepositoryCall(op);
+                case CallKind.MediatorSend:
+                    HandleMediatorSend(op);
+                    break;
+                case CallKind.MediatorPublish:
+                case CallKind.DomainEventPublish:
+                    HandleMediatorPublish(op);
+                    break;
+                case CallKind.Mapper:
+                    HandleMapperMap(op);
+                    break;
+                case CallKind.Repository:
+                case CallKind.DbContext:
+                    HandleRepositoryCall(op);
+                    break;
             }
 
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void HandleMediatorSend(IInvocationOperation invocation)
@@ -138,7 +173,28 @@ public sealed partial class ProjectAnalyzer
             }
 
             var operation = DetermineRepositoryOperation(methodName);
-            _handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(typeName!, methodName, line, operation));
+            string? entityType = null;
+            if (invocation.Syntax is InvocationExpressionSyntax invocationSyntax &&
+                invocationSyntax.Expression is MemberAccessExpressionSyntax access)
+            {
+                entityType = _analyzer.ResolveRepositoryEntityType(
+                    typeName,
+                    typeName,
+                    _handler.Assembly,
+                    _handler.Project,
+                    access.Name,
+                    invocationSyntax);
+            }
+            else
+            {
+                entityType = _analyzer.ResolveRepositoryEntityType(
+                    typeName,
+                    typeName,
+                    _handler.Assembly,
+                    _handler.Project);
+            }
+
+            _handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(typeName!, entityType, methodName, line, operation));
             _analyzer.RecordDomainEventHandlerRepositoryFact(_handler, typeName!, methodName, operation, line);
         }
 

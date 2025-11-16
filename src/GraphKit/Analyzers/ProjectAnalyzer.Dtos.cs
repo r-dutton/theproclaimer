@@ -8,20 +8,20 @@ public sealed partial class ProjectAnalyzer
     {
         foreach (var dto in _dtos.Values)
         {
-            var id = StableId.For("dto", dto.Fqdn, dto.Assembly, dto.SymbolId);
-            _nodes[id] = new GraphNode
-            {
-                Id = id,
-                Type = "dto",
-                Name = dto.Name,
-                Fqdn = dto.Fqdn,
-                Assembly = dto.Assembly,
-                Project = dto.Project,
-                FilePath = dto.FilePath,
-                Span = dto.Span,
-                SymbolId = dto.SymbolId,
-                Tags = new[] { "app" }
-            };
+        var id = StableId.For("dto", dto.Fqdn, dto.Assembly, dto.SymbolId);
+        _nodes[id] = new GraphNode
+        {
+            Id = id,
+            Type = "dto",
+            Name = dto.Name,
+            Fqdn = dto.Fqdn,
+            Assembly = dto.Assembly,
+            Project = dto.Project,
+            FilePath = dto.FilePath,
+            Span = dto.Span,
+            SymbolId = dto.SymbolId,
+            Tags = new[] { "app", "dto" }
+        };
         }
     }
 
@@ -41,7 +41,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = validator.FilePath,
                 Span = validator.Span,
                 SymbolId = validator.SymbolId,
-                Tags = new[] { "app" }
+                Tags = new[] { "app", "validator" }
             };
 
             var targetSimple = GetSimpleIdentifier(validator.TargetType);

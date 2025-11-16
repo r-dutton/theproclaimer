@@ -57,8 +57,8 @@ public sealed partial class ProjectAnalyzer
         var info = new DomainEventHandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, eventType!);
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.DomainEvents);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.DomainEvents);
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
@@ -103,7 +103,7 @@ public sealed partial class ProjectAnalyzer
                 var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                 if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
                 {
-                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
+                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree, model, valueContent) is { } configurationUsage)
                     {
                         info.ConfigurationUsages.Add(configurationUsage);
                     }
@@ -137,10 +137,21 @@ public sealed partial class ProjectAnalyzer
                     recordedUsage = true;
                 }
 
-                if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                if (resolvedType.EndsWith("Repository", StringComparison.Ordinal) ||
+                    IsRepositoryType(resolvedType) ||
+                    IsRepositoryType(typeName))
                 {
+                    var repositoryType = resolvedType;
                     var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                    info.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
+                    var entityType = ResolveRepositoryEntityType(
+                        repositoryType,
+                        typeName,
+                        info.Assembly,
+                        info.Project,
+                        memberAccess.Name,
+                        invocation);
+
+                    info.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(repositoryType, entityType, methodName ?? string.Empty, line, operation));
                     continue;
                 }
 
@@ -218,7 +229,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                 {
                     info.ConfigurationUsages.Add(configurationUsage);
                 }
@@ -497,7 +508,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = handler.FilePath ?? string.Empty,
                 Span = handler.Span,
                 SymbolId = handler.SymbolId,
-                Tags = new[] { "domain", "event" }
+                Tags = new[] { "domain", "event", "handler" }
             };
 
             if (FindDomainEventByType(handler.EventType) is { } domainEvent)

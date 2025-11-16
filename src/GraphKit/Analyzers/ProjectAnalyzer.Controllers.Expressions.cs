@@ -118,6 +118,33 @@ public sealed partial class ProjectAnalyzer
             }
         }
 
+        // Handle wrappers like QueryHelpers.AddQueryString(url, ...)
+        if (expression is InvocationExpressionSyntax invoked)
+        {
+            // Try match AddQueryString on QueryHelpers or any AddQueryString(...) style
+            static bool IsAddQueryString(SyntaxNode node)
+            {
+                return node switch
+                {
+                    IdentifierNameSyntax ident => string.Equals(ident.Identifier.Text, "AddQueryString", StringComparison.Ordinal),
+                    GenericNameSyntax g => string.Equals(g.Identifier.Text, "AddQueryString", StringComparison.Ordinal),
+                    MemberAccessExpressionSyntax member => IsAddQueryString(member.Name),
+                    _ => false
+                };
+            }
+
+            if (IsAddQueryString(invoked.Expression))
+            {
+                // Base URL is the first argument; ignore query additions for route matching
+                var firstArg = invoked.ArgumentList?.Arguments.FirstOrDefault()?.Expression;
+                var baseRoute = ExtractRouteLiteral(invoked.SyntaxTree, firstArg) ?? ResolveRouteFromExpression(firstArg, localValues);
+                if (!string.IsNullOrWhiteSpace(baseRoute))
+                {
+                    return NormalizeRoute(baseRoute!);
+                }
+            }
+        }
+
         var expressionText = expression.ToString();
         if (_stringConstants.TryGetValue(expressionText, out var constantValue))
         {

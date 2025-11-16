@@ -67,6 +67,10 @@ internal static class ClientLinker
                 }
 
                 var canonicalRoute = CanonicalizeRoute(rawRoute!);
+                if (!LooksSpecific(canonicalRoute))
+                {
+                    continue;
+                }
                 var normalizedVerb = NormalizeHttpVerb(props.TryGetValue("verb", out var verbValue) ? verbValue?.ToString() : null);
 
                 var clientId = uses.To;
@@ -160,7 +164,8 @@ internal static class ClientLinker
         if (endpoint.Props is not { }) return false;
         var endpointRoute = endpoint.Props.TryGetValue("route", out var r) ? r?.ToString() : null;
         var endpointCanonicalRoute = CanonicalizeRoute(endpointRoute ?? string.Empty);
-        if (!string.Equals(endpointCanonicalRoute, canonicalRoute, StringComparison.Ordinal))
+
+        if (!RoutesMatchWithTokens(canonicalRoute, endpointCanonicalRoute))
         {
             return false;
         }
@@ -168,6 +173,74 @@ internal static class ClientLinker
         var endpointVerb = NormalizeHttpVerb(endpoint.Props.TryGetValue("http_method", out var v) ? v?.ToString() : null);
         var verbMatches = normalizedVerb is null || endpointVerb is null || string.Equals(normalizedVerb, endpointVerb, StringComparison.Ordinal);
         return verbMatches;
+    }
+
+    private static bool RoutesMatchWithTokens(string a, string b)
+    {
+        // Quick path exact match
+        if (string.Equals(a, b, StringComparison.Ordinal)) return true;
+
+        var aSegs = SplitAndTokenize(a);
+        var bSegs = SplitAndTokenize(b);
+        return MatchSegmentsWithWildcard(aSegs, bSegs);
+    }
+
+    private static string[] SplitAndTokenize(string route)
+    {
+        if (string.IsNullOrWhiteSpace(route)) return Array.Empty<string>();
+        var segs = route.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (int i = 0; i < segs.Length; i++)
+        {
+            var s = segs[i];
+            if (s.Length > 1 && s[0] == '{' && s[^1] == '}')
+            {
+                segs[i] = "{}";
+                continue;
+            }
+            if (s.Contains('*'))
+            {
+                segs[i] = "*";
+                continue;
+            }
+            // leave concrete segments as-is
+        }
+        return segs;
+    }
+
+    private static bool MatchSegmentsWithWildcard(string[] a, string[] b)
+    {
+        int ia = 0, ib = 0;
+        int starA = -1, starB = -1; // remember star position in a and corresponding b index
+
+        while (ib < b.Length)
+        {
+            if (ia < a.Length && (a[ia] == b[ib] || a[ia] == "{}" || b[ib] == "{}"))
+            {
+                ia++; ib++;
+                continue;
+            }
+            if (ia < a.Length && a[ia] == "*")
+            {
+                starA = ia;
+                starB = ib;
+                ia++; // '*' matches zero or more segments
+                continue;
+            }
+            if (starA != -1)
+            {
+                // backtrack: let '*' consume one more segment in b
+                ia = starA + 1;
+                ib = ++starB;
+                continue;
+            }
+            return false;
+        }
+
+        // consume remaining '*' in a
+        while (ia < a.Length && a[ia] == "*") ia++;
+
+        // match if we've consumed all of a
+        return ia == a.Length;
     }
 
     private static string CanonicalizeRoute(string route)
@@ -179,6 +252,24 @@ internal static class ClientLinker
             trimmed = trimmed.Replace("//", "/", StringComparison.Ordinal);
         }
         return trimmed.ToLowerInvariant();
+    }
+
+    private static bool LooksSpecific(string canonicalRoute)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalRoute))
+        {
+            return false;
+        }
+
+        foreach (var ch in canonicalRoute)
+        {
+            if (char.IsLetter(ch))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string? NormalizeHttpVerb(string? verb)

@@ -10,6 +10,113 @@ namespace GraphKit.Analyzers;
 
 public sealed partial class ProjectAnalyzer
 {
+    /// <summary>
+    /// Bind repositories discovered in the workspace to their canonical entity types using Roslyn symbols first,
+    /// falling back to existing string-based heuristics only when necessary.
+    /// </summary>
+    private void BindRepositoryEntities(ProjectInfo project)
+    {
+        if (project?.Compilation is not { } compilation)
+        {
+            return;
+        }
+
+        foreach (var repository in _repositories.Values)
+        {
+            // Skip repositories that already have a bound entity type.
+            if (!string.IsNullOrWhiteSpace(repository.EntityTypeFqdn))
+            {
+                continue;
+            }
+
+            // Try to resolve the repository symbol by its FQDN.
+            var typeSymbol = compilation.GetTypeByMetadataName(repository.Fqdn);
+            if (typeSymbol is null)
+            {
+                // Fall back to existing heuristics if we can't resolve the symbol.
+                repository.EntityTypeFqdn = InferEntityTypeFromHeuristics(repository);
+                continue;
+            }
+
+            // Generic repository implementations (e.g., IRepository<TEntity>).
+            var entityFromGenerics = TryInferEntityFromGenericRepository(typeSymbol);
+            if (!string.IsNullOrWhiteSpace(entityFromGenerics))
+            {
+                repository.EntityTypeFqdn = QualifyTypeName(entityFromGenerics!, repository.Assembly, repository.Project) ?? entityFromGenerics;
+                continue;
+            }
+
+            // Reuse existing "ControlledEntities" as a strong hint if already populated.
+            if (repository.ControlledEntities.Count == 1)
+            {
+                var single = repository.ControlledEntities.First();
+                repository.EntityTypeFqdn = QualifyTypeName(single, repository.Assembly, repository.Project) ?? single;
+                continue;
+            }
+
+            // Fall back to string-based heuristics derived from repository type name.
+            repository.EntityTypeFqdn = InferEntityTypeFromHeuristics(repository);
+        }
+    }
+
+    private static string? TryInferEntityFromGenericRepository(INamedTypeSymbol repositorySymbol)
+    {
+        // Direct generic repository types: Repository<TEntity> where TEntity is the first type argument.
+        if (repositorySymbol.IsGenericType && repositorySymbol.TypeArguments.Length > 0)
+        {
+            var arg = repositorySymbol.TypeArguments[0];
+            return arg.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        }
+
+        // Interfaces implemented by the repository that might carry TEntity.
+        foreach (var iface in repositorySymbol.AllInterfaces)
+        {
+            if (!iface.IsGenericType || iface.TypeArguments.Length == 0)
+            {
+                continue;
+            }
+
+            var ifaceName = iface.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (ifaceName.Contains("Repository", StringComparison.OrdinalIgnoreCase))
+            {
+                var arg = iface.TypeArguments[0];
+                return arg.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Use existing string-based helpers as a fallback when symbol-based inference fails.
+    /// </summary>
+    private string? InferEntityTypeFromHeuristics(RepositoryInfo repository)
+    {
+        // Try using the repository type itself first.
+        var candidate = ExtractRepositoryEntityType(repository.Fqdn);
+        if (!string.IsNullOrWhiteSpace(candidate))
+        {
+            var qualified = QualifyTypeName(candidate!, repository.Assembly, repository.Project);
+            if (!string.IsNullOrWhiteSpace(qualified))
+            {
+                return qualified;
+            }
+        }
+
+        // Try deriving from the simple repository name (e.g., BinderRepository -> Binder).
+        var fromName = TryDeriveEntityTypeFromRepositoryName(repository.Fqdn);
+        if (!string.IsNullOrWhiteSpace(fromName))
+        {
+            var qualified = QualifyTypeName(fromName!, repository.Assembly, repository.Project);
+            if (!string.IsNullOrWhiteSpace(qualified))
+            {
+                return qualified;
+            }
+        }
+
+        return null;
+    }
+
     private void AnalyzeRepository(ProjectInfo project, SyntaxTree tree, ClassDeclarationSyntax classDeclaration, string namespaceName, IReadOnlyDictionary<string, FieldDescriptor> fieldTypes)
     {
         var className = classDeclaration.Identifier.Text;
@@ -20,6 +127,9 @@ public sealed partial class ProjectAnalyzer
 
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var repository = new RepositoryInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, fieldLookup);
+        var model = project.GetModel(tree);
+        var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
+        var valueContent = CreateValueContentFacade(callsitePredicate);
 
         if (classDeclaration.BaseList is { Types.Count: > 0 })
         {
@@ -92,7 +202,7 @@ public sealed partial class ProjectAnalyzer
                     var resolvedType = ResolveImplementationType(descriptor.Type, repository.Assembly, repository.Project) ?? descriptor.Type;
                     if (IsConfigurationType(resolvedType) || IsConfigurationType(descriptor.Type))
                     {
-                        if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                        if (TryCaptureConfigurationUsage(access, invocation, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                         {
                             repository.ConfigurationUsages.Add(configurationUsage);
                         }
@@ -222,7 +332,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                 {
                     repository.ConfigurationUsages.Add(configurationUsage);
                 }
@@ -285,6 +395,7 @@ public sealed partial class ProjectAnalyzer
         foreach (var repository in _repositories.Values)
         {
             var id = StableId.For("app.repository", repository.Fqdn, repository.Assembly, repository.SymbolId);
+            var tags = new List<string> { "app", "data", "repository" };
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -296,7 +407,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = repository.FilePath,
                 Span = repository.Span,
                 SymbolId = repository.SymbolId,
-                Tags = new[] { "app", "data" }
+                Tags = tags.ToArray()
             };
 
             foreach (var mapping in repository.MapperCalls)

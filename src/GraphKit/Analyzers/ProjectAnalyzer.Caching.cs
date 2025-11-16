@@ -10,9 +10,34 @@ namespace GraphKit.Analyzers;
 public sealed partial class ProjectAnalyzer
 {
     private static bool IsCacheService(string typeName)
-        => typeName.Contains("IMemoryCache", StringComparison.Ordinal)
-            || typeName.Contains("IDistributedCache", StringComparison.Ordinal)
-            || typeName.Contains("IHybridCache", StringComparison.Ordinal);
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        if (typeName.Contains("IMemoryCache", StringComparison.Ordinal) ||
+            typeName.Contains("IDistributedCache", StringComparison.Ordinal) ||
+            typeName.Contains("IHybridCache", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (typeName.Contains("MemoryCache", StringComparison.OrdinalIgnoreCase) ||
+            typeName.Contains("DistributedCache", StringComparison.OrdinalIgnoreCase) ||
+            typeName.Contains("CacheManager", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (typeName.Contains("Cache", StringComparison.OrdinalIgnoreCase) &&
+            !typeName.Contains("Http", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
 
     private CacheInvocation? TryCaptureCacheInvocation(
         MemberAccessExpressionSyntax memberAccess,
@@ -64,6 +89,16 @@ public sealed partial class ProjectAnalyzer
         if (!_nodes.ContainsKey(id))
         {
             var name = GetTopLevelSimpleIdentifier(info.TypeName);
+            var tags = new List<string> { "cache", "infra" };
+            if (string.Equals(nodeType, "cache.memory", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.Add("memory");
+            }
+            else if (string.Equals(nodeType, "cache.distributed", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.Add("distributed");
+            }
+
             _nodes[id] = new GraphNode
             {
                 Id = id,
@@ -74,7 +109,7 @@ public sealed partial class ProjectAnalyzer
                 Project = string.Empty,
                 FilePath = string.Empty,
                 SymbolId = info.TypeName,
-                Tags = new[] { "cache" }
+                Tags = tags.ToArray()
             };
         }
 

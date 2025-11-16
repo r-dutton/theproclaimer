@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.Http;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -17,6 +19,7 @@ public sealed partial class ProjectAnalyzer
         private readonly string _ownerMethod;
         private readonly HashSet<string> _seenCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public HttpOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -25,8 +28,12 @@ public sealed partial class ProjectAnalyzer
             string ownerMethod,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade nullAnalysis,
+            FlowCopyAnalysisFacade copyAnalysis,
+            FlowPredicateAnalysisFacade predicateAnalysis,
+            FlowTaintedDataFacade taintedData,
             FactWriter facts)
-            : base(model.Compilation, model, pointsTo, valueContent)
+            : base(model.Compilation, model, pointsTo, valueContent, nullAnalysis, copyAnalysis, predicateAnalysis, taintedData)
         {
             _analyzer = analyzer;
             _client = client;
@@ -37,6 +44,12 @@ public sealed partial class ProjectAnalyzer
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             if (AnalysisPredicates.IsHttpClientCall(op))
             {
                 HandleHttpInvocation(op);
@@ -45,12 +58,45 @@ public sealed partial class ProjectAnalyzer
             base.VisitInvocation(op);
         }
 
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
+        }
+
         private void HandleHttpInvocation(IInvocationOperation invocation)
         {
-            var verb = NormalizeHttpVerb(invocation.TargetMethod.Name) ?? invocation.TargetMethod.Name.ToUpperInvariant();
-            var route = TryResolveRoute(invocation);
-            var normalizedRoute = route is null ? null : NormalizeRoute(route);
-            var parameters = ExtractQueryParameters(route);
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
+            {
+                return;
+            }
+
+            if (invocation.Instance is not null && (NullAnalysis?.IsDefinitelyNull(invocation.Instance) ?? false))
+            {
+                return;
+            }
+
+            if (!RouteCanonicalizer.TryReconstruct(invocation, ValueContent, out var verb, out var rawRoute))
+            {
+                return;
+            }
+
+            var normalizedRoute = RouteCanonicalizer.CanonRoute(rawRoute);
+            var parameters = ExtractQueryParameters(rawRoute);
             var line = GetInvocationLine(invocation);
             var key = $"{_ownerMethod}@{verb}@{normalizedRoute}@{line}";
             if (!_seenCalls.Add(key))
@@ -58,76 +104,17 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
+
             var call = new HttpClientCall(
                 _ownerMethod,
                 verb,
                 normalizedRoute,
                 line,
-                parameters);
+                parameters,
+                containsTaint);
             _client.OutboundCalls.Add(call);
             _analyzer.RecordHttpClientOutboundCallFact(_client, call);
-        }
-
-        private string? TryResolveRoute(IInvocationOperation invocation)
-        {
-            foreach (var argument in invocation.Arguments)
-            {
-                if (!IsRouteParameter(argument.Parameter))
-                {
-                    continue;
-                }
-
-                var value = TryGetString(argument.Value);
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-
-            if (invocation.Arguments.Length > 0)
-            {
-                var value = TryGetString(invocation.Arguments[0].Value);
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-
-            return null;
-        }
-
-        private string? TryGetString(IOperation? operation)
-        {
-            if (operation is null)
-            {
-                return null;
-            }
-
-            if (operation.ConstantValue is { HasValue: true, Value: string s })
-            {
-                return s;
-            }
-
-            if (operation is IConversionOperation conversion)
-            {
-                return TryGetString(conversion.Operand);
-            }
-
-            return ValueContent.TryGetStringValue(operation);
-        }
-
-        private static bool IsRouteParameter(IParameterSymbol? parameter)
-        {
-            if (parameter is null)
-            {
-                return false;
-            }
-
-            return parameter.Name.Equals("requestUri", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("uri", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("url", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("endpoint", StringComparison.OrdinalIgnoreCase) ||
-                   parameter.Name.Equals("path", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int GetInvocationLine(IInvocationOperation invocation)

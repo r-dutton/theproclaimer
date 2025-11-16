@@ -1,3 +1,4 @@
+using GraphKit.Analyzers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -5,32 +6,83 @@ namespace GraphKit.Classification
 {
     public sealed class CallClassifier
     {
-        // TODO: inject symbol references/namespaces as needed
+        private readonly TypeClassifier _typeClassifier = new();
+
+        /// <summary>
+        /// Classify an invocation into a coarse semantic bucket using existing analyzer predicates
+        /// and symbol-based type classification.
+        /// </summary>
         public CallKind Classify(IInvocationOperation inv)
         {
-            var m = inv.TargetMethod;
-            // Replace with your existing IsXxx helpers or name-based checks:
-            if (IsMediatorSend(m)) return CallKind.MediatorSend;
-            if (IsMediatorPublish(m)) return CallKind.MediatorPublish;
-            if (IsHandlerHandle(m)) return CallKind.HandlerHandle;
-            if (IsRepoCall(m)) return CallKind.Repo;
-            if (IsDbContextCall(m)) return CallKind.Db;
-            if (IsHttpClientCall(m)) return CallKind.Http;
-            if (IsMapperMap(m)) return CallKind.Mapper;
-            if (IsValidatorCall(m)) return CallKind.Validator;
-            if (IsPipelineBehavior(m)) return CallKind.Pipeline;
+            if (inv is null || inv.TargetMethod is not { } method)
+            {
+                return CallKind.Other;
+            }
+
+            // Mediator / CQRS patterns
+            if (AnalysisPredicates.IsMediatorSend(inv))
+            {
+                return CallKind.MediatorSend;
+            }
+
+            if (AnalysisPredicates.IsMediatorPublish(inv))
+            {
+                return CallKind.MediatorPublish;
+            }
+
+            if (AnalysisPredicates.IsDomainEventPublish(inv))
+            {
+                return CallKind.DomainEventPublish;
+            }
+
+            if (AnalysisPredicates.IsHandlerHandle(inv))
+            {
+                return CallKind.HandlerHandle;
+            }
+
+            // Storage / EF / repositories
+            if (AnalysisPredicates.IsDbContextOrRepoCall(inv))
+            {
+                var receiver = AnalysisPredicates.GetReceiverType(inv);
+                var classification = _typeClassifier.Classify(receiver ?? method.ContainingType);
+
+                if (classification.IsDbContext)
+                {
+                    return CallKind.DbContext;
+                }
+
+                if (classification.IsRepository)
+                {
+                    return CallKind.Repository;
+                }
+
+                // Default to Repository when in doubt; existing behavior treated all as repo.
+                return CallKind.Repository;
+            }
+
+            // HTTP / clients
+            if (AnalysisPredicates.IsHttpClientCall(inv))
+            {
+                return CallKind.Http;
+            }
+
+            // Mapping / validation / pipeline
+            if (AnalysisPredicates.IsMapperMap(inv))
+            {
+                return CallKind.Mapper;
+            }
+
+            if (AnalysisPredicates.IsValidatorCall(inv))
+            {
+                return CallKind.Validator;
+            }
+
+            if (AnalysisPredicates.IsPipelineBehavior(inv))
+            {
+                return CallKind.Pipeline;
+            }
+
             return CallKind.Other;
         }
-
-        // Stub methods below; wire to your AnalysisPredicates from Phase 1.
-        private static bool IsMediatorSend(IMethodSymbol m) => m.Name == "Send";
-        private static bool IsMediatorPublish(IMethodSymbol m) => m.Name == "Publish";
-        private static bool IsHandlerHandle(IMethodSymbol m) => m.Name == "Handle";
-        private static bool IsRepoCall(IMethodSymbol m) => m.ContainingType.Name.Contains("Repository");
-        private static bool IsDbContextCall(IMethodSymbol m) => m.ContainingType.Name.EndsWith("DbContext");
-        private static bool IsHttpClientCall(IMethodSymbol m) => m.ContainingType.Name.Contains("HttpClient");
-        private static bool IsMapperMap(IMethodSymbol m) => m.Name == "Map";
-        private static bool IsValidatorCall(IMethodSymbol m) => m.Name.StartsWith("Validate");
-        private static bool IsPipelineBehavior(IMethodSymbol m) => m.ContainingType.Name.Contains("PipelineBehavior");
     }
 }

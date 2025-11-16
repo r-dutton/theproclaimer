@@ -30,8 +30,8 @@ public sealed partial class ProjectAnalyzer
 
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Messaging);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Messaging);
 
         var fieldLookup = new Dictionary<string, FieldDescriptor>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in fieldTypes)
@@ -366,7 +366,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = publisher.FilePath,
                 Span = publisher.Span,
                 SymbolId = publisher.SymbolId,
-                Tags = new[] { "messaging" },
+                Tags = new[] { "messaging", "publisher" },
                 Props = new Dictionary<string, object>
                 {
                     ["queue"] = publisher.QueueOrTopic ?? string.Empty,
@@ -439,7 +439,7 @@ public sealed partial class ProjectAnalyzer
                         FilePath = contract.FilePath,
                         Span = contract.Span,
                         SymbolId = contract.SymbolId,
-                        Tags = new[] { "messaging" }
+                        Tags = new[] { "messaging", "contract" }
                     };
                 }
 

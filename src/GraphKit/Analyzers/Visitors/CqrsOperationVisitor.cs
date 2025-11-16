@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
 using GraphKit.Facts;
 using GraphKit.FlowAnalysis.Core;
 using GraphKit.FlowAnalysis.Dependencies;
+using GraphKit.Classification;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace GraphKit.Analyzers;
@@ -21,7 +26,10 @@ public sealed partial class ProjectAnalyzer
         private readonly HashSet<string> _seenMapperCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenHttpCalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenNotifications = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _seenServiceUsages = new(StringComparer.OrdinalIgnoreCase);
         private readonly FactWriter _facts;
+        private readonly CallClassifier _callClassifier;
+        private readonly ControlFlowTraversalState _flowState = new();
 
         public CqrsOperationVisitor(
             ProjectAnalyzer analyzer,
@@ -30,8 +38,12 @@ public sealed partial class ProjectAnalyzer
             string ownerMethod,
             FlowPointsToFacade pointsTo,
             FlowValueContentFacade valueContent,
+            FlowNullAnalysisFacade nullAnalysis,
+            FlowCopyAnalysisFacade copyAnalysis,
+            FlowPredicateAnalysisFacade predicateAnalysis,
+            FlowTaintedDataFacade taintedData,
             FactWriter facts)
-            : base(model.Compilation, model, pointsTo, valueContent)
+            : base(model.Compilation, model, pointsTo, valueContent, nullAnalysis, copyAnalysis, predicateAnalysis, taintedData)
         {
             _analyzer = analyzer;
             _handler = handler;
@@ -39,30 +51,62 @@ public sealed partial class ProjectAnalyzer
             _facts = facts ?? throw new ArgumentNullException(nameof(facts));
             _ = _facts;
             _efVisitor = new EfOperationVisitor(analyzer, handler.Assembly, handler.Project, RecordEfAccess, _facts);
+            _callClassifier = new CallClassifier();
         }
 
         protected override void VisitInvocation(IInvocationOperation op)
         {
+            if (ShouldSkipOperation())
+            {
+                base.VisitInvocation(op);
+                return;
+            }
+
             _efVisitor.TryProcess(op);
 
-            if (AnalysisPredicates.IsDbContextOrRepoCall(op))
+            var kind = _callClassifier.Classify(op);
+
+            switch (kind)
             {
-                HandleDataCall(op);
-            }
-            else if (AnalysisPredicates.IsMediatorPublish(op) || AnalysisPredicates.IsDomainEventPublish(op))
-            {
-                HandleMediatorPublish(op);
-            }
-            else if (AnalysisPredicates.IsMapperMap(op))
-            {
-                HandleMapperCall(op);
-            }
-            else if (AnalysisPredicates.IsHttpClientCall(op))
-            {
-                HandleHttpCall(op);
+                case CallKind.Repository:
+                case CallKind.DbContext:
+                    HandleDataCall(op);
+                    break;
+                case CallKind.MediatorPublish:
+                case CallKind.DomainEventPublish:
+                    HandleMediatorPublish(op);
+                    break;
+                case CallKind.Mapper:
+                    HandleMapperCall(op);
+                    break;
+                case CallKind.Http:
+                    HandleHttpCall(op);
+                    break;
             }
 
+            HandleRequestDispatch(op);
+
             base.VisitInvocation(op);
+        }
+
+        protected override void OnBranch(ControlFlowBranch branch, IOperation? condition)
+        {
+            _flowState.OnBranch(branch, condition);
+        }
+
+        protected override void OnEnterRegion(ControlFlowRegion region)
+        {
+            _flowState.OnEnterRegion(region);
+        }
+
+        protected override void OnLeaveRegion(ControlFlowRegion region)
+        {
+            _flowState.OnLeaveRegion(region);
+        }
+
+        private bool ShouldSkipOperation()
+        {
+            return _flowState.ShouldSkip(CurrentBlock);
         }
 
         private void HandleDataCall(IInvocationOperation invocation)
@@ -78,7 +122,28 @@ public sealed partial class ProjectAnalyzer
                 var key = $"{typeName}@{methodName}@{line}";
                 if (_seenRepositoryCalls.Add(key))
                 {
-                    _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, methodName, line, operation));
+                    string? entityType = null;
+                    if (invocation.Syntax is InvocationExpressionSyntax invocationSyntax &&
+                        invocationSyntax.Expression is MemberAccessExpressionSyntax access)
+                    {
+                        entityType = _analyzer.ResolveRepositoryEntityType(
+                            typeName,
+                            typeName,
+                            _handler.Assembly,
+                            _handler.Project,
+                            access.Name,
+                            invocationSyntax);
+                    }
+                    else
+                    {
+                        entityType = _analyzer.ResolveRepositoryEntityType(
+                            typeName,
+                            typeName,
+                            _handler.Assembly,
+                            _handler.Project);
+                    }
+
+                    _handler.RepositoryCalls.Add(new HandlerRepositoryCall(typeName, entityType, methodName, line, operation));
                     _analyzer.RecordHandlerRepositoryFact(_handler, typeName!, methodName, operation, line);
                 }
                 return;
@@ -125,12 +190,39 @@ public sealed partial class ProjectAnalyzer
 
         private void HandleHttpCall(IInvocationOperation invocation)
         {
-            var clientSymbol = invocation.Instance?.Type ?? invocation.TargetMethod.ContainingType;
+            if (PredicateAnalysis?.IsAlwaysFalse(invocation) ?? false)
+            {
+                return;
+            }
+
+            if (invocation.Instance is not null && (NullAnalysis?.IsDefinitelyNull(invocation.Instance) ?? false))
+            {
+                return;
+            }
+
+            if (IsRepositoryExtension(invocation.TargetMethod))
+            {
+                return;
+            }
+
+            var clientSymbol = invocation.Instance?.Type
+                               ?? invocation.Arguments.FirstOrDefault()?.Value.Type
+                               ?? invocation.TargetMethod.ContainingType;
             var clientType = Qualify(clientSymbol) ??
                              clientSymbol?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ??
                              "System.Net.Http.HttpClient";
 
             if (string.IsNullOrWhiteSpace(clientType))
+            {
+                return;
+            }
+
+            if (LooksLikeDomainType(clientSymbol, clientType))
+            {
+                return;
+            }
+
+            if (IsCacheService(clientType!))
             {
                 return;
             }
@@ -149,6 +241,8 @@ public sealed partial class ProjectAnalyzer
                 return;
             }
 
+            var containsTaint = TaintedData?.IsInvocationTainted(invocation) ?? false;
+
             _handler.HttpClientInvocations.Add(new HandlerClientInvocation(
                 clientType,
                 verb ?? string.Empty,
@@ -157,8 +251,96 @@ public sealed partial class ProjectAnalyzer
                 invocation.TargetMethod.Name,
                 null,
                 null,
-                _ownerMethod));
-            _analyzer.RecordHandlerHttpClientFact(_handler, clientType, verb, route, invocation.TargetMethod.Name, line, _ownerMethod);
+                _ownerMethod,
+                containsTaint));
+            _analyzer.RecordHandlerHttpClientFact(
+                _handler,
+                clientType,
+                verb,
+                route,
+                invocation.TargetMethod.Name,
+                line,
+                _ownerMethod,
+                containsTaint);
+        }
+
+        private void HandleRequestDispatch(IInvocationOperation invocation)
+        {
+            var receiverSymbol = invocation.Instance?.Type ?? invocation.TargetMethod.ContainingType;
+            var receiverType = Qualify(receiverSymbol);
+            if (string.IsNullOrWhiteSpace(receiverType))
+            {
+                return;
+            }
+
+            IReadOnlyCollection<string>? implementations = null;
+            if (invocation.Instance is not null)
+            {
+                var pointed = PointsTo.TryGetLocationTypes(invocation.Instance);
+                if (!pointed.IsDefaultOrEmpty)
+                {
+                    var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var candidate in pointed)
+                    {
+                        if (Qualify(candidate) is { } resolved)
+                        {
+                            unique.Add(resolved);
+                        }
+                    }
+
+                    if (unique.Count > 0)
+                    {
+                        implementations = unique.ToList();
+                    }
+                }
+            }
+
+            if (!_analyzer.TryResolveRequestDispatch(
+                    PointsTo,
+                    invocation,
+                    receiverType,
+                    implementations,
+                    _handler.Assembly,
+                    _handler.Project,
+                    out var targetType,
+                    out var requestType,
+                    out var responseType,
+                    out var dispatchKind))
+            {
+                return;
+            }
+
+            var serviceTypeName = receiverType;
+            if (implementations is { Count: > 0 })
+            {
+                foreach (var implementation in implementations)
+                {
+                    if (_analyzer.TryResolveScopedService(implementation, _handler.Assembly, _handler.Project, out var scoped))
+                    {
+                        serviceTypeName = scoped;
+                        break;
+                    }
+                }
+            }
+
+            var methodName = invocation.TargetMethod?.Name ?? string.Empty;
+            var line = GetInvocationLine(invocation);
+            var key = $"{serviceTypeName}@{methodName}@{line}";
+            if (!_seenServiceUsages.Add(key))
+            {
+                return;
+            }
+
+            _handler.ServiceUsages.Add(new ServiceUsage(
+                serviceTypeName,
+                line,
+                _ownerMethod,
+                methodName,
+                requestType,
+                responseType,
+                dispatchKind,
+                targetType,
+                implementations));
         }
 
         private void RecordEfAccess(string? contextType, string entityName, string operation, int line)
@@ -220,7 +402,12 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                var literal = TryGetStringLiteral(argument.Value) ?? ValueContent.TryGetStringValue(argument.Value);
+                var literal = TryGetStringLiteral(argument.Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    var description = ValueContent.DescribeStringValue(argument.Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(argument.Value);
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     return literal;
@@ -229,8 +416,12 @@ public sealed partial class ProjectAnalyzer
 
             if (invocation.Arguments.Length > 0)
             {
-                var literal = TryGetStringLiteral(invocation.Arguments[0].Value) ??
-                              ValueContent.TryGetStringValue(invocation.Arguments[0].Value);
+                var literal = TryGetStringLiteral(invocation.Arguments[0].Value);
+                if (string.IsNullOrWhiteSpace(literal))
+                {
+                    var description = ValueContent.DescribeStringValue(invocation.Arguments[0].Value);
+                    literal = description.FirstNonEmptyLiteralOrDefault ?? TryRenderValue(invocation.Arguments[0].Value);
+                }
                 if (!string.IsNullOrWhiteSpace(literal))
                 {
                     return literal;
@@ -272,6 +463,84 @@ public sealed partial class ProjectAnalyzer
             }
 
             return null;
+        }
+
+        private string? TryRenderValue(IOperation? operation)
+        {
+            if (operation is null)
+            {
+                return null;
+            }
+
+            foreach (var candidate in ValueContent.EnumerateContentCandidates(operation))
+            {
+                var literal = candidate.TryGetLiteralText();
+                if (!string.IsNullOrWhiteSpace(literal))
+                {
+                    return literal;
+                }
+
+                var placeholder = candidate.ToDisplayString();
+                if (!string.IsNullOrWhiteSpace(placeholder))
+                {
+                    return placeholder;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool LooksLikeDomainType(ITypeSymbol? symbol, string? typeName)
+        {
+            if (symbol is not null)
+            {
+                var ns = symbol.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (!string.IsNullOrWhiteSpace(ns) && ns.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (display.IndexOf(".Domain", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                if (typeName!.IndexOf(".DomainModel.", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    typeName.IndexOf(".Domain.", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsRepositoryExtension(IMethodSymbol method)
+        {
+            if (method is null)
+            {
+                return false;
+            }
+
+            var container = method.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(container) &&
+                container.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            var ns = method.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            if (!string.IsNullOrWhiteSpace(ns) &&
+                ns.IndexOf(".Data.Extensions.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

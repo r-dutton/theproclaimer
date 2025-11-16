@@ -46,8 +46,8 @@ public sealed partial class ProjectAnalyzer
         var handler = new NotificationHandlerInfo(fqdn, project.AssemblyName, project.RelativeDirectory, filePath, span, symbolId, className, notificationType);
         var model = project.GetModel(tree);
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Notifications);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Notifications);
         var fieldLookup = fieldTypes.ToDictionary(pair => pair.Key.TrimStart('_'), pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
         foreach (var method in classDeclaration.Members.OfType<MethodDeclarationSyntax>())
@@ -91,7 +91,7 @@ public sealed partial class ProjectAnalyzer
                 var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                 if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
                 {
-                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
+                    if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree, model, valueContent) is { } configurationUsage)
                     {
                         handler.ConfigurationUsages.Add(configurationUsage);
                     }
@@ -125,10 +125,21 @@ public sealed partial class ProjectAnalyzer
                     recordedUsage = true;
                 }
 
-                if (resolvedType.EndsWith("Repository", StringComparison.Ordinal))
+                if (resolvedType.EndsWith("Repository", StringComparison.Ordinal) ||
+                    IsRepositoryType(resolvedType) ||
+                    IsRepositoryType(typeName))
                 {
+                    var repositoryType = resolvedType;
                     var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(resolvedType, methodName ?? string.Empty, line, operation));
+                    var entityType = ResolveRepositoryEntityType(
+                        repositoryType,
+                        typeName,
+                        handler.Assembly,
+                        handler.Project,
+                        memberAccess.Name,
+                        invocation);
+
+                    handler.RepositoryCalls.Add(new NotificationHandlerRepositoryCall(repositoryType, entityType, methodName ?? string.Empty, line, operation));
                     continue;
                 }
 
@@ -213,7 +224,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                 {
                     handler.ConfigurationUsages.Add(configurationUsage);
                 }
@@ -303,7 +314,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = notification.FilePath,
                 Span = notification.Span,
                 SymbolId = notification.SymbolId,
-                Tags = new[] { "app", "event" },
+                Tags = new[] { "app", "event", "notification" },
                 Props = new Dictionary<string, object>
                 {
                     ["contract_type"] = notification.ContractType ?? notification.Fqdn
@@ -329,7 +340,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = handler.FilePath,
                 Span = handler.Span,
                 SymbolId = handler.SymbolId,
-                Tags = new[] { "app", "event" }
+                Tags = new[] { "app", "event", "handler" }
             };
 
             if (FindNotificationByType(handler.NotificationType) is { } notificationInfo)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Analyzer.Utilities;
 using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
@@ -29,24 +30,33 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
         private static readonly PointsToAnalysisResult? PlaceholderResult = null;
 
-        private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
-            static _ => false,
-            static _ => false,
-            static _ => false);
+        private static readonly InterproceduralAnalysisPredicate AllowAllPredicate = new(
+            static _ => true,
+            static _ => true,
+            static _ => true);
 
         private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<PointsToAnalysisResult?>> _analysisCache = new();
 
         public FlowPointsToFacade(
             InterproceduralSettings configuration,
-            FlowCallsitePredicate pruningPredicate)
+            FlowCallsitePredicate pruningPredicate,
+            FlowPointsToAnalysisOptions options)
         {
             Configuration = configuration;
             PruningPredicate = pruningPredicate;
+            AnalysisPredicate = CreateInterproceduralPredicate(pruningPredicate);
+            Options = options;
         }
 
         public InterproceduralSettings Configuration { get; }
 
         public FlowCallsitePredicate PruningPredicate { get; }
+
+        public FlowPointsToAnalysisOptions Options { get; }
+
+        private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
+
+        internal InterproceduralAnalysisPredicate InterproceduralPredicate => AnalysisPredicate;
 
         public bool TryGetAbstractValue(IOperation operation, out PointsToAbstractValue value)
         {
@@ -141,7 +151,10 @@ namespace GraphKit.FlowAnalysis.Dependencies
                         Configuration,
                         CancellationToken.None);
 
-                    if (!methodAnalysis.PointsToComputed)
+                    var settingsMismatch = !methodAnalysis.PointsToSettings.HasValue || !methodAnalysis.PointsToSettings.Value.Equals(Configuration);
+                    var predicateMismatch = methodAnalysis.PointsToPruningPredicate != PruningPredicate;
+
+                    if (!methodAnalysis.PointsToComputed || settingsMismatch || predicateMismatch)
                     {
                         var methodContext = methodAnalysis.Context;
                         var declaration = methodContext.Declaration ?? declarationSyntax;
@@ -156,6 +169,9 @@ namespace GraphKit.FlowAnalysis.Dependencies
 
                         methodAnalysis.PointsToAnalysis = computed;
                         methodAnalysis.PointsToComputed = true;
+                        methodAnalysis.PointsToSettings = Configuration;
+                        methodAnalysis.PointsToPruningPredicate = PruningPredicate;
+                        methodAnalysis.PointsToIncludesCopyAnalysis = false;
                     }
 
                     return methodAnalysis.PointsToAnalysis;
@@ -178,6 +194,7 @@ namespace GraphKit.FlowAnalysis.Dependencies
         {
             var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
             var settings = Configuration;
+            var pointsToOptions = Options;
 
             var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
                 EmptyAnalyzerOptions,
@@ -193,15 +210,31 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 owningSymbol,
                 EmptyAnalyzerOptions,
                 wellKnownProvider,
-                PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
+                pointsToOptions.PointsToAnalysisKind,
                 interproceduralConfiguration,
-                NoOpPredicate,
-                false,
-                false,
-                false);
+                AnalysisPredicate,
+                pointsToOptions.PessimisticAnalysis,
+                pointsToOptions.PerformCopyAnalysis,
+                pointsToOptions.ExceptionPathsAnalysis);
         }
 
-        private static SyntaxNode? FindDeclarationSyntax(ISymbol symbol, SyntaxNode contextSyntax)
+        internal static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
+        {
+            if (predicate is null)
+            {
+                return AllowAllPredicate;
+            }
+
+            bool ShouldAnalyzeInvocation(IOperation operation)
+                => operation is IInvocationOperation invocation && predicate(invocation);
+
+            return new InterproceduralAnalysisPredicate(
+                ShouldAnalyzeInvocation,
+                static _ => true,
+                static _ => true);
+        }
+
+        internal static SyntaxNode? FindDeclarationSyntax(ISymbol symbol, SyntaxNode contextSyntax)
         {
             foreach (var reference in symbol.DeclaringSyntaxReferences)
             {
@@ -217,8 +250,24 @@ namespace GraphKit.FlowAnalysis.Dependencies
                 : null;
         }
 
-        private static bool IsBenignAnalysisException(Exception exception)
+        internal static bool IsBenignAnalysisException(Exception exception)
             => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
+
+        internal PointsToAnalysisResult? TryGetAnalysisResult(IOperation operation)
+        {
+            if (operation is null || operation.SemanticModel is not { } model)
+            {
+                return null;
+            }
+
+            var owningSymbol = model.GetEnclosingSymbol(operation.Syntax.SpanStart);
+            if (owningSymbol is null)
+            {
+                return null;
+            }
+
+            return TryGetAnalysis(owningSymbol, model, operation.Syntax, out var analysis) ? analysis : null;
+        }
 
         private readonly struct AnalysisCacheKey : IEquatable<AnalysisCacheKey>
         {

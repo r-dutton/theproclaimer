@@ -246,6 +246,12 @@ public sealed partial class ProjectAnalyzer
         {
             edgeProps["invocation"] = invocationName;
         }
+        // Include pipeline behaviors if known so narrative can render them
+        var pipelineLabels = ResolvePipelineBehaviorsForRequest(requestInfo?.Fqdn ?? requestType);
+        if (pipelineLabels.Count > 0)
+        {
+            edgeProps["pipeline_behaviors"] = string.Join(", ", pipelineLabels);
+        }
         AddSource(edgeProps, action.FilePath, line);
         AddFactEdge(_facts, controllerId, requestId, "sends_request", edgeProps);
 
@@ -317,8 +323,28 @@ public sealed partial class ProjectAnalyzer
         AddFactEdge(_facts, controllerId, destination.Id, "maps_to", props);
     }
 
-    private void RecordControllerHttpClientFact(ControllerActionInfo action, string clientType, string? verb, string? route, string methodName, int line)
+    private void RecordControllerHttpClientFact(
+        ControllerActionInfo action,
+        string clientType,
+        string? verb,
+        string? route,
+        string methodName,
+        int line,
+        bool containsTaintedInput)
     {
+        if (IsCacheService(clientType) ||
+            clientType.IndexOf("Cache", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return;
+        }
+
+        if (string.Equals(methodName, "GetByIdAsync", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(route, "/id", StringComparison.OrdinalIgnoreCase) &&
+            clientType.IndexOf('.', StringComparison.Ordinal) < 0)
+        {
+            return;
+        }
+
         var controllerId = EnsureControllerFactNode(action);
         var clientId = EnsureHttpClientFactNode(clientType, verb, route);
         var props = EdgeProps(
@@ -326,6 +352,7 @@ public sealed partial class ProjectAnalyzer
             ("route", route),
             ("method", methodName),
             ("line", line),
+            ("contains_tainted_input", containsTaintedInput ? true : null),
             ("provenance", "Interprocedural"),
             ("confidence", string.IsNullOrWhiteSpace(route) ? "Medium" : "High"));
 
@@ -452,8 +479,22 @@ public sealed partial class ProjectAnalyzer
         AddFactEdge(_facts, handlerId, destination.Id, "maps_to", props);
     }
 
-    private void RecordHandlerHttpClientFact(HandlerInfo handler, string clientType, string? verb, string? route, string? methodName, int line, string? ownerMethod)
+    private void RecordHandlerHttpClientFact(
+        HandlerInfo handler,
+        string clientType,
+        string? verb,
+        string? route,
+        string? methodName,
+        int line,
+        string? ownerMethod,
+        bool containsTaintedInput)
     {
+        if (IsCacheService(clientType) ||
+            clientType.IndexOf("Cache", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return;
+        }
+
         var handlerId = EnsureHandlerFactNode(handler);
         var clientId = EnsureHttpClientFactNode(clientType, verb, route);
         var props = EdgeProps(
@@ -462,6 +503,7 @@ public sealed partial class ProjectAnalyzer
             ("method", methodName),
             ("owner_method", ownerMethod),
             ("line", line),
+            ("contains_tainted_input", containsTaintedInput ? true : null),
             ("provenance", "Interprocedural"),
             ("confidence", string.IsNullOrWhiteSpace(route) ? "Medium" : "High"));
 
@@ -506,7 +548,40 @@ public sealed partial class ProjectAnalyzer
 
     private void RecordHttpClientOutboundCallFact(HttpClientInfo client, HttpClientCall call)
     {
-        EnsureHttpClientFactNode(client.Fqdn, call.HttpMethod, call.Route);
+        var clientId = EnsureHttpClientFactNode(client.Fqdn, call.HttpMethod, call.Route);
+        var callSymbolId = $"{client.SymbolId}.{call.DeclaringMethod}@{call.Line}";
+        var callId = StableId.For("http.client_call", client.Fqdn, client.Assembly, callSymbolId);
+        var callProps = new Dictionary<string, object?>
+        {
+            ["client"] = client.Fqdn,
+            ["declaring_method"] = call.DeclaringMethod,
+            ["verb"] = call.HttpMethod,
+            ["route"] = call.Route,
+            ["line"] = call.Line
+        };
+
+        if (call.QueryParameters is { Count: > 0 })
+        {
+            callProps["query_params"] = call.QueryParameters.ToArray();
+        }
+
+        if (call.ContainsTaintedInput)
+        {
+            callProps["contains_tainted_input"] = true;
+        }
+
+        AddSource(callProps, client.FilePath, call.Line);
+        _facts.AddNode(new NodeFact(callId, "http.client_call", callProps));
+
+        var edgeProps = EdgeProps(
+            ("verb", call.HttpMethod),
+            ("route", call.Route),
+            ("line", call.Line),
+            ("contains_tainted_input", call.ContainsTaintedInput ? true : null),
+            ("provenance", "Interprocedural"),
+            ("confidence", string.IsNullOrWhiteSpace(call.Route) ? "Medium" : "High"));
+        AddSource(edgeProps, client.FilePath, call.Line);
+        AddFactEdge(_facts, clientId, callId, "issues_call", edgeProps);
     }
 
     private string EnsurePublisherFactNode(string publisherType, string? assemblyHint, string? projectHint)

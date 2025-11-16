@@ -144,7 +144,7 @@ public sealed partial class ProjectAnalyzer
                     var invocation = memberAccess.Parent as InvocationExpressionSyntax;
                     if (IsConfigurationType(resolvedType) || IsConfigurationType(typeName))
                     {
-                        if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree) is { } configurationUsage)
+                        if (invocation is not null && TryCaptureConfigurationUsage(memberAccess, invocation, resolvedType ?? typeName, tree, model, valueContent) is { } configurationUsage)
                         {
                             handlerInfo.ConfigurationUsages.Add(configurationUsage);
                         }
@@ -258,7 +258,19 @@ public sealed partial class ProjectAnalyzer
                         {
                             var repositoryType = IsRepositoryType(resolvedType) ? resolvedType : typeName;
                             var operation = DetermineRepositoryOperation(methodName ?? string.Empty);
-                            handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType ?? string.Empty, methodName ?? string.Empty, line, operation));
+                            if (!string.IsNullOrWhiteSpace(repositoryType))
+                            {
+                                var entityType = ResolveRepositoryEntityType(
+                                    repositoryType!,
+                                    typeName,
+                                    project.AssemblyName,
+                                    project.RelativeDirectory,
+                                    memberAccess.Name,
+                                    invocation);
+
+                                handlerInfo.RepositoryCalls.Add(new HandlerRepositoryCall(repositoryType!, entityType, methodName ?? string.Empty, line, operation));
+                            }
+
                             continue;
                         }
                         else if (typeName.Contains("IMapper", StringComparison.Ordinal) && memberAccess.Name is GenericNameSyntax mapperGeneric && mapperGeneric.Identifier.Text == "Map")
@@ -426,7 +438,7 @@ public sealed partial class ProjectAnalyzer
                     continue;
                 }
 
-                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree) is { } configurationUsage)
+                if (TryCaptureConfigurationIndexer(elementAccess, resolvedType ?? descriptor.Type, tree, model, valueContent) is { } configurationUsage)
                 {
                     handlerInfo.ConfigurationUsages.Add(configurationUsage);
                 }
@@ -516,8 +528,12 @@ public sealed partial class ProjectAnalyzer
         }
 
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsTo = CreatePointsToFacade(callsitePredicate);
-        var valueContent = CreateValueContentFacade(callsitePredicate);
+        var pointsTo = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Cqrs);
+        var valueContent = CreateValueContentFacade(pointsTo, FlowAnalysisFeature.Cqrs);
+        var copyAnalysis = CreateCopyAnalysisFacade(callsitePredicate);
+        var nullAnalysis = CreateNullAnalysisFacade(pointsTo);
+        var predicateAnalysis = CreatePredicateAnalysisFacade(pointsTo);
+        var taintedData = CreateTaintedDataFacade(callsitePredicate);
 
         foreach (var method in typeSymbol.GetMembers().OfType<IMethodSymbol>())
         {
@@ -540,7 +556,18 @@ public sealed partial class ProjectAnalyzer
 
             var tree = methodSyntax.SyntaxTree;
             var model = project.GetModel(tree);
-            var visitor = new CqrsOperationVisitor(this, model, handler, method.Name, pointsTo, valueContent, _facts);
+            var visitor = new CqrsOperationVisitor(
+                this,
+                model,
+                handler,
+                method.Name,
+                pointsTo,
+                valueContent,
+                nullAnalysis,
+                copyAnalysis,
+                predicateAnalysis,
+                taintedData,
+                _facts);
             var analysis = FlowAnalysisCore.GetOrCreateMethodAnalysis(project.Compilation, method, InterproceduralConfiguration);
             analysis.Context.Accept(visitor);
         }
@@ -580,7 +607,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = string.Empty,
                 Span = null,
                 SymbolId = symbolId,
-                Tags = new[] { "framework" }
+                Tags = new[] { "framework", "infra" }
             };
         }
 
@@ -640,7 +667,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = request.FilePath,
                 Span = request.Span,
                 SymbolId = request.SymbolId,
-                Tags = new[] { "app" }
+                Tags = new[] { "app", "request" }
             };
         }
     }
@@ -675,7 +702,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = handler.FilePath,
                 Span = handler.Span,
                 SymbolId = handler.SymbolId,
-                Tags = new[] { "app" },
+                Tags = new[] { "app", "handler" },
                 Props = handlerProps
             };
 
@@ -717,25 +744,89 @@ public sealed partial class ProjectAnalyzer
                 var targetType = ResolveImplementationType(repositoryCall.RepositoryType, handler.Assembly, handler.Project) ?? repositoryCall.RepositoryType;
                 var repositoryName = GetTopLevelSimpleIdentifier(targetType);
 
-                if (_repositories.Values.FirstOrDefault(r => r.Name.Equals(repositoryName, StringComparison.Ordinal)) is { } repository)
+                NodeReference? entityReference = null;
+                if (!string.IsNullOrWhiteSpace(repositoryCall.EntityType) &&
+                    TryResolveNodeReference(repositoryCall.EntityType, out var resolvedEntity, handler.Assembly, handler.Project))
                 {
-                    var repositoryId = StableId.For("app.repository", repository.Fqdn, repository.Assembly, repository.SymbolId);
+                    entityReference = resolvedEntity;
+                }
+
+                string? repositoryId = null;
+
+                if (!string.IsNullOrWhiteSpace(repositoryName) &&
+                    _repositories.Values.FirstOrDefault(r => r.Name.Equals(repositoryName, StringComparison.Ordinal)) is { } repository)
+                {
+                    repositoryId = StableId.For("app.repository", repository.Fqdn, repository.Assembly, repository.SymbolId);
+                }
+                else if (!string.IsNullOrWhiteSpace(targetType))
+                {
+                    var syntheticReference = EnsureSyntheticRepositoryNode(
+                        targetType,
+                        null,
+                        handler.Assembly,
+                        handler.Project,
+                        handler.FilePath,
+                        repositoryCall.Line);
+                    repositoryId = syntheticReference.Id;
+                }
+
+                if (repositoryId is null)
+                {
+                    continue;
+                }
+
+                _edges.Add(new GraphEdge
+                {
+                    From = id,
+                    To = repositoryId,
+                    Kind = "calls",
+                    Source = "static",
+                    Confidence = 1.0,
+                    Transform = new GraphTransform
+                    {
+                        Type = "mediatr.handler",
+                        Location = new GraphLocation { File = handler.FilePath, Line = repositoryCall.Line }
+                    },
+                    Props = new Dictionary<string, object>
+                    {
+                        ["method"] = repositoryCall.Method,
+                        ["operation"] = repositoryCall.Operation
+                    },
+                    Evidence = CreateEvidence(handler.FilePath, repositoryCall.Line)
+                });
+
+                if (entityReference is not null)
+                {
+                    var kind = repositoryCall.Operation switch
+                    {
+                        "insert" => "inserts_into",
+                        "update" => "updates",
+                        "delete" => "deletes_from",
+                        "upsert" => "upserts",
+                        "write" => "writes_to",
+                        _ => "queries"
+                    };
+                    var transformType = kind switch
+                    {
+                        "inserts_into" => "repository.insert",
+                        "updates" => "repository.update",
+                        "deletes_from" => "repository.delete",
+                        "upserts" => "repository.upsert",
+                        "writes_to" => "repository.write",
+                        _ => "repository.query"
+                    };
+
                     _edges.Add(new GraphEdge
                     {
                         From = id,
-                        To = repositoryId,
-                        Kind = "calls",
+                        To = entityReference.Id,
+                        Kind = kind,
                         Source = "static",
                         Confidence = 1.0,
                         Transform = new GraphTransform
                         {
-                            Type = "mediatr.handler",
+                            Type = transformType,
                             Location = new GraphLocation { File = handler.FilePath, Line = repositoryCall.Line }
-                        },
-                        Props = new Dictionary<string, object>
-                        {
-                            ["method"] = repositoryCall.Method,
-                            ["operation"] = repositoryCall.Operation
                         },
                         Evidence = CreateEvidence(handler.FilePath, repositoryCall.Line)
                     });
@@ -848,6 +939,11 @@ public sealed partial class ProjectAnalyzer
                 if (!string.IsNullOrWhiteSpace(targetService))
                 {
                     props["target_service"] = targetService!;
+                }
+
+                if (preferredInvocation.ContainsTaintedInput)
+                {
+                    props["contains_tainted_input"] = true;
                 }
 
                 EnrichClientPropsFromHttpClient(preferredInvocation, props, handler.Assembly, handler.Project);

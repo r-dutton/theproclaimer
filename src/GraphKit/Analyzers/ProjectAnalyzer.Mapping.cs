@@ -33,14 +33,14 @@ public sealed partial class ProjectAnalyzer
             FilePath = profileFile,
             Span = profileSpan,
             SymbolId = profileSymbolId,
-            Tags = new[] { "mapping" }
+            Tags = new[] { "mapping", "profile" }
         };
 
         var model = project.GetModel(tree);
         var compilation = project.Compilation;
         var callsitePredicate = ComposeInterproceduralPredicate(ShouldExpandForCqrsEfHttpMap);
-        var pointsToFacade = CreatePointsToFacade(callsitePredicate);
-        var valueContentFacade = CreateValueContentFacade(callsitePredicate);
+        var pointsToFacade = CreatePointsToFacade(callsitePredicate, feature: FlowAnalysisFeature.Mapping);
+        var valueContentFacade = CreateValueContentFacade(pointsToFacade, FlowAnalysisFeature.Mapping);
         var registeredMappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var invocation in Descendants<InvocationExpressionSyntax>(classDeclaration))

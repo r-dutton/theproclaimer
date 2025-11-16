@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using Analyzer.Utilities;
 using FlowAnalysisCore = GraphKit.FlowAnalysis.Core.FlowAnalysis;
@@ -31,54 +35,272 @@ public sealed class FlowValueContentFacade
 
     private static readonly ValueContentAnalysisResult? PlaceholderResult = null;
 
-    private static readonly InterproceduralAnalysisPredicate NoOpPredicate = new(
-        static _ => false,
-        static _ => false,
-        static _ => false);
+    private static readonly InterproceduralAnalysisPredicate AllowAllPredicate = new(
+        static _ => true,
+        static _ => true,
+        static _ => true);
 
     private readonly ConcurrentDictionary<AnalysisCacheKey, Lazy<ValueContentAnalysisResult?>> _analysisCache = new();
+
+    private FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowCallsitePredicate pruningPredicate,
+        FlowPointsToAnalysisOptions pointsToOptions,
+        InterproceduralAnalysisPredicate? interproceduralPredicate)
+    {
+        Settings = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        PruningPredicate = pruningPredicate;
+        PointsToOptions = pointsToOptions;
+        AnalysisPredicate = interproceduralPredicate ?? CreateInterproceduralPredicate(pruningPredicate);
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowCallsitePredicate pruningPredicate,
+        FlowPointsToAnalysisOptions pointsToOptions)
+        : this(configuration, pruningPredicate, pointsToOptions, interproceduralPredicate: null)
+    {
+    }
 
     public FlowValueContentFacade(
         InterproceduralSettings configuration,
         FlowCallsitePredicate pruningPredicate)
+        : this(configuration, pruningPredicate, FlowPointsToAnalysisOptions.Fast, interproceduralPredicate: null)
     {
-        Settings = configuration;
-        PruningPredicate = pruningPredicate;
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
+    public FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade,
+        FlowPointsToAnalysisOptions overrideOptions)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade?.PruningPredicate ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            overrideOptions,
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
+    public FlowValueContentFacade(FlowPointsToFacade pointsToFacade)
+        : this(
+            pointsToFacade?.Configuration ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade,
+            pointsToFacade?.InterproceduralPredicate)
+    {
+    }
+
+    private FlowValueContentFacade(
+        InterproceduralSettings configuration,
+        FlowPointsToFacade pointsToFacade,
+        InterproceduralAnalysisPredicate? interproceduralPredicate)
+        : this(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)),
+            pointsToFacade?.PruningPredicate ?? throw new ArgumentNullException(nameof(pointsToFacade)),
+            pointsToFacade.Options,
+            interproceduralPredicate)
+    {
     }
 
     public InterproceduralSettings Settings { get; }
 
     public FlowCallsitePredicate PruningPredicate { get; }
 
-    public string? TryGetStringValue(IOperation op)
+    public FlowPointsToAnalysisOptions PointsToOptions { get; }
+
+    private InterproceduralAnalysisPredicate AnalysisPredicate { get; }
+
+    public ValueDescription DescribeStringValue(IOperation? op)
     {
         if (op is null)
         {
+            return ValueDescription.None;
+        }
+
+        if (op is IConversionOperation conversion)
+        {
+            return DescribeStringValue(conversion.Operand);
+        }
+
+        if (op.ConstantValue is { HasValue: true } constant)
+        {
+            if (constant.Value is string literal)
+            {
+                return ValueDescription.FromLiteral(literal);
+            }
+
+            if (constant.Value is null)
+            {
+                return ValueDescription.NullLiteral;
+            }
+        }
+
+        if (!TryGetAnalysisFor(op, out var analysis) || analysis is null)
+        {
+            return ValueDescription.None;
+        }
+
+        return TryDescribeString(analysis, op, out var description) ? description : ValueDescription.None;
+    }
+
+    public bool TryGetStringLiterals(IOperation? op, out ImmutableArray<string> values)
+    {
+        var description = DescribeStringValue(op);
+        if (description.HasLiterals)
+        {
+            values = description.Literals;
+            return true;
+        }
+
+        values = ImmutableArray<string>.Empty;
+        return false;
+    }
+
+    public bool MayBeNull(IOperation? op)
+    {
+        var description = DescribeStringValue(op);
+        return description.MayBeNull;
+    }
+
+    public string? TryGetStringValue(IOperation op)
+        => DescribeStringValue(op).FirstNonEmptyLiteralOrDefault;
+
+    public bool? TryGetBooleanValue(IOperation op)
+    {
+        if (op is null) return null;
+        if (op.ConstantValue is { HasValue: true, Value: bool b }) return b;
+        if (!TryGetAnalysisFor(op, out var analysis)) return null;
+        return TryExtractBoolean(analysis!, op, out var value) ? value : null;
+    }
+
+    public long? TryGetIntegralValue(IOperation op)
+    {
+        if (op is null) return null;
+        if (op.ConstantValue is { HasValue: true, Value: int i }) return i;
+        if (op.ConstantValue is { HasValue: true, Value: long l }) return l;
+        if (!TryGetAnalysisFor(op, out var analysis)) return null;
+        return TryExtractIntegral(analysis!, op, out var value) ? value : null;
+    }
+
+    public IEnumerable<FlowContentCandidate> EnumerateContentCandidates(IOperation? operation)
+    {
+        if (operation is null)
+        {
+            yield break;
+        }
+
+        // Use the default comparer to allow null entries without throwing when hashing.
+        var emittedLiterals = new HashSet<string?>();
+        if (operation.ConstantValue is { HasValue: true } constant)
+        {
+            if (constant.Value is string constantString)
+            {
+                if (emittedLiterals.Add(constantString))
+                {
+                    yield return FlowContentCandidate.FromLiteral(constantString);
+                }
+            }
+            else if (constant.Value is null && emittedLiterals.Add(null))
+            {
+                yield return FlowContentCandidate.Null;
+            }
+        }
+
+        if (!TryGetAnalysisFor(operation, out var analysis) || analysis is null)
+        {
+            yield break;
+        }
+
+        var abstractValue = analysis[operation];
+        if (abstractValue is null)
+        {
+            yield break;
+        }
+
+        foreach (var literal in abstractValue.LiteralValues)
+        {
+            if (literal is string literalString)
+            {
+                if (emittedLiterals.Add(literalString))
+                {
+                    yield return FlowContentCandidate.FromLiteral(literalString);
+                }
+            }
+            else if (literal is null && emittedLiterals.Add(null))
+            {
+                yield return FlowContentCandidate.Null;
+            }
+        }
+
+        if (abstractValue.NonLiteralState == ValueContainsNonLiteralState.Maybe)
+        {
+            var segments = DescribeOperation(operation, analysis);
+            if (!segments.IsDefaultOrEmpty)
+            {
+                yield return FlowContentCandidate.FromSegments(segments);
+            }
+        }
+    }
+
+    public bool? MayBeNull(IOperation? operation)
+    {
+        if (operation is null)
+        {
             return null;
         }
 
-        if (op.ConstantValue is { HasValue: true, Value: string constant })
+        if (operation.ConstantValue is { HasValue: true } constant)
         {
-            return constant;
+            return constant.Value is null;
         }
 
+        if (!TryGetAnalysisFor(operation, out var analysis) || analysis is null)
+        {
+            return null;
+        }
+
+        var abstractValue = analysis[operation];
+        if (abstractValue is null)
+        {
+            return null;
+        }
+
+        if (abstractValue.LiteralValues.Contains(null))
+        {
+            return true;
+        }
+
+        return abstractValue.NonLiteralState switch
+        {
+            ValueContainsNonLiteralState.No => false,
+            _ => null
+        };
+    }
+
+    private bool TryGetAnalysisFor(IOperation op, out ValueContentAnalysisResult? analysis)
+    {
+        analysis = null;
         if (op.SemanticModel is not { } model)
         {
-            return null;
+            return false;
         }
 
         var owningSymbol = model.GetEnclosingSymbol(op.Syntax.SpanStart);
         if (owningSymbol is null)
         {
-            return null;
+            return false;
         }
 
-        if (!TryGetAnalysis(owningSymbol, model, op.Syntax, out var analysis))
-        {
-            return null;
-        }
-
-        return TryExtractString(analysis, op, out var reconstructed) ? reconstructed : null;
+        return TryGetAnalysis(owningSymbol, model, op.Syntax, out analysis);
     }
 
     private bool TryGetAnalysis(
@@ -157,6 +379,7 @@ public sealed class FlowValueContentFacade
         var wellKnownProvider = WellKnownTypeProvider.GetOrCreate(compilation);
 
         var settings = Settings;
+        var pointsToOptions = PointsToOptions;
         var interproceduralConfiguration = InterproceduralAnalysisConfiguration.Create(
             EmptyAnalyzerOptions,
             ImmutableArray.Create(FlowAnalysisRule),
@@ -166,35 +389,78 @@ public sealed class FlowValueContentFacade
             (uint)Math.Max(0, settings.MaxCallChainLength),
             (uint)Math.Max(0, settings.MaxLambdaOrLocalFunctionDepth));
 
-        var pointsToResult = PointsToAnalysis.TryGetOrComputeResult(
-            controlFlowGraph,
-            owningSymbol,
-            EmptyAnalyzerOptions,
-            wellKnownProvider,
-            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
-            interproceduralConfiguration,
-            NoOpPredicate,
-            pessimisticAnalysis: false,
-            performCopyAnalysis: false,
-            exceptionPathsAnalysis: false);
-
         var valueContentResult = ValueContentAnalysis.TryGetOrComputeResult(
             controlFlowGraph,
             owningSymbol,
-            wellKnownProvider,
             EmptyAnalyzerOptions,
-            FlowAnalysisRule,
-            PointsToAnalysisKind.PartialWithoutTrackingFieldsAndProperties,
-            settings.Kind,
-            pessimisticAnalysis: false);
+            wellKnownProvider,
+            pointsToOptions.PointsToAnalysisKind,
+            interproceduralConfiguration,
+            out _,
+            out _,
+            pessimisticAnalysis: pointsToOptions.PessimisticAnalysis,
+            performCopyAnalysis: pointsToOptions.PerformCopyAnalysis,
+            exceptionPathsAnalysis: pointsToOptions.ExceptionPathsAnalysis,
+            interproceduralAnalysisPredicate: AnalysisPredicate);
 
         return valueContentResult;
     }
 
-    private static bool TryExtractString(
+    private static bool TryDescribeString(
         ValueContentAnalysisResult analysis,
         IOperation operation,
-        out string? value)
+        out ValueDescription description)
+    {
+        description = ValueDescription.None;
+        var abstractValue = analysis[operation];
+        if (abstractValue is null)
+        {
+            return false;
+        }
+
+        description = BuildDescription(abstractValue);
+        return true;
+    }
+
+    private static ValueDescription BuildDescription(ValueContentAbstractValue abstractValue)
+    {
+        var literals = ImmutableArray.CreateBuilder<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var includesNull = false;
+
+        if (abstractValue.TryGetSingleNonNullLiteral(out string? literal) && literal is not null)
+        {
+            seen.Add(literal);
+            literals.Add(literal);
+        }
+        else if (abstractValue.IsLiteralState)
+        {
+            foreach (var candidate in abstractValue.LiteralValues)
+            {
+                switch (candidate)
+                {
+                    case string text when seen.Add(text):
+                        literals.Add(text);
+                        break;
+                    case null:
+                        includesNull = true;
+                        break;
+                }
+            }
+        }
+        else if (Equals(abstractValue, ValueContentAbstractValue.ContainsNullLiteralState))
+        {
+            includesNull = true;
+        }
+
+        seen.Clear();
+        return new ValueDescription(literals.ToImmutable(), includesNull, abstractValue.NonLiteralState, hasValue: true);
+    }
+
+    private static bool TryExtractBoolean(
+        ValueContentAnalysisResult analysis,
+        IOperation operation,
+        out bool? value)
     {
         value = null;
         var abstractValue = analysis[operation];
@@ -203,33 +469,143 @@ public sealed class FlowValueContentFacade
             return false;
         }
 
-        if (abstractValue.TryGetSingleNonNullLiteral(out string? literal) && literal is not null)
+        foreach (var candidate in abstractValue.LiteralValues)
         {
-            value = literal;
-            return true;
-        }
-
-        if (abstractValue.IsLiteralState)
-        {
-            foreach (var candidate in abstractValue.LiteralValues)
+            if (candidate is bool cb)
             {
-                if (candidate is string text)
-                {
-                    value = text;
-                    return true;
-                }
-
-                if (candidate is null)
-                {
-                    value = null;
-                    return true;
-                }
+                value = cb;
+                return true;
             }
         }
 
-        if (Equals(abstractValue, ValueContentAbstractValue.ContainsNullLiteralState))
+        return false;
+    }
+
+    private static bool TryExtractIntegral(
+        ValueContentAnalysisResult analysis,
+        IOperation operation,
+        out long? value)
+    {
+        value = null;
+        var abstractValue = analysis[operation];
+        if (abstractValue is null)
         {
-            value = null;
+            return false;
+        }
+
+        foreach (var candidate in abstractValue.LiteralValues)
+        {
+            switch (candidate)
+            {
+                case int i:
+                    value = i; return true;
+                case long l:
+                    value = l; return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static ImmutableArray<FlowContentSegment> DescribeOperation(
+        IOperation operation,
+        ValueContentAnalysisResult? analysis)
+    {
+        var builder = ImmutableArray.CreateBuilder<FlowContentSegment>();
+        var visited = new HashSet<IOperation>(ReferenceEqualityComparer.Instance);
+        AppendSegments(operation, analysis, builder, visited);
+        return builder.ToImmutable();
+    }
+
+    private static void AppendSegments(
+        IOperation? operation,
+        ValueContentAnalysisResult? analysis,
+        ImmutableArray<FlowContentSegment>.Builder builder,
+        HashSet<IOperation> visited)
+    {
+        if (operation is null)
+        {
+            return;
+        }
+
+        if (!visited.Add(operation))
+        {
+            builder.Add(FlowContentSegment.NonLiteral());
+            return;
+        }
+
+        switch (operation)
+        {
+            case ILiteralOperation literal:
+                var literalValue = literal.ConstantValue.HasValue ? literal.ConstantValue.Value : null;
+                builder.Add(FlowContentSegment.FromLiteral(literalValue));
+                break;
+
+            case IInterpolatedStringOperation interpolated:
+                foreach (var part in interpolated.Parts)
+                {
+                    switch (part)
+                    {
+                        case IInterpolatedStringTextOperation text:
+                            builder.Add(FlowContentSegment.Literal(text.Text));
+                            break;
+                        case IInterpolationOperation interpolation:
+                            AppendSegments(interpolation.Expression, analysis, builder, visited);
+                            break;
+                        default:
+                            builder.Add(FlowContentSegment.NonLiteral());
+                            break;
+                    }
+                }
+                break;
+
+            case IBinaryOperation binary when binary.OperatorKind is BinaryOperatorKind.Add or BinaryOperatorKind.Concatenate:
+                AppendSegments(binary.LeftOperand, analysis, builder, visited);
+                AppendSegments(binary.RightOperand, analysis, builder, visited);
+                break;
+
+            case IConversionOperation conversion when conversion.Type?.SpecialType == SpecialType.System_String:
+                AppendSegments(conversion.Operand, analysis, builder, visited);
+                break;
+
+            default:
+                if (!TryAppendLiteralFromAnalysis(operation, analysis, builder))
+                {
+                    builder.Add(FlowContentSegment.NonLiteral());
+                }
+
+                break;
+        }
+
+        visited.Remove(operation);
+    }
+
+    private static bool TryAppendLiteralFromAnalysis(
+        IOperation operation,
+        ValueContentAnalysisResult? analysis,
+        ImmutableArray<FlowContentSegment>.Builder builder)
+    {
+        if (analysis is null)
+        {
+            return false;
+        }
+
+        var abstractValue = analysis[operation];
+        if (abstractValue is null || abstractValue.LiteralValues.Count == 0)
+        {
+            return false;
+        }
+
+        if (abstractValue.LiteralValues.Contains(null))
+        {
+            builder.Add(FlowContentSegment.Null());
+            return true;
+        }
+
+        var literal = abstractValue.LiteralValues.OfType<string>().FirstOrDefault();
+        if (literal is not null)
+        {
+            builder.Add(FlowContentSegment.Literal(literal));
             return true;
         }
 
@@ -255,6 +631,22 @@ public sealed class FlowValueContentFacade
     private static bool IsBenignAnalysisException(Exception exception)
         => exception is InvalidOperationException or NotSupportedException or OperationCanceledException;
 
+    private static InterproceduralAnalysisPredicate CreateInterproceduralPredicate(FlowCallsitePredicate predicate)
+    {
+        if (predicate is null)
+        {
+            return AllowAllPredicate;
+        }
+
+        bool ShouldAnalyzeInvocation(IOperation operation)
+            => operation is IInvocationOperation invocation && predicate(invocation);
+
+        return new InterproceduralAnalysisPredicate(
+            ShouldAnalyzeInvocation,
+            static _ => true,
+            static _ => true);
+    }
+
     private readonly struct AnalysisCacheKey : IEquatable<AnalysisCacheKey>
     {
         public AnalysisCacheKey(SyntaxTree tree, TextSpan span)
@@ -275,5 +667,191 @@ public sealed class FlowValueContentFacade
 
         public override int GetHashCode()
             => HashCode.Combine(Tree, Span.Start, Span.Length);
+    }
+
+    public readonly record struct ValueDescription
+    {
+        public static ValueDescription None { get; } = new(
+            ImmutableArray<string>.Empty,
+            includesNullLiteral: false,
+            ValueContainsNonLiteralState.Undefined,
+            hasValue: false);
+
+        public static ValueDescription NullLiteral { get; } = new(
+            ImmutableArray<string>.Empty,
+            includesNullLiteral: true,
+            ValueContainsNonLiteralState.No,
+            hasValue: true);
+
+        public static ValueDescription FromLiteral(string literal)
+            => new(ImmutableArray.Create(literal), includesNullLiteral: false, ValueContainsNonLiteralState.No, hasValue: true);
+
+        public ValueDescription(
+            ImmutableArray<string> literals,
+            bool includesNullLiteral,
+            ValueContainsNonLiteralState nonLiteralState,
+            bool hasValue)
+        {
+            Literals = literals.IsDefault ? ImmutableArray<string>.Empty : literals;
+            IncludesNullLiteral = includesNullLiteral;
+            NonLiteralState = nonLiteralState;
+            HasValue = hasValue;
+        }
+
+        public ImmutableArray<string> Literals { get; }
+
+        public bool IncludesNullLiteral { get; }
+
+        public ValueContainsNonLiteralState NonLiteralState { get; }
+
+        public bool HasValue { get; }
+
+        public bool HasLiterals => !Literals.IsDefaultOrEmpty && Literals.Length > 0;
+
+        public bool HasSingleLiteral => HasLiterals && Literals.Length == 1;
+
+        public string? SingleLiteralOrDefault => HasSingleLiteral ? Literals[0] : null;
+
+        public string? FirstLiteralOrDefault => HasLiterals ? Literals[0] : null;
+
+        public string? FirstNonEmptyLiteralOrDefault
+        {
+            get
+            {
+                if (!HasLiterals)
+                {
+                    return null;
+                }
+
+                foreach (var literal in Literals)
+                {
+                    if (!string.IsNullOrWhiteSpace(literal))
+                    {
+                        return literal;
+                    }
+                }
+
+                return Literals[0];
+            }
+        }
+
+        public bool ContainsNonLiteralValues => NonLiteralState is ValueContainsNonLiteralState.Maybe;
+
+        public bool MayBeNull
+            => IncludesNullLiteral
+               || NonLiteralState is ValueContainsNonLiteralState.Maybe
+               || NonLiteralState is ValueContainsNonLiteralState.Invalid
+               || NonLiteralState is ValueContainsNonLiteralState.Undefined
+               || !HasValue;
+    }
+}
+
+
+public enum FlowContentSegmentKind
+{
+    Literal,
+    NonLiteral,
+    NullLiteral
+}
+
+public readonly record struct FlowContentSegment(FlowContentSegmentKind Kind, string? Value)
+{
+    public static FlowContentSegment Literal(string? value)
+        => new(FlowContentSegmentKind.Literal, value ?? string.Empty);
+
+    public static FlowContentSegment NonLiteral(string? value = null)
+        => new(FlowContentSegmentKind.NonLiteral, value);
+
+    public static FlowContentSegment Null()
+        => new(FlowContentSegmentKind.NullLiteral, null);
+
+    public static FlowContentSegment FromLiteral(object? literal)
+    {
+        if (literal is null)
+        {
+            return Null();
+        }
+
+        if (literal is string text)
+        {
+            return Literal(text);
+        }
+
+        return Literal(literal.ToString());
+    }
+}
+
+public sealed record FlowContentCandidate
+{
+    public FlowContentCandidate(ImmutableArray<FlowContentSegment> segments)
+    {
+        Segments = segments;
+    }
+
+    public ImmutableArray<FlowContentSegment> Segments { get; }
+
+    public static FlowContentCandidate FromLiteral(string? value)
+        => new(ImmutableArray.Create(value is null ? FlowContentSegment.Null() : FlowContentSegment.Literal(value)));
+
+    public static FlowContentCandidate FromSegments(ImmutableArray<FlowContentSegment> segments)
+        => new(segments);
+
+    public static FlowContentCandidate Null { get; } = new(ImmutableArray.Create(FlowContentSegment.Null()));
+
+    public bool IsLiteral => !Segments.IsDefaultOrEmpty && Segments.All(segment => segment.Kind == FlowContentSegmentKind.Literal);
+
+    public bool ContainsNonLiteralSegments => !Segments.IsDefaultOrEmpty && Segments.Any(segment => segment.Kind == FlowContentSegmentKind.NonLiteral);
+
+    public string? TryGetLiteralText()
+    {
+        if (Segments.IsDefaultOrEmpty)
+        {
+            return null;
+        }
+
+        if (Segments.Length == 1 && Segments[0].Kind == FlowContentSegmentKind.NullLiteral)
+        {
+            return null;
+        }
+
+        if (!IsLiteral)
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var segment in Segments)
+        {
+            builder.Append(segment.Value);
+        }
+
+        return builder.ToString();
+    }
+
+    public string ToDisplayString(string nonLiteralPlaceholder = "{*}")
+    {
+        if (Segments.IsDefaultOrEmpty)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var segment in Segments)
+        {
+            switch (segment.Kind)
+            {
+                case FlowContentSegmentKind.Literal:
+                    builder.Append(segment.Value);
+                    break;
+                case FlowContentSegmentKind.NullLiteral:
+                    builder.Append("null");
+                    break;
+                default:
+                    builder.Append(string.IsNullOrWhiteSpace(segment.Value) ? nonLiteralPlaceholder : segment.Value);
+                    break;
+            }
+        }
+
+        return builder.ToString();
     }
 }

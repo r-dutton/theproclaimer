@@ -94,6 +94,15 @@ public sealed class GraphGenerator
     private static string MapConfidence(double value)
         => value >= 0.9 ? "High" : value >= 0.6 ? "Medium" : "Low";
 
+    private static bool LooksLikeCacheNode(GraphNode node)
+    {
+        static bool ContainsCache(string? value)
+            => !string.IsNullOrWhiteSpace(value) &&
+               value.IndexOf("cache", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        return ContainsCache(node.Name) || ContainsCache(node.Fqdn);
+    }
+
     private static string MapProvenance(string source) => source switch
     {
         "static" => "Static",
@@ -105,6 +114,7 @@ public sealed class GraphGenerator
     private static void PopulateFactsFromGraph(GraphDocument document, FactWriter facts, string workspaceRoot)
     {
         var workspaceFullPath = Path.GetFullPath(workspaceRoot);
+        var nodeLookup = document.Nodes.ToDictionary(static node => node.Id, StringComparer.OrdinalIgnoreCase);
 
         foreach (var node in document.Nodes)
         {
@@ -207,6 +217,13 @@ public sealed class GraphGenerator
                 {
                     props["line"] = source.StartLine;
                 }
+            }
+
+            if (edge.Kind == EdgeKinds.UsesClient &&
+                nodeLookup.TryGetValue(edge.To, out var targetNode) &&
+                LooksLikeCacheNode(targetNode))
+            {
+                continue;
             }
 
             facts.AddEdge(new EdgeFact(edge.From, edge.To, edge.Kind, props));

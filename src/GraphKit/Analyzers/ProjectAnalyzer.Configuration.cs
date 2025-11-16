@@ -6,6 +6,7 @@ using GraphKit.Graph;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
+using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.PointsToAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using GraphKit.FlowAnalysis.Interprocedural;
 using InterproceduralAnalysisConfiguration = Microsoft.CodeAnalysis.FlowAnalysis.DataFlow.InterproceduralAnalysisConfiguration;
@@ -26,11 +27,58 @@ public sealed partial class ProjectAnalyzer
         return normalized;
     }
 
-    private FlowPointsToFacade CreatePointsToFacade(FlowCallsitePredicate predicate)
+    private FlowPointsToFacade CreatePointsToFacade(
+        FlowCallsitePredicate predicate,
+        FlowPointsToPrecision? precision = null,
+        string? feature = null)
+    {
+        var options = EnsureCopyAnalysisOption(
+            _configuration.GetPointsToAnalysisOptions(precision),
+            feature);
+        return new(_interproceduralConfiguration, predicate, options);
+    }
+
+    private FlowValueContentFacade CreateValueContentFacade(
+        FlowCallsitePredicate predicate,
+        string? feature = null,
+        FlowPointsToPrecision? precision = null)
+    {
+        var options = EnsureCopyAnalysisOption(
+            _configuration.GetPointsToAnalysisOptions(precision),
+            feature);
+        return new(_interproceduralConfiguration, predicate, options);
+    }
+
+    private FlowValueContentFacade CreateValueContentFacade(
+        FlowPointsToFacade pointsToFacade,
+        string? feature = null)
+    {
+        if (pointsToFacade is null)
+        {
+            throw new ArgumentNullException(nameof(pointsToFacade));
+        }
+
+        var requiresCopyAnalysis = ShouldPerformCopyAnalysis(feature);
+        if (!requiresCopyAnalysis || pointsToFacade.Options.PerformCopyAnalysis)
+        {
+            return new(_interproceduralConfiguration, pointsToFacade);
+        }
+
+        var upgradedOptions = pointsToFacade.Options with { PerformCopyAnalysis = true };
+        return new(_interproceduralConfiguration, pointsToFacade, upgradedOptions);
+    }
+
+    private FlowCopyAnalysisFacade CreateCopyAnalysisFacade(FlowCallsitePredicate predicate)
         => new(_interproceduralConfiguration, predicate);
 
-    private FlowValueContentFacade CreateValueContentFacade(FlowCallsitePredicate predicate)
-        => new(_interproceduralConfiguration, predicate);
+    private FlowNullAnalysisFacade CreateNullAnalysisFacade(FlowPointsToFacade pointsTo)
+        => new(pointsTo);
+
+    private FlowPredicateAnalysisFacade CreatePredicateAnalysisFacade(FlowPointsToFacade pointsTo)
+        => new(pointsTo);
+
+    private FlowTaintedDataFacade CreateTaintedDataFacade(FlowCallsitePredicate predicate)
+        => new(_interproceduralConfiguration, predicate, FlowTaintedDataConfiguration.Empty);
 
     private static FlowCallsitePredicate ComposeInterproceduralPredicate(FlowCallsitePredicate predicate)
         => invocation => !ShouldPruneInterproceduralInvocation(invocation) && predicate(invocation);
@@ -71,6 +119,20 @@ public sealed partial class ProjectAnalyzer
 
         public InterproceduralAnalysisKind InterproceduralAnalysisKind { get; init; } = InterproceduralAnalysisKind.ContextSensitive;
 
+        public FlowPointsToPrecision DefaultPointsToPrecision { get; init; } = FlowPointsToPrecision.Fast;
+
+        public bool EnableValueContentCopyAnalysis { get; init; }
+
+        public string[] ValueContentCopyAnalysisFeatures { get; init; } = Array.Empty<string>();
+
+        public PointsToAnalysisKind PointsToAnalysisKind { get; init; } = FlowPointsToAnalysisOptions.Fast.PointsToAnalysisKind;
+
+        public bool PerformCopyAnalysis { get; init; } = FlowPointsToAnalysisOptions.Fast.PerformCopyAnalysis;
+
+        public bool PessimisticAnalysis { get; init; } = FlowPointsToAnalysisOptions.Fast.PessimisticAnalysis;
+
+        public bool ExceptionPathsAnalysis { get; init; } = FlowPointsToAnalysisOptions.Fast.ExceptionPathsAnalysis;
+
         public static ProjectAnalyzerConfiguration Default { get; } = new();
 
         public ProjectAnalyzerConfiguration Normalize()
@@ -78,8 +140,11 @@ public sealed partial class ProjectAnalyzer
             var normalizedCallChain = Math.Max(0, MaxInterproceduralCallChainLength);
             var normalizedLambdaDepth = Math.Max(0, MaxInterproceduralLambdaOrLocalFunctionDepth);
 
+            var normalizedFeatures = ValueContentCopyAnalysisFeatures ?? Array.Empty<string>();
+
             if (normalizedCallChain == MaxInterproceduralCallChainLength &&
-                normalizedLambdaDepth == MaxInterproceduralLambdaOrLocalFunctionDepth)
+                normalizedLambdaDepth == MaxInterproceduralLambdaOrLocalFunctionDepth &&
+                ReferenceEquals(ValueContentCopyAnalysisFeatures, normalizedFeatures))
             {
                 return this;
             }
@@ -87,7 +152,8 @@ public sealed partial class ProjectAnalyzer
             return this with
             {
                 MaxInterproceduralCallChainLength = normalizedCallChain,
-                MaxInterproceduralLambdaOrLocalFunctionDepth = normalizedLambdaDepth
+                MaxInterproceduralLambdaOrLocalFunctionDepth = normalizedLambdaDepth,
+                ValueContentCopyAnalysisFeatures = normalizedFeatures
             };
         }
 
@@ -96,6 +162,48 @@ public sealed partial class ProjectAnalyzer
                 InterproceduralAnalysisKind,
                 MaxInterproceduralCallChainLength,
                 MaxInterproceduralLambdaOrLocalFunctionDepth);
+
+        public FlowPointsToAnalysisOptions GetPointsToAnalysisOptions(FlowPointsToPrecision? precision = null)
+        {
+            var effectivePrecision = precision ?? DefaultPointsToPrecision;
+            if (effectivePrecision == FlowPointsToPrecision.HighPrecision)
+            {
+                return FlowPointsToAnalysisOptions.HighPrecision;
+            }
+
+            return new FlowPointsToAnalysisOptions(
+                PointsToAnalysisKind,
+                PerformCopyAnalysis,
+                PessimisticAnalysis,
+                ExceptionPathsAnalysis);
+        }
+    }
+
+    private FlowPointsToAnalysisOptions EnsureCopyAnalysisOption(
+        FlowPointsToAnalysisOptions options,
+        string? feature)
+    {
+        if (ShouldPerformCopyAnalysis(feature) && !options.PerformCopyAnalysis)
+        {
+            return options with { PerformCopyAnalysis = true };
+        }
+
+        return options;
+    }
+
+    private bool ShouldPerformCopyAnalysis(string? feature)
+    {
+        if (_configuration.EnableValueContentCopyAnalysis)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(feature))
+        {
+            return false;
+        }
+
+        return _valueContentCopyAnalysisFeatures.Contains(feature);
     }
 
     private static bool IsConfigurationType(string? typeName)
@@ -106,7 +214,9 @@ public sealed partial class ProjectAnalyzer
         MemberAccessExpressionSyntax memberAccess,
         InvocationExpressionSyntax invocation,
         string configurationType,
-        SyntaxTree tree)
+        SyntaxTree tree,
+        SemanticModel? model = null,
+        FlowValueContentFacade? valueContent = null)
     {
         var methodName = GetMemberName(memberAccess.Name);
         if (string.IsNullOrWhiteSpace(methodName))
@@ -115,7 +225,7 @@ public sealed partial class ProjectAnalyzer
         }
 
         var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-        var key = argument is null ? null : ExtractConfigurationKey(argument);
+        var key = argument is null ? null : ExtractConfigurationKey(argument, model, valueContent);
         if (string.IsNullOrWhiteSpace(key))
         {
             return null;
@@ -129,10 +239,12 @@ public sealed partial class ProjectAnalyzer
     private ConfigurationUsage? TryCaptureConfigurationIndexer(
         ElementAccessExpressionSyntax elementAccess,
         string configurationType,
-        SyntaxTree tree)
+        SyntaxTree tree,
+        SemanticModel? model = null,
+        FlowValueContentFacade? valueContent = null)
     {
         var argument = elementAccess.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-        var key = argument is null ? null : ExtractConfigurationKey(argument);
+        var key = argument is null ? null : ExtractConfigurationKey(argument, model, valueContent);
         if (string.IsNullOrWhiteSpace(key))
         {
             return null;
@@ -143,7 +255,44 @@ public sealed partial class ProjectAnalyzer
         return new ConfigurationUsage(configurationType, "indexer", key, line, filePath);
     }
 
-    private static string? ExtractConfigurationKey(ExpressionSyntax expression)
+    private string? ExtractConfigurationKey(
+        ExpressionSyntax expression,
+        SemanticModel? model,
+        FlowValueContentFacade? valueContent)
+    {
+        if (model is not null && valueContent is not null)
+        {
+            try
+            {
+                var operation = model.GetOperation(expression);
+                if (operation is not null)
+                {
+                    foreach (var candidate in valueContent.EnumerateContentCandidates(operation))
+                    {
+                        var literal = candidate.TryGetLiteralText();
+                        if (!string.IsNullOrWhiteSpace(literal))
+                        {
+                            return literal;
+                        }
+
+                        var placeholder = candidate.ToDisplayString();
+                        if (!string.IsNullOrWhiteSpace(placeholder))
+                        {
+                            return placeholder;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore semantic model failures; fall back to syntax heuristics.
+            }
+        }
+
+        return ExtractConfigurationKeyFromSyntax(expression);
+    }
+
+    private static string? ExtractConfigurationKeyFromSyntax(ExpressionSyntax expression)
     {
         return expression switch
         {
@@ -185,7 +334,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = configuration.FilePath,
                 Span = configuration.Span,
                 SymbolId = key,
-                Tags = new[] { "configuration" },
+                Tags = new[] { "configuration", "infra" },
                 Props = props
             };
         }
@@ -202,7 +351,7 @@ public sealed partial class ProjectAnalyzer
                 FilePath = string.Empty,
                 Span = null,
                 SymbolId = key,
-                Tags = new[] { "configuration" }
+                Tags = new[] { "configuration", "infra" }
             };
         }
 
@@ -254,6 +403,19 @@ public sealed partial class ProjectAnalyzer
                 Evidence = CreateEvidence(usage.FilePath, usage.Line)
             });
         }
+    }
+
+    private static class FlowAnalysisFeature
+    {
+        public const string Controllers = "controllers";
+        public const string Http = "http";
+        public const string Mapping = "mapping";
+        public const string Messaging = "messaging";
+        public const string Notifications = "notifications";
+        public const string DomainEvents = "domain-events";
+        public const string Services = "services";
+        public const string Cqrs = "cqrs";
+        public const string Pipelines = "pipelines";
     }
 
     private sealed class ConfigurationUsageComparer : IEqualityComparer<(string Key, string Accessor, string FilePath)>

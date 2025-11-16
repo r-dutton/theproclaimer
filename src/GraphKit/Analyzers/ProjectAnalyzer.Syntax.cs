@@ -672,6 +672,7 @@ public sealed partial class ProjectAnalyzer
 
     private string? InferRequestResponseType(IReadOnlyList<string> interfaceTypes, string? preferredAssembly, string? preferredProject)
     {
+        // Fallback to old logic if we don't have a model (callers pass strings today)
         if (interfaceTypes.Count == 0)
         {
             return null;
